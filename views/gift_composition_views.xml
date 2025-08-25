@@ -428,7 +428,7 @@
                                                             style="width: calc(var(--confidence-score, 66.8) * 1%)"></div>
                                                     </div>
                                                     <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('confidence_score', '<', 0.8)]}">Excellent Confidence</span>
+                                                        <span attrs="{'invisible': [('confidence_score', '&lt;', 0.8)]}">Excellent Confidence</span>
                                                         <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.8), ('confidence_score', '&lt;', 0.6)]}">Good Confidence</span>
                                                         <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.6), ('confidence_score', '&lt;', 0.4)]}">Medium Confidence</span>
                                                         <span attrs="{'invisible': [('confidence_score', '>=', 0.4)]}">Requires Review</span>
