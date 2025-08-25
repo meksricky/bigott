@@ -37,9 +37,9 @@
         'views/res_partner_views.xml',
         'views/menu_views.xml',
     ],
-    'demo': [
-        'demo/additional_demo_data.xml',
-    ],
+    # 'demo': [
+    #     'demo/additional_demo_data.xml',
+    # ],
     'installable': True,
     'application': True,
     'auto_install': False,
