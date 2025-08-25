@@ -24,16 +24,16 @@
                             <group name="categorization" string="Le Biggot Categorization">
                                 <field name="lebiggot_category" widget="radio"/>
                                 <field name="beverage_type" 
-                                       invisible="lebiggot_category != 'main_beverage' and lebiggot_category != 'aperitif'"/>
+                                       attrs="{'invisible': ['&', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
                                 <field name="volume_ml" 
-                                       invisible="lebiggot_category != 'main_beverage' and lebiggot_category != 'aperitif'"/>
+                                       attrs="{'invisible': ['&', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
                                 <field name="product_grade"/>
                             </group>
                             <group name="product_details" string="Product Details">
                                 <field name="brand"/>
                                 <field name="origin_region"/>
                                 <field name="vintage_year" 
-                                       invisible="lebiggot_category != 'main_beverage'"/>
+                                       attrs="{'invisible': [('lebiggot_category', '!=', 'main_beverage')]}"/>
                             </group>
                         </group>
                         

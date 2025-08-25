@@ -56,7 +56,7 @@
                         </group>
                         
                         <group name="experience_details" string="Experience Details" 
-                               invisible="box_type != 'experience'">
+                               attrs="{'invisible': [('box_type', '!=', 'experience')]}">
                             <field name="experience_id" readonly="1"/>
                         </group>
                         
