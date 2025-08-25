@@ -566,7 +566,7 @@
                                                     <li attrs="{'invisible': [('confidence_score', '>=', 0.7)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> Lower confidence - limited data
                                                     </li>
-                                                    <li attrs="{'invisible': ['&', ('novelty_score', '&lt;=', 0.8), ('novelty_score', '>=', 0.6)]}">
+                                                    <li attrs="{'invisible': ['&amp;', ('novelty_score', '&lt;=', 0.8), ('novelty_score', '>=', 0.6)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> High novelty - client reaction uncertain
                                                     </li>
                                                     <li attrs="{'invisible': [('historical_compatibility', '>=', 0.5)]}">
