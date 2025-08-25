@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Demo Clients -->
+        <record id="client_hotel_palace" model="res.partner">
+            <field name="name">Hotel Palace Madrid</field>
+            <field name="is_company">True</field>
+            <field name="email">direccion@hotelpalace.es</field>
+            <field name="phone">+34 91 360 8000</field>
+            <field name="dietary_restrictions">none</field>
+        </record>
+        
+        <record id="client_consulting_bcg" model="res.partner">
+            <field name="name">BCG Madrid</field>
+            <field name="is_company">True</field>
+            <field name="email">gifts@bcg.com</field>
+            <field name="phone">+34 91 555 0100</field>
+            <field name="dietary_restrictions">halal</field>
+        </record>
+        
+        <record id="client_tech_startup" model="res.partner">
+            <field name="name">TechVision SL</field>
+            <field name="is_company">True</field>
+            <field name="email">admin@techvision.es</field>
+            <field name="phone">+34 93 123 4567</field>
+            <field name="dietary_restrictions">vegan_non_alcoholic</field>
+        </record>
+        
+        <!-- MAIN BEVERAGES -->
+        <record id="product_champagne_dom_perignon" model="product.template">
+            <field name="name">Dom Perignon Vintage 2013</field>
+            <field name="categ_id" ref="category_main_beverage"/>
+            <field name="list_price">180.00</field>
+            <field name="lebiggot_category">main_beverage</field>
+            <field name="beverage_type">champagne</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">luxury</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Dom Perignon</field>
+            <field name="origin_region">Champagne, France</field>
+            <field name="taste_profile">Elegant, refined, complex mineral notes</field>
+        </record>
+        
+        <record id="product_cava_codorniu" model="product.template">
+            <field name="name">Codorniu Anna de Codorniu</field>
+            <field name="categ_id" ref="category_main_beverage"/>
+            <field name="list_price">35.00</field>
+            <field name="lebiggot_category">main_beverage</field>
+            <field name="beverage_type">cava</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">standard</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Codorniu</field>
+            <field name="origin_region">Penedes, Spain</field>
+            <field name="taste_profile">Fresh, fruity, balanced acidity</field>
+        </record>
+        
+        <record id="product_rioja_reserva" model="product.template">
+            <field name="name">Marques de Riscal Reserva 2018</field>
+            <field name="categ_id" ref="category_main_beverage"/>
+            <field name="list_price">45.00</field>
+            <field name="lebiggot_category">main_beverage</field>
+            <field name="beverage_type">red_wine</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">premium</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Marques de Riscal</field>
+            <field name="origin_region">Rioja, Spain</field>
+            <field name="taste_profile">Rich, full-bodied, oak and vanilla notes</field>
+        </record>
+        
+        <record id="product_albarino" model="product.template">
+            <field name="name">Martin Codax Albarino</field>
+            <field name="categ_id" ref="category_main_beverage"/>
+            <field name="list_price">22.00</field>
+            <field name="lebiggot_category">main_beverage</field>
+            <field name="beverage_type">white_wine</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">standard</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Martin Codax</field>
+            <field name="origin_region">Rias Baixas, Spain</field>
+            <field name="taste_profile">Crisp, citrusy, mineral finish</field>
+        </record>
+        
+        <!-- APERITIFS -->
+        <record id="product_vermouth_yzaguirre" model="product.template">
+            <field name="name">Yzaguirre Vermouth Reserva</field>
+            <field name="categ_id" ref="category_aperitif"/>
+            <field name="list_price">28.00</field>
+            <field name="lebiggot_category">aperitif</field>
+            <field name="beverage_type">vermouth</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">premium</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Yzaguirre</field>
+            <field name="origin_region">Tarragona, Spain</field>
+            <field name="taste_profile">Herbal, aromatic, bittersweet</field>
+        </record>
+        
+        <record id="product_tokaj_royal" model="product.template">
+            <field name="name">Royal Tokaji 5 Puttonyos</field>
+            <field name="categ_id" ref="category_aperitif"/>
+            <field name="list_price">85.00</field>
+            <field name="lebiggot_category">aperitif</field>
+            <field name="beverage_type">tokaj</field>
+            <field name="volume_ml">500</field>
+            <field name="product_grade">luxury</field>
+            <field name="contains_alcohol">True</field>
+            <field name="brand">Royal Tokaji</field>
+            <field name="origin_region">Tokaj, Hungary</field>
+            <field name="taste_profile">Sweet, complex, honeyed</field>
+        </record>
+        
+        <!-- EXPERIENCE GASTRONOMICA -->
+        <record id="product_truffle_selection" model="product.template">
+            <field name="name">Artisan Truffle Selection</field>
+            <field name="categ_id" ref="category_experience"/>
+            <field name="list_price">65.00</field>
+            <field name="lebiggot_category">experience_gastronomica</field>
+            <field name="product_grade">premium</field>
+            <field name="brand">Le Biggot Artisan</field>
+            <field name="taste_profile">Earthy, intense, luxurious</field>
+        </record>
+        
+        <record id="product_olive_tasting" model="product.template">
+            <field name="name">Premium Olive Oil Tasting Set</field>
+            <field name="categ_id" ref="category_experience"/>
+            <field name="list_price">42.00</field>
+            <field name="lebiggot_category">experience_gastronomica</field>
+            <field name="product_grade">standard</field>
+            <field name="is_vegan">True</field>
+            <field name="is_halal">True</field>
+            <field name="brand">Andalusian Gold</field>
+            <field name="taste_profile">Fruity, peppery, diverse regional flavors</field>
+        </record>
+        
+        <!-- FOIE GRAS -->
+        <record id="product_foie_gras_perigord" model="product.template">
+            <field name="name">Foie Gras de Canard du Perigord</field>
+            <field name="categ_id" ref="category_foie_gras"/>
+            <field name="list_price">95.00</field>
+            <field name="lebiggot_category">foie_gras</field>
+            <field name="product_grade">luxury</field>
+            <field name="brand">Maison Dubernet</field>
+            <field name="origin_region">Perigord, France</field>
+            <field name="taste_profile">Rich, buttery, delicate</field>
+        </record>
+        
+        <record id="product_foie_gras_mi_cuit" model="product.template">
+            <field name="name">Foie Gras Mi-Cuit Artisanal</field>
+            <field name="categ_id" ref="category_foie_gras"/>
+            <field name="list_price">58.00</field>
+            <field name="lebiggot_category">foie_gras</field>
+            <field name="product_grade">premium</field>
+            <field name="brand">Les Delices du Quercy</field>
+            <field name="origin_region">Quercy, France</field>
+            <field name="taste_profile">Smooth, refined, traditional</field>
+        </record>
+        
+        <!-- CHARCUTERIE -->
+        <record id="product_jamon_bellota" model="product.template">
+            <field name="name">Jamon Iberico de Bellota 100%</field>
+            <field name="categ_id" ref="category_charcuterie"/>
+            <field name="list_price">120.00</field>
+            <field name="lebiggot_category">charcuterie</field>
+            <field name="product_grade">luxury</field>
+            <field name="brand">Cinco Jotas</field>
+            <field name="origin_region">Extremadura, Spain</field>
+            <field name="taste_profile">Nutty, intense, melt-in-mouth</field>
+        </record>
+        
+        <record id="product_paletilla_iberica" model="product.template">
+            <field name="name">Paletilla Iberica de Cebo de Campo</field>
+            <field name="categ_id" ref="category_charcuterie"/>
+            <field name="list_price">75.00</field>
+            <field name="lebiggot_category">charcuterie</field>
+            <field name="product_grade">premium</field>
+            <field name="brand">Garcia Baquero</field>
+            <field name="origin_region">Salamanca, Spain</field>
+            <field name="taste_profile">Savory, well-cured, balanced</field>
+        </record>
+        
+        <record id="product_manchego_cheese" model="product.template">
+            <field name="name">Queso Manchego Curado 12 Meses</field>
+            <field name="categ_id" ref="category_charcuterie"/>
+            <field name="list_price">38.00</field>
+            <field name="lebiggot_category">charcuterie</field>
+            <field name="product_grade">standard</field>
+            <field name="brand">Garcia Baquero</field>
+            <field name="origin_region">La Mancha, Spain</field>
+            <field name="taste_profile">Sharp, nutty, firm texture</field>
+        </record>
+        
+        <record id="product_cabrales_cheese" model="product.template">
+            <field name="name">Queso de Cabrales DOP</field>
+            <field name="categ_id" ref="category_charcuterie"/>
+            <field name="list_price">32.00</field>
+            <field name="lebiggot_category">charcuterie</field>
+            <field name="product_grade">premium</field>
+            <field name="brand">Queseria Cueva</field>
+            <field name="origin_region">Asturias, Spain</field>
+            <field name="taste_profile">Strong, creamy, blue veining</field>
+        </record>
+        
+        <!-- SWEETS -->
+        <record id="product_turron_alicante" model="product.template">
+            <field name="name">Turron de Alicante Suprema</field>
+            <field name="categ_id" ref="category_sweets"/>
+            <field name="list_price">24.00</field>
+            <field name="lebiggot_category">sweets</field>
+            <field name="product_grade">premium</field>
+            <field name="brand">Turrones Vicens</field>
+            <field name="origin_region">Alicante, Spain</field>
+            <field name="taste_profile">Crunchy almonds, honey sweetness</field>
+        </record>
+        
+        <record id="product_lingote_chocolate" model="product.template">
+            <field name="name">Lingote de Chocolate Negro 85%</field>
+            <field name="categ_id" ref="category_sweets"/>
+            <field name="list_price">18.00</field>
+            <field name="lebiggot_category">sweets</field>
+            <field name="product_grade">standard</field>
+            <field name="is_vegan">True</field>
+            <field name="brand">Chocolates Valor</field>
+            <field name="origin_region">Villajoyosa, Spain</field>
+            <field name="taste_profile">Intense cocoa, slightly bitter</field>
+        </record>
+        
+        <record id="product_polvorones" model="product.template">
+            <field name="name">Polvorones de Almendra Artesanos</field>
+            <field name="categ_id" ref="category_sweets"/>
+            <field name="list_price">16.00</field>
+            <field name="lebiggot_category">sweets</field>
+            <field name="product_grade">standard</field>
+            <field name="brand">Confiteria Mantecados</field>
+            <field name="origin_region">Estepa, Spain</field>
+            <field name="taste_profile">Crumbly, almond flavor, traditional</field>
+        </record>
+        
+        <!-- VEGAN ALTERNATIVES -->
+        <record id="product_vegan_cheese" model="product.template">
+            <field name="name">Artisan Vegan Cheese Selection</field>
+            <field name="categ_id" ref="category_charcuterie"/>
+            <field name="list_price">45.00</field>
+            <field name="lebiggot_category">charcuterie</field>
+            <field name="product_grade">premium</field>
+            <field name="is_vegan">True</field>
+            <field name="is_halal">True</field>
+            <field name="brand">Plant-Based Delights</field>
+            <field name="taste_profile">Nutty, aged, complex flavors</field>
+        </record>
+        
+        <record id="product_vegan_pate" model="product.template">
+            <field name="name">Gourmet Mushroom Pate</field>
+            <field name="categ_id" ref="category_experience"/>
+            <field name="list_price">28.00</field>
+            <field name="lebiggot_category">experience_gastronomica</field>
+            <field name="product_grade">standard</field>
+            <field name="is_vegan">True</field>
+            <field name="is_halal">True</field>
+            <field name="brand">Forest Flavors</field>
+            <field name="taste_profile">Earthy, umami-rich, smooth</field>
+        </record>
+        
+        <!-- NON-ALCOHOLIC ALTERNATIVES -->
+        <record id="product_grape_juice_premium" model="product.template">
+            <field name="name">Premium Grape Juice Reserve</field>
+            <field name="categ_id" ref="category_main_beverage"/>
+            <field name="list_price">25.00</field>
+            <field name="lebiggot_category">main_beverage</field>
+            <field name="volume_ml">750</field>
+            <field name="product_grade">premium</field>
+            <field name="contains_alcohol">False</field>
+            <field name="is_vegan">True</field>
+            <field name="is_halal">True</field>
+            <field name="brand">Noble Juices</field>
+            <field name="taste_profile">Rich, complex, wine-like depth</field>
+        </record>
+        
+    </data>
+</odoo>

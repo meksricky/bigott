@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Enhanced Product Template View for Le Biggot -->
+        <record id="view_product_template_form_lebiggot" model="ir.ui.view">
+            <field name="name">product.template.form.lebiggot</field>
+            <field name="model">product.template</field>
+            <field name="inherit_id" ref="product.product_template_form_view"/>
+            <field name="arch" type="xml">
+                <xpath expr="//div[@name='button_box']" position="inside">
+                    <button name="action_view_experiences" 
+                            type="object" 
+                            class="oe_stat_button" 
+                            icon="fa-star">
+                        <field name="times_recommended" widget="statinfo" 
+                               string="Times Recommended"/>
+                    </button>
+                </xpath>
+                
+                <xpath expr="//page[@name='general_information']" position="after">
+                    <page string="🍷 Le Biggot Details" name="lebiggot_details">
+                        <group>
+                            <group name="categorization" string="Le Biggot Categorization">
+                                <field name="lebiggot_category" widget="radio"/>
+                                <field name="beverage_type" 
+                                       invisible="lebiggot_category != 'main_beverage' and lebiggot_category != 'aperitif'"/>
+                                <field name="volume_ml" 
+                                       invisible="lebiggot_category != 'main_beverage' and lebiggot_category != 'aperitif'"/>
+                                <field name="product_grade"/>
+                            </group>
+                            <group name="product_details" string="Product Details">
+                                <field name="brand"/>
+                                <field name="origin_region"/>
+                                <field name="vintage_year" 
+                                       invisible="lebiggot_category != 'main_beverage'"/>
+                            </group>
+                        </group>
+                        
+                        <group name="dietary_properties" string="Dietary Properties">
+                            <field name="is_vegan"/>
+                            <field name="is_halal"/>
+                            <field name="contains_alcohol"/>
+                        </group>
+                        
+                        <!-- FIXED: Escaped ampersand in string -->
+                        <group name="taste_profile" string="Taste Profile &amp; Pairing">
+                            <field name="taste_profile" placeholder="Describe taste characteristics..."/>
+                            <field name="pairing_suggestions" placeholder="Suggest food pairings..."/>
+                        </group>
+                        
+                        <group name="experience_associations" string="Experience Associations">
+                            <field name="experience_ids" widget="many2many_tags"/>
+                        </group>
+                        
+                        <group name="recommendation_stats" string="AI Recommendation Stats">
+                            <field name="times_recommended" readonly="1"/>
+                            <field name="success_rate" widget="percentage" readonly="1"/>
+                        </group>
+                    </page>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- Enhanced Product Tree View -->
+        <record id="view_product_template_tree_lebiggot" model="ir.ui.view">
+            <field name="name">product.template.tree.lebiggot</field>
+            <field name="model">product.template</field>
+            <field name="inherit_id" ref="product.product_template_tree_view"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='list_price']" position="after">
+                    <field name="lebiggot_category" optional="show"/>
+                    <field name="product_grade" optional="show"/>
+                    <field name="brand" optional="hide"/>
+                    <field name="is_vegan" optional="hide"/>
+                    <field name="is_halal" optional="hide"/>
+                    <field name="contains_alcohol" optional="hide"/>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- Product Search View Enhancement -->
+        <record id="view_product_template_search_lebiggot" model="ir.ui.view">
+            <field name="name">product.template.search.lebiggot</field>
+            <field name="model">product.template</field>
+            <field name="inherit_id" ref="product.product_template_search_view"/>
+            <field name="arch" type="xml">
+                <xpath expr="//filter[@name='consumable']" position="after">
+                    <separator/>
+                    <filter name="main_beverage" string="Main Beverages" 
+                            domain="[('lebiggot_category', '=', 'main_beverage')]"/>
+                    <filter name="aperitif" string="Aperitifs" 
+                            domain="[('lebiggot_category', '=', 'aperitif')]"/>
+                    <filter name="experience_gastronomica" string="Experience Gastronomica" 
+                            domain="[('lebiggot_category', '=', 'experience_gastronomica')]"/>
+                    <filter name="foie_gras" string="Foie Gras" 
+                            domain="[('lebiggot_category', '=', 'foie_gras')]"/>
+                    <filter name="charcuterie" string="Charcuterie" 
+                            domain="[('lebiggot_category', '=', 'charcuterie')]"/>
+                    <filter name="sweets" string="Sweets" 
+                            domain="[('lebiggot_category', '=', 'sweets')]"/>
+                    <separator/>
+                    <filter name="vegan_friendly" string="Vegan" 
+                            domain="[('is_vegan', '=', True)]"/>
+                    <filter name="halal_friendly" string="Halal" 
+                            domain="[('is_halal', '=', True)]"/>
+                    <filter name="alcohol_free" string="Alcohol-Free" 
+                            domain="[('contains_alcohol', '=', False)]"/>
+                    <separator/>
+                    <filter name="premium_grade" string="Premium+" 
+                            domain="[('product_grade', 'in', ['premium', 'luxury'])]"/>
+                </xpath>
+                
+                <xpath expr="//group" position="inside">
+                    <filter name="group_by_lebiggot_category" string="Le Biggot Category" 
+                            context="{'group_by': 'lebiggot_category'}"/>
+                    <filter name="group_by_product_grade" string="Product Grade" 
+                            context="{'group_by': 'product_grade'}"/>
+                    <filter name="group_by_brand" string="Brand" 
+                            context="{'group_by': 'brand'}"/>
+                </xpath>
+            </field>
+        </record>
+        
+    </data>
+</odoo>

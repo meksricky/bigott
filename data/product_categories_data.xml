@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        
+        <!-- Le Biggot Product Categories -->
+        <record id="category_main_beverage" model="product.category">
+            <field name="name">Main Beverages</field>
+        </record>
+        
+        <record id="category_aperitif" model="product.category">
+            <field name="name">Aperitifs</field>
+        </record>
+        
+        <record id="category_experience" model="product.category">
+            <field name="name">Experience Gastronomica</field>
+        </record>
+        
+        <record id="category_foie_gras" model="product.category">
+            <field name="name">Foie Gras</field>
+        </record>
+        
+        <record id="category_charcuterie" model="product.category">
+            <field name="name">Charcuterie</field>
+        </record>
+        
+        <record id="category_sweets" model="product.category">
+            <field name="name">Sweets</field>
+        </record>
+        
+    </data>
+</odoo>

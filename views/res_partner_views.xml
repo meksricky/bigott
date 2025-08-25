@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Extend Partner Form View -->
+        <record id="view_partner_form_lebiggot" model="ir.ui.view">
+            <field name="name">res.partner.form.lebiggot</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_form"/>
+            <field name="arch" type="xml">
+                
+                <!-- Add buttons to button box -->
+                <xpath expr="//div[@name='button_box']" position="inside">
+                    <button name="action_generate_composition" 
+                            type="object" 
+                            class="oe_stat_button" 
+                            icon="fa-magic"
+                            title="Generate AI Composition"
+                            invisible="is_company == True">
+                        <div class="o_field_widget o_stat_info">
+                            <span class="o_stat_text">Generate</span>
+                            <span class="o_stat_text">Composition</span>
+                        </div>
+                    </button>
+                    <button name="action_view_order_history" 
+                            type="object" 
+                            class="oe_stat_button" 
+                            icon="fa-history"
+                            title="View Order History"
+                            invisible="is_company == True">
+                        <field name="years_as_client" widget="statinfo" 
+                               string="Years as Client"/>
+                    </button>
+                    <button name="action_view_compositions" 
+                            type="object" 
+                            class="oe_stat_button" 
+                            icon="fa-gift"
+                            title="View Gift Compositions"
+                            invisible="is_company == True">
+                        <field name="total_gift_budget" widget="statinfo" 
+                               string="Total Gift Budget"/>
+                    </button>
+                </xpath>
+                
+                <!-- Add Le Biggot Profile page -->
+                <xpath expr="//page[@name='contact_addresses']" position="after">
+                    <page string="🎁 Le Biggot Profile" name="lebiggot_profile" 
+                          invisible="is_company == True">
+                        
+                        <!-- Enhanced Client Summary Dashboard -->
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                    color: white; padding: 35px; border-radius: 20px; margin-bottom: 30px; 
+                                    box-shadow: 0 15px 40px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
+                            <!-- Enhanced Background Decorations -->
+                            <div style="position: absolute; top: -60px; right: -60px; width: 200px; height: 200px; 
+                                        background: rgba(255,255,255,0.08); border-radius: 50%; opacity: 0.8;"></div>
+                            <div style="position: absolute; bottom: -40px; left: -40px; width: 150px; height: 150px; 
+                                        background: rgba(255,255,255,0.05); border-radius: 50%; opacity: 0.9;"></div>
+                            <div style="position: absolute; top: 20%; left: 80%; width: 80px; height: 80px; 
+                                        background: rgba(255,255,255,0.06); border-radius: 50%; opacity: 0.7;"></div>
+                            
+                            <div style="position: relative; z-index: 2;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                                    <div>
+                                        <h2 style="margin: 0; color: white; font-weight: 800; font-size: 28px;">
+                                            <i class="fa fa-crown" title="Client Profile" style="margin-right: 12px; color: #ffd700;"/> 
+                                            Client Profile Dashboard
+                                        </h2>
+                                        <p style="margin: 8px 0 0 0; opacity: 0.9; font-size: 16px; font-weight: 300;">
+                                            Comprehensive client analytics and business intelligence insights
+                                        </p>
+                                    </div>
+                                    <div style="background: rgba(255,255,255,0.15); padding: 20px; border-radius: 50%; 
+                                                width: 80px; height: 80px; display: flex; align-items: center; justify-content: center;
+                                                backdrop-filter: blur(10px); box-shadow: 0 8px 25px rgba(0,0,0,0.1);">
+                                        <i class="fa fa-user-tie" title="VIP Client" style="font-size: 32px; color: white;"/>
+                                    </div>
+                                </div>
+                                
+                                <!-- Enhanced Key Metrics Row -->
+                                <div style="display: flex; gap: 25px; justify-content: space-around;">
+                                    <div style="background: rgba(255,255,255,0.12); padding: 25px; border-radius: 15px; 
+                                                text-align: center; flex: 1; backdrop-filter: blur(15px);
+                                                box-shadow: 0 8px 25px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1);">
+                                        <div style="background: rgba(255,255,255,0.2); width: 50px; height: 50px; 
+                                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                                    margin: 0 auto 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                                            <i class="fa fa-star" title="Client Tier" style="font-size: 20px; color: white;"/>
+                                        </div>
+                                        <div style="font-size: 32px; font-weight: 800; margin-bottom: 8px; color: white;">
+                                            <field name="client_tier" readonly="1"/>
+                                        </div>
+                                        <div style="opacity: 0.9; font-size: 12px; text-transform: uppercase; 
+                                                    letter-spacing: 1.5px; font-weight: 600;">Client Tier</div>
+                                    </div>
+                                    <div style="background: rgba(255,255,255,0.12); padding: 25px; border-radius: 15px; 
+                                                text-align: center; flex: 1; backdrop-filter: blur(15px);
+                                                box-shadow: 0 8px 25px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1);">
+                                        <div style="background: rgba(255,255,255,0.2); width: 50px; height: 50px; 
+                                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                                    margin: 0 auto 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                                            <i class="fa fa-clock" title="Years as Client" style="font-size: 20px; color: white;"/>
+                                        </div>
+                                        <div style="font-size: 32px; font-weight: 800; margin-bottom: 8px; color: white;">
+                                            <field name="years_as_client" readonly="1"/>
+                                        </div>
+                                        <div style="opacity: 0.9; font-size: 12px; text-transform: uppercase; 
+                                                    letter-spacing: 1.5px; font-weight: 600;">Years Experience</div>
+                                    </div>
+                                    <div style="background: rgba(255,255,255,0.12); padding: 25px; border-radius: 15px; 
+                                                text-align: center; flex: 1; backdrop-filter: blur(15px);
+                                                box-shadow: 0 8px 25px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1);">
+                                        <div style="background: rgba(255,255,255,0.2); width: 50px; height: 50px; 
+                                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                                    margin: 0 auto 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                                            <i class="fa fa-euro-sign" title="Average Budget" style="font-size: 20px; color: white;"/>
+                                        </div>
+                                        <div style="font-size: 28px; font-weight: 800; margin-bottom: 8px; color: white;">
+                                            €<field name="average_annual_budget" readonly="1"/>
+                                        </div>
+                                        <div style="opacity: 0.9; font-size: 12px; text-transform: uppercase; 
+                                                    letter-spacing: 1.5px; font-weight: 600;">Avg Budget</div>
+                                    </div>
+                                    <div style="background: rgba(255,255,255,0.12); padding: 25px; border-radius: 15px; 
+                                                text-align: center; flex: 1; backdrop-filter: blur(15px);
+                                                box-shadow: 0 8px 25px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.1);">
+                                        <div style="background: rgba(255,255,255,0.2); width: 50px; height: 50px; 
+                                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                                    margin: 0 auto 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+                                            <i class="fa fa-heart" title="Satisfaction" style="font-size: 20px; color: white;"/>
+                                        </div>
+                                        <div style="font-size: 32px; font-weight: 800; margin-bottom: 8px; color: white;">
+                                            <field name="client_satisfaction_avg" widget="percentage" readonly="1"/>
+                                        </div>
+                                        <div style="opacity: 0.9; font-size: 12px; text-transform: uppercase; 
+                                                    letter-spacing: 1.5px; font-weight: 600;">Satisfaction</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Enhanced Analytics Groups -->
+                        <group>
+                            <group name="client_insights" string="📊 Client Analytics">
+                                <field name="client_tier" readonly="1"/>
+                                <field name="years_as_client" readonly="1"/>
+                                <field name="last_order_year" readonly="1"/>
+                                <field name="preferred_box_type" readonly="1"/>
+                                <field name="client_satisfaction_avg" widget="percentage" readonly="1"/>
+                            </group>
+                            <group name="budget_analysis" string="💰 Budget Analysis">
+                                <field name="total_gift_budget" widget="monetary" readonly="1"/>
+                                <field name="average_annual_budget" widget="monetary" readonly="1"/>
+                                <field name="budget_growth_rate" widget="percentage" readonly="1"
+                                       decoration-success="budget_growth_rate &gt; 0"
+                                       decoration-danger="budget_growth_rate &lt; 0"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Enhanced Preferences Section -->
+                        <group name="preferences" string="🍽️ Client Preferences &amp; Requirements">
+                            <field name="dietary_restrictions"/>
+                            <field name="client_notes" placeholder="Add freeform notes to guide recommendations..."/>
+                        </group>
+                        
+                        <sheet>
+    <div class="o_form_sheet_bg">
+        <div style="padding: 20px; max-height: 1000px; overflow-y: auto;">
+
+            <!-- ⚡ Quick Actions Header -->
+            <div style="text-align: center; margin-bottom: 30px; padding: 30px; 
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        border-radius: 20px; box-shadow: 0 12px 40px rgba(102, 126, 234, 0.15);
+                        position: relative; overflow: hidden;">
+                <div style="position: absolute; top: -50px; right: -50px; width: 150px; height: 150px; 
+                            background: rgba(255,255,255,0.1); border-radius: 50%; opacity: 0.7;"></div>
+                <div style="position: absolute; bottom: -30px; left: -30px; width: 100px; height: 100px; 
+                            background: rgba(255,255,255,0.05); border-radius: 50%; opacity: 0.8;"></div>
+
+                <div style="position: relative; z-index: 2;">
+                    <div style="background: rgba(255,255,255,0.15); width: 70px; height: 70px; 
+                                border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                margin: 0 auto 20px; backdrop-filter: blur(10px);">
+                        <i class="fa fa-rocket" title="Quick Actions Hub" style="font-size: 28px; color: white;"></i>
+                    </div>
+                    <h3 style="color: white; margin-bottom: 10px; font-weight: 700; font-size: 24px;">
+                        Action Center
+                    </h3>
+                    <p style="color: rgba(255,255,255,0.9); margin-bottom: 0; font-size: 16px; font-weight: 300;">
+                        Streamline your workflow with intelligent one-click actions
+                    </p>
+                </div>
+            </div>
+
+            <!-- 🧠 Quick Actions Cards -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; width: 100%; margin-bottom: 25px;">
+
+                <!-- AI Composition Card -->
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            border-radius: 16px; padding: 25px; text-align: center; 
+                            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.2); 
+                            min-height: 280px; display: flex; flex-direction: column; justify-content: space-between; position: relative;">
+                    <div style="position: absolute; top: -20px; right: -20px; width: 100px; height: 100px; 
+                                background: rgba(255,255,255,0.1); border-radius: 50%; opacity: 0.7;"></div>
+                    <div style="z-index: 2;">
+                        <div style="background: rgba(255,255,255,0.15); width: 60px; height: 60px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 20px;">
+                            <i class="fa fa-brain" style="font-size: 24px; color: white;"></i>
+                        </div>
+                        <h4 style="color: white; font-weight: 700; font-size: 18px;">AI Composition</h4>
+                        <p style="color: rgba(255,255,255,0.9); font-size: 13px;">
+                            Generate personalized gift compositions using advanced machine learning algorithms
+                        </p>
+                        <button name="action_generate_composition" type="object" string="🧠 Generate Now"
+                                class="btn btn-light" style="margin-top: 15px; width: 100%; border-radius: 25px;">
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Order Analytics Card -->
+                <div style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+                            border-radius: 16px; padding: 25px; text-align: center; 
+                            box-shadow: 0 12px 30px rgba(252, 182, 159, 0.2); 
+                            min-height: 280px; display: flex; flex-direction: column; justify-content: space-between; position: relative;">
+                    <div style="position: absolute; top: -20px; left: -20px; width: 80px; height: 80px; 
+                                background: rgba(139, 69, 19, 0.1); border-radius: 50%; opacity: 0.8;"></div>
+                    <div style="z-index: 2;">
+                        <div style="background: rgba(139, 69, 19, 0.15); width: 60px; height: 60px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 20px;">
+                            <i class="fa fa-chart-line" style="font-size: 24px; color: #8b4513;"></i>
+                        </div>
+                        <h4 style="color: #8b4513; font-weight: 700; font-size: 18px;">Order Analytics</h4>
+                        <p style="color: rgba(139, 69, 19, 0.85); font-size: 13px;">
+                            Comprehensive transaction history with pattern analysis and insights
+                        </p>
+                        <button name="action_view_order_history" type="object" string="📊 Analyze History"
+                                class="btn btn-dark" style="margin-top: 15px; width: 100%; border-radius: 25px;">
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Gift Library Card -->
+                <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+                            border-radius: 16px; padding: 25px; text-align: center; 
+                            box-shadow: 0 12px 30px rgba(168, 237, 234, 0.2); 
+                            min-height: 280px; display: flex; flex-direction: column; justify-content: space-between; position: relative;">
+                    <div style="position: absolute; bottom: -15px; right: -15px; width: 90px; height: 90px; 
+                                background: rgba(44, 85, 48, 0.1); border-radius: 50%; opacity: 0.8;"></div>
+                    <div style="z-index: 2;">
+                        <div style="background: rgba(44, 85, 48, 0.15); width: 60px; height: 60px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 20px;">
+                            <i class="fa fa-gift" style="font-size: 24px; color: #2c5530;"></i>
+                        </div>
+                        <h4 style="color: #2c5530; font-weight: 700; font-size: 18px;">Gift Library</h4>
+                        <p style="color: rgba(44, 85, 48, 0.85); font-size: 13px;">
+                            Browse and manage all AI-generated gift compositions and recommendations
+                        </p>
+                        <button name="action_view_compositions" type="object" string="🎁 Browse Library"
+                                class="btn btn-dark" style="margin-top: 15px; width: 100%; border-radius: 25px;">
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 📊 Performance Metrics Section -->
+            <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                        border-radius: 20px; padding: 35px; border-left: 6px solid #007bff;
+                        box-shadow: 0 8px 30px rgba(0,0,0,0.08);">
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <div style="background: linear-gradient(135deg, #007bff, #0056b3); color: white; 
+                                width: 60px; height: 60px; border-radius: 50%; display: flex; align-items: center; 
+                                justify-content: center; margin: 0 auto 15px;">
+                        <i class="fa fa-chart-bar" style="font-size: 24px;"></i>
+                    </div>
+                    <h4 style="font-weight: 700; font-size: 20px;">Performance Metrics</h4>
+                    <p style="font-size: 14px; font-weight: 300;">Real-time client analytics and key performance indicators</p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 25px; text-align: center;">
+                    <div style="background: white; padding: 25px; border-radius: 15px;">
+                        <div style="background: #3b82f6; color: white; width: 55px; height: 55px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 15px;">
+                            <i class="fa fa-calendar-alt"></i>
+                        </div>
+                        <h3><field name="years_as_client" readonly="1"/></h3>
+                        <small>Years as Client</small>
+                    </div>
+
+                    <div style="background: white; padding: 25px; border-radius: 15px;">
+                        <div style="background: #10b981; color: white; width: 55px; height: 55px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 15px;">
+                            <i class="fa fa-dollar-sign"></i>
+                        </div>
+                        <h3><field name="average_annual_budget" widget="monetary" readonly="1"/></h3>
+                        <small>Avg Annual Budget</small>
+                    </div>
+
+                    <div style="background: white; padding: 25px; border-radius: 15px;">
+                        <div style="background: #f59e0b; color: white; width: 55px; height: 55px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 15px;">
+                            <i class="fa fa-medal"></i>
+                        </div>
+                        <h3><field name="client_tier" readonly="1"/></h3>
+                        <small>Client Tier</small>
+                    </div>
+
+                    <div style="background: white; padding: 25px; border-radius: 15px;">
+                        <div style="background: #8b5cf6; color: white; width: 55px; height: 55px; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    margin: 0 auto 15px;">
+                            <i class="fa fa-heart"></i>
+                        </div>
+                        <h3><field name="client_satisfaction_avg" widget="percentage" readonly="1"/></h3>
+                        <small>Satisfaction</small>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</sheet>
+
+                        
+                    </page>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- Enhanced Partner Tree View -->
+        <record id="view_partner_tree_lebiggot" model="ir.ui.view">
+            <field name="name">res.partner.tree.lebiggot</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_tree"/>
+            <field name="arch" type="xml">
+                <xpath expr="//field[@name='display_name']" position="after">
+                    <field name="client_tier" optional="hide"/>
+                    <field name="years_as_client" optional="hide"/>
+                    <field name="average_annual_budget" widget="monetary" optional="hide"/>
+                    <field name="dietary_restrictions" optional="hide"/>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- Partner Search View Enhancement -->
+        <record id="view_partner_search_lebiggot" model="ir.ui.view">
+            <field name="name">res.partner.search.lebiggot</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_res_partner_filter"/>
+            <field name="arch" type="xml">
+                <xpath expr="//filter[@name='supplier']" position="after">
+                    <separator/>
+                    <filter name="has_gift_history" string="Has Gift History" 
+                            domain="[('order_history_ids', '!=', False)]"/>
+                    <filter name="new_clients" string="New Clients" 
+                            domain="[('client_tier', '=', 'new')]"/>
+                    <filter name="vip_clients" string="VIP Clients" 
+                            domain="[('client_tier', '=', 'vip')]"/>
+                    <filter name="premium_clients" string="Premium Clients" 
+                            domain="[('client_tier', '=', 'premium')]"/>
+                    <separator/>
+                    <filter name="vegan_clients" string="Vegan Requirements" 
+                            domain="[('dietary_restrictions', 'like', 'vegan')]"/>
+                    <filter name="halal_clients" string="Halal Requirements" 
+                            domain="[('dietary_restrictions', 'like', 'halal')]"/>
+                    <filter name="non_alcoholic_clients" string="Non-Alcoholic Requirements" 
+                            domain="[('dietary_restrictions', 'like', 'non_alcoholic')]"/>
+                </xpath>
+                
+                <xpath expr="//group" position="inside">
+                    <filter name="group_by_client_tier" string="Client Tier" 
+                            context="{'group_by': 'client_tier'}"/>
+                    <filter name="group_by_dietary_restrictions" string="Dietary Restrictions" 
+                            context="{'group_by': 'dietary_restrictions'}"/>
+                </xpath>
+            </field>
+        </record>
+        
+    </data>
+</odoo>

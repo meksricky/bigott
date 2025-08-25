@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Composition Wizard Form View -->
+        <record id="view_composition_wizard_form" model="ir.ui.view">
+            <field name="name">composition.wizard.form</field>
+            <field name="model">composition.wizard</field>
+            <field name="arch" type="xml">
+                <form string="🧠 Generate Gift Composition">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1 style="color: #875A7B; text-align: center;">
+                                🎁 Señor Bigott AI Composition Generator
+                            </h1>
+                            <p style="text-align: center; font-size: 14px; color: #666;">
+                                Generate personalized gift compositions using advanced AI analysis
+                            </p>
+                        </div>
+                        
+                        <group>
+                            <group name="client_selection" string="📋 Client &amp; Budget">
+                                <field name="partner_id" 
+                                       placeholder="Select client..."
+                                       options="{'no_create': True}"/>
+                                <field name="target_year"/>
+                                <field name="target_budget" widget="monetary"/>
+                            </group>
+                            <group name="composition_preferences" string="⚙️ Preferences">
+                                <field name="force_composition_type" widget="radio"/>
+                                <field name="dietary_restrictions"/>
+                                <field name="additional_notes" placeholder="Any special notes for this recommendation?"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Enhanced Client Information Display -->
+                        <div attrs="{'invisible': [('partner_id', '=', False)]}" style="margin-top: 20px;">
+                            <div class="alert alert-info" role="alert" style="border-left: 4px solid #17a2b8;">
+                                <h5 style="color: #0c5460; margin-bottom: 15px;">
+                                    📊 Client Insights
+                                </h5>
+                                
+                                <!-- Client Profile Cards -->
+                                <div class="row" style="margin-bottom: 15px;">
+                                    <div class="col-md-3">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
+                                            <div style="background: linear-gradient(135deg, #17a2b8, #138496); color: white; 
+                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
+                                                        justify-content: center; margin: 0 auto 10px;">
+                                                <i class="fa fa-star" title="Client Tier" style="font-size: 16px;"/>
+                                            </div>
+                                            <h6 style="color: #17a2b8; margin-bottom: 5px; font-weight: 700;">
+                                                NEW
+                                            </h6>
+                                            <small class="text-muted">Client Tier</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
+                                            <div style="background: linear-gradient(135deg, #28a745, #1e7e34); color: white; 
+                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
+                                                        justify-content: center; margin: 0 auto 10px;">
+                                                <i class="fa fa-calendar" title="Experience" style="font-size: 16px;"/>
+                                            </div>
+                                            <h6 style="color: #28a745; margin-bottom: 5px; font-weight: 700;">0 years</h6>
+                                            <small class="text-muted">Experience</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
+                                            <div style="background: linear-gradient(135deg, #ffc107, #e0a800); color: white; 
+                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
+                                                        justify-content: center; margin: 0 auto 10px;">
+                                                <i class="fa fa-euro-sign" title="Avg Budget" style="font-size: 16px;"/>
+                                            </div>
+                                            <h6 style="color: #ffc107; margin-bottom: 5px; font-weight: 700;">€0</h6>
+                                            <small class="text-muted">Avg Budget</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
+                                            <div style="background: linear-gradient(135deg, #dc3545, #c82333); color: white; 
+                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
+                                                        justify-content: center; margin: 0 auto 10px;">
+                                                <i class="fa fa-heart" title="Satisfaction" style="font-size: 16px;"/>
+                                            </div>
+                                            <h6 style="color: #dc3545; margin-bottom: 5px; font-weight: 700;">0.0/5 ⭐</h6>
+                                            <small class="text-muted">Satisfaction</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Client Preferences Row -->
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
+                                            <strong style="color: #0c5460;">Preferences:</strong>
+                                            <span class="badge badge-warning" style="margin-left: 8px;">CUSTOM</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
+                                            <strong style="color: #0c5460;">Diet:</strong>
+                                            <span class="badge badge-secondary" style="margin-left: 8px;">NONE</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
+                                            <strong style="color: #0c5460;">Status:</strong>
+                                            <span class="badge badge-primary" style="margin-left: 8px;">NEW</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Enhanced AI Recommendations Display -->
+                        <div class="alert alert-success" role="alert" attrs="{'invisible': [('partner_id', '=', False)]}" 
+                             style="margin-top: 20px; border-left: 4px solid #28a745;">
+                            <h5 style="color: #155724; margin-bottom: 15px;">
+                                🤖 Señor Bigott Live Analysis
+                            </h5>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div style="margin-bottom: 12px;">
+                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                            <i class="fa fa-lightbulb text-warning" title="Smart Recommendations" style="margin-right: 8px;"/>
+                                            <strong style="color: #155724;">Smart Recommendations:</strong>
+                                        </div>
+                                        <span style="color: #0c5460; background: #d1ecf1; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                                            AI will analyze client history, preferences, and market trends
+                                        </span>
+                                    </div>
+                                    
+                                    <div style="margin-bottom: 12px;">
+                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                            <i class="fa fa-euro-sign text-success" title="Budget Optimization" style="margin-right: 8px;"/>
+                                            <strong style="color: #155724;">Budget Optimization:</strong>
+                                        </div>
+                                        <span style="color: #155724; font-size: 12px;">
+                                            Dynamic product selection within your target budget range
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-md-6">
+                                    <div style="margin-bottom: 12px;">
+                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                            <i class="fa fa-utensils text-info" title="Dietary Intelligence" style="margin-right: 8px;"/>
+                                            <strong style="color: #155724;">Dietary Intelligence:</strong>
+                                        </div>
+                                        <span style="color: #155724; font-size: 12px;">
+                                            Automatic filtering based on selected dietary restrictions
+                                        </span>
+                                    </div>
+                                    
+                                    <div style="margin-bottom: 0;">
+                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                            <i class="fa fa-bullseye text-primary" title="Personalization" style="margin-right: 8px;"/>
+                                            <strong style="color: #155724;">Personalization:</strong>
+                                        </div>
+                                        <span style="color: #856404; background: #fff3cd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
+                                            Tailored to client tier, satisfaction history, and proven preferences
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                    </sheet>
+                    <footer>
+                        <button name="action_generate_composition" 
+                                string="🚀 Generate Composition" 
+                                type="object" 
+                                class="btn-primary btn-lg"
+                                data-hotkey="q"
+                                style="min-width: 200px;"/>
+                        <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Composition Wizard Action -->
+        <record id="action_composition_wizard" model="ir.actions.act_window">
+            <field name="name">🧠 Generate New Composition</field>
+            <field name="res_model">composition.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="context">{}</field>
+        </record>
+        
+    </data>
+</odoo>

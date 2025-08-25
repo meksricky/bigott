@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- Main Menu -->
+        <menuitem id="menu_senor_bigott_main" 
+                  name="🎁 Señor Bigott" 
+                  sequence="40"/>
+        
+        <!-- Main Operations -->
+        <menuitem id="menu_operations" 
+                  name="Operations" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="10"/>
+        
+        <!-- Generate Composition Wizard -->
+        <menuitem id="menu_generate_composition" 
+                  name="🧠 Generate New Composition" 
+                  parent="menu_operations" 
+                  action="action_composition_wizard" 
+                  sequence="10"/>
+        
+        <!-- Compositions Menu -->
+        <menuitem id="menu_compositions" 
+                  name="Gift Compositions" 
+                  parent="menu_operations" 
+                  action="action_gift_composition" 
+                  sequence="20"/>
+        
+        <!-- Master Data -->
+        <menuitem id="menu_master_data" 
+                  name="Master Data" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="20"/>
+        
+        <!-- Client History Menu -->
+        <menuitem id="menu_client_history" 
+                  name="Client History" 
+                  parent="menu_master_data" 
+                  action="action_client_order_history" 
+                  sequence="10"/>
+        
+        <!-- Experiences Menu -->
+        <menuitem id="menu_experiences" 
+                  name="Gift Experiences" 
+                  parent="menu_master_data" 
+                  action="action_gift_experience" 
+                  sequence="20"/>
+        
+        <!-- Analytics Menu -->
+        <menuitem id="menu_analytics" 
+                  name="📊 Analytics" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="30"/>
+        
+        <menuitem id="menu_client_insights" 
+                  name="Client Insights" 
+                  parent="menu_analytics" 
+                  action="action_client_insights" 
+                  sequence="10"/>
+        
+    </data>
+</odoo>

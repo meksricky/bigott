@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+
+        <record id="view_gift_composition_tree" model="ir.ui.view">
+            <field name="name">gift.composition.tree</field>
+            <field name="model">gift.composition</field>
+            <field name="arch" type="xml">
+                <tree string="Gift Compositions"
+                      decoration-success="state=='approved'"
+                      decoration-info="state=='proposed'"
+                      decoration-muted="state=='draft'"
+                      decoration-danger="state=='cancelled'"
+                      sample="1">
+                    <field name="partner_id"/>
+                    <field name="target_year"/>
+                    <field name="composition_type" widget="badge"/>
+                    <field name="target_budget" widget="monetary"/>
+                    <field name="actual_cost" widget="monetary"/>
+                    <field name="budget_status"
+                           widget="badge"
+                           decoration-success="budget_status=='on_target'"
+                           decoration-warning="budget_status=='under'"
+                           decoration-danger="budget_status=='over'"/>
+                    <field name="confidence_score" widget="percentage"/>
+                    <field name="state"
+                           widget="badge"
+                           decoration-success="state=='approved'"
+                           decoration-info="state=='proposed'"/>
+                    <field name="generated_date"/>
+                </tree>
+            </field>
+        </record>
+
+        <record id="view_gift_composition_form" model="ir.ui.view">
+            <field name="name">gift.composition.form</field>
+            <field name="model">gift.composition</field>
+            <field name="arch" type="xml">
+                <form string="Gift Composition">
+                    <header>
+                        <button name="action_regenerate"
+                                string="🔄 Regenerate"
+                                type="object"
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                        <button name="action_propose"
+                                string="Propose to Client"
+                                type="object"
+                                class="btn-primary"
+                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                        <button name="action_approve"
+                                string="Approve"
+                                type="object"
+                                class="btn-success"
+                                attrs="{'invisible': [('state', '!=', 'proposed')]}"/>
+                        <button name="action_create_order"
+                                string="Create Sale Order"
+                                type="object"
+                                class="btn-success"
+                                attrs="{'invisible': [('state', '!=', 'approved')]}"/>
+                        <button name="action_deliver"
+                                string="Mark as Delivered"
+                                type="object"
+                                class="btn-info"
+                                attrs="{'invisible': [('state', '!=', 'approved')]}"/>
+                        <button name="action_cancel"
+                                string="Cancel"
+                                type="object"
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_button_box" name="button_box">
+                            <button name="action_view_order_history"
+                                    type="object"
+                                    class="oe_stat_button"
+                                    icon="fa-solid fa-history"> <div class="o_field_widget o_stat_info">
+                                    <span class="o_stat_text">Client</span>
+                                    <span class="o_stat_text">History</span>
+                                </div>
+                            </button>
+                        </div>
+
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" readonly="1"/>
+                            </h1>
+                            <div class="o_row">
+                                <field name="confidence_score" widget="percentage"/>
+                                <span>AI Confidence</span>
+                                <field name="novelty_score" widget="percentage"/>
+                                <span>Novelty Score</span>
+                            </div>
+                        </div>
+
+                        <group>
+                            <group name="client_info" string="Client Information">
+                                <field name="partner_id" readonly="1"
+                                       options="{'no_open': True}"/>
+                                <field name="target_year"/>
+                                <field name="composition_type" widget="radio"/>
+                                <field name="dietary_restrictions"/>
+                            </group>
+                            <group name="budget_info" string="Budget Analysis">
+                                <field name="target_budget" widget="monetary"/>
+                                <field name="actual_cost" widget="monetary"/>
+                                <field name="budget_variance" widget="monetary"
+                                       decoration-success="budget_variance &lt;= 0"
+                                       decoration-danger="budget_variance &gt; 0"/>
+                                <field name="budget_variance_percent" widget="percentage"
+                                       decoration-success="abs(budget_variance_percent) &lt;= 5"
+                                       decoration-warning="abs(budget_variance_percent) &lt;= 15"
+                                       decoration-danger="abs(budget_variance_percent) &gt; 15"/>
+                                <field name="budget_status" widget="badge"/>
+                            </group>
+                        </group>
+
+                        <notebook>
+                            <page string="Composition Details" name="composition_details">
+                                <group name="experience_section" string="Experience Details"
+                                       attrs="{'invisible': [('composition_type', '!=', 'experience')]}">
+                                    <field name="experience_id" readonly="1"/>
+                                    <field name="product_count" string="Products in Experience"/>
+                                </group>
+
+                                <group name="custom_section" string="Custom Composition"
+                                       attrs="{'invisible': [('composition_type', '!=', 'custom')]}">
+                                    <field name="product_ids" readonly="1"
+                                           widget="many2many_tags"
+                                           options="{'color_field': 'lebiggot_category'}"/>
+                                    <field name="product_count" string="Total Products"/>
+                                </group>
+
+                                <group name="products_list" string="Product Details"
+                                       attrs="{'invisible': [('composition_type', '!=', 'custom')]}">
+                                    <field name="product_ids" nolabel="1" readonly="1">
+                                        <tree>
+                                            <field name="name"/>
+                                            <field name="lebiggot_category" widget="badge"/>
+                                            <field name="product_grade" widget="badge"/>
+                                            <field name="list_price" widget="monetary"/>
+                                            <field name="brand"/>
+                                            <field name="is_vegan" widget="boolean_toggle"/>
+                                            <field name="is_halal" widget="boolean_toggle"/>
+                                        </tree>
+                                    </field>
+                                </group>
+
+                                <group name="category_analysis" string="Category Analysis"
+                                       attrs="{'invisible': [('composition_type', '!=', 'custom')]}">
+                                    <field name="category_structure"/>
+                                </group>
+                            </page>
+
+                            <page string="🧠 AI Reasoning" name="ai_reasoning">
+                                <group name="reasoning_section" string="Señor Bigott's Analysis">
+                                    <field name="reasoning" nolabel="1" readonly="1"/>
+                                </group>
+
+                                <group name="ai_metrics" string="AI Performance Metrics">
+                                    <field name="confidence_score" widget="percentage"/>
+                                    <field name="novelty_score" widget="percentage"/>
+                                    <field name="historical_compatibility" widget="percentage"/>
+                                </group>
+                            </page>
+
+                            <page string="Client Feedback" name="client_feedback"
+                                  attrs="{'invisible': [('state', 'not in', ['delivered'])]}">
+                                <group>
+                                    <field name="client_rating"/>
+                                    <field name="client_feedback"/>
+                                </group>
+                            </page>
+
+                            <page string="Metadata" name="metadata">
+                                <group name="generation_info" string="Generation Details">
+                                    <field name="generated_date"/>
+                                    <field name="generated_by"/>
+                                    <field name="proposed_date" readonly="1"/>
+                                    <field name="approved_date" readonly="1"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <div class="oe_chatter">
+                        <field name="message_follower_ids"/>
+                        <field name="activity_ids"/>
+                        <field name="message_ids"/>
+                    </div>
+                </form>
+            </field>
+        </record>
+
+        <record id="view_gift_composition_kanban" model="ir.ui.view">
+            <field name="name">gift.composition.kanban</field>
+            <field name="model">gift.composition</field>
+            <field name="arch" type="xml">
+                <kanban default_group_by="state" quick_create="false">
+                    <field name="partner_id"/>
+                    <field name="target_budget"/>
+                    <field name="actual_cost"/>
+                    <field name="composition_type"/>
+                    <field name="confidence_score"/>
+                    <field name="state"/>
+                    <templates>
+                        <t t-name="kanban-box">
+                            <div t-attf-class="oe_kanban_card oe_kanban_global_click {{ (record.state.raw_value === 'approved') ? 'o_kanban_color_1' : '' }} {{ (record.state.raw_value === 'proposed') ? 'o_kanban_color_10' : '' }} {{ (record.state.raw_value === 'draft') ? 'o_kanban_color_3' : '' }} {{ (record.state.raw_value === 'cancelled') ? 'o_kanban_color_7' : '' }}">
+                                <div class="oe_kanban_content">
+                                    <div class="oe_kanban_card_header">
+                                        <div class="oe_kanban_card_header_title">
+                                            <div class="o_dropdown_kanban dropdown">
+                                                <a class="dropdown-toggle o-no-caret btn" data-toggle="dropdown" href="#" role="button" aria-label="Dropdown menu" title="Dropdown menu">
+                                                    <span class="fa-solid fa-ellipsis-v"/> </a>
+                                                <div class="dropdown-menu" role="menu">
+                                                    <t t-if="record.state.raw_value == 'draft'">
+                                                        <a type="object" name="action_propose" class="dropdown-item">Propose</a>
+                                                    </t>
+                                                    <t t-if="record.state.raw_value == 'proposed'">
+                                                        <a type="object" name="action_approve" class="dropdown-item">Approve</a>
+                                                    </t>
+                                                    <a type="delete" class="dropdown-item">Delete</a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="oe_kanban_card_content">
+                                        <div><strong><field name="partner_id"/></strong></div>
+                                        <div><field name="composition_type" widget="badge"/></div>
+                                        <div>Budget: <field name="target_budget" widget="monetary"/></div>
+                                        <div>Cost: <field name="actual_cost" widget="monetary"/></div>
+                                        <div class="oe_kanban_bottom_right">
+                                            <field name="confidence_score" widget="percentage"/>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </t>
+                    </templates>
+                </kanban>
+            </field>
+        </record>
+
+        <record id="view_gift_composition_search" model="ir.ui.view">
+            <field name="name">gift.composition.search</field>
+            <field name="model">gift.composition</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="partner_id"/>
+                    <field name="target_year"/>
+                    <field name="composition_type"/>
+                    <field name="state"/>
+                    <field name="experience_id"/>
+
+                    <filter name="current_year" string="Current Year"
+                            domain="[('target_year', '=', context_today().year)]"/>
+                    <filter name="next_year" string="Next Year"
+                            domain="[('target_year', '=', context_today().year + 1)]"/>
+                    <separator/>
+                    <filter name="experience_based" string="Experience-Based"
+                            domain="[('composition_type', '=', 'experience')]"/>
+                    <filter name="custom_compositions" string="Custom Compositions"
+                            domain="[('composition_type', '=', 'custom')]"/>
+                    <separator/>
+                    <filter name="high_confidence" string="High Confidence (&gt;80%)"
+                            domain="[('confidence_score', '&gt;', 0.8)]"/>
+                    <filter name="on_budget" string="On Budget"
+                            domain="[('budget_status', '=', 'on_target')]"/>
+                    <separator/>
+                    <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                    <filter name="proposed" string="Proposed" domain="[('state', '=', 'proposed')]"/>
+                    <filter name="approved" string="Approved" domain="[('state', '=', 'approved')]"/>
+
+                    <group expand="0" string="Group By">
+                        <filter name="group_by_client" string="Client" context="{'group_by': 'partner_id'}"/>
+                        <filter name="group_by_year" string="Year" context="{'group_by': 'target_year'}"/>
+                        <filter name="group_by_type" string="Type" context="{'group_by': 'composition_type'}"/>
+                        <filter name="group_by_state" string="State" context="{'group_by': 'state'}"/>
+                        <filter name="group_by_generated_by" string="Generated By" context="{'group_by': 'generated_by'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+
+        <record id="action_gift_composition" model="ir.actions.act_window">
+            <field name="name">Gift Compositions</field>
+            <field name="res_model">gift.composition</field>
+            <field name="view_mode">kanban,tree,form</field>
+            <field name="context">{'search_default_current_year': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    🎁 Create your first gift composition!
+                </p>
+                <p>
+                    Use Señor Bigott AI to generate personalized gift compositions based on client history and preferences.
+                </p>
+                <p>
+                    <a type="action" name="%(action_composition_wizard)d" class="btn btn-primary">
+                        🧠 Generate New Composition
+                    </a>
+                </p>
+            </field>
+        </record>
+
+    </data>
+</odoo>
