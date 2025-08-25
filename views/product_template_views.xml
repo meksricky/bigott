@@ -24,9 +24,9 @@
                             <group name="categorization" string="Le Biggot Categorization">
                                 <field name="lebiggot_category" widget="radio"/>
                                 <field name="beverage_type" 
-                                       attrs="{'invisible': ['&', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
+                                       attrs="{'invisible': ['&amp;', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
                                 <field name="volume_ml" 
-                                       attrs="{'invisible': ['&', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
+                                       attrs="{'invisible': ['&amp;', ('lebiggot_category', '!=', 'main_beverage'), ('lebiggot_category', '!=', 'aperitif')]}"/>
                                 <field name="product_grade"/>
                             </group>
                             <group name="product_details" string="Product Details">
