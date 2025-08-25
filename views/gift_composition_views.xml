@@ -429,8 +429,8 @@
                                                     </div>
                                                     <small class="text-muted mt-2 d-block">
                                                         <span attrs="{'invisible': [('confidence_score', '<', 0.8)]}">Excellent Confidence</span>
-                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.8), ('confidence_score', '<', 0.6)]}">Good Confidence</span>
-                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.6), ('confidence_score', '<', 0.4)]}">Medium Confidence</span>
+                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.8), ('confidence_score', '&lt;', 0.6)]}">Good Confidence</span>
+                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.6), ('confidence_score', '&lt;', 0.4)]}">Medium Confidence</span>
                                                         <span attrs="{'invisible': [('confidence_score', '>=', 0.4)]}">Requires Review</span>
                                                     </small>
                                                 </div>
@@ -459,8 +459,8 @@
                                                             style="width: calc(var(--novelty-score, 70) * 1%)"></div>
                                                     </div>
                                                     <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('novelty_score', '<', 0.8)]}">High Discovery</span>
-                                                        <span attrs="{'invisible': ['|', ('novelty_score', '>=', 0.8), ('novelty_score', '<', 0.4)]}">Balanced Mix</span>
+                                                        <span attrs="{'invisible': [('novelty_score', '&lt;', 0.8)]}">High Discovery</span>
+                                                        <span attrs="{'invisible': ['|', ('novelty_score', '>=', 0.8), ('novelty_score', '&lt;', 0.4)]}">Balanced Mix</span>
                                                         <span attrs="{'invisible': [('novelty_score', '>=', 0.4)]}">Conservative Selection</span>
                                                     </small>
                                                 </div>
@@ -489,9 +489,9 @@
                                                             style="width: calc(var(--compatibility-score, 0) * 1%)"></div>
                                                     </div>
                                                     <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('historical_compatibility', '<', 0.8)]}">Perfect Match</span>
-                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.8), ('historical_compatibility', '<', 0.6)]}">Good Alignment</span>
-                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.6), ('historical_compatibility', '<', 0.3)]}">Some Patterns</span>
+                                                        <span attrs="{'invisible': [('historical_compatibility', '&lt;', 0.8)]}">Perfect Match</span>
+                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.8), ('historical_compatibility', '&lt;', 0.6)]}">Good Alignment</span>
+                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.6), ('historical_compatibility', '&lt;', 0.3)]}">Some Patterns</span>
                                                         <span attrs="{'invisible': [('historical_compatibility', '>=', 0.3)]}">New Territory</span>
                                                     </small>
                                                 </div>
@@ -537,13 +537,13 @@
                                             </div>
                                             <div class="card-body">
                                                 <ul class="list-unstyled">
-                                                    <li attrs="{'invisible': [('confidence_score', '<', 0.7)]}">
+                                                    <li attrs="{'invisible': [('confidence_score', '&lt;', 0.7)]}">
                                                         <i class="fa fa-check text-success" title="Success"/> High confidence in recommendations
                                                     </li>
-                                                    <li attrs="{'invisible': ['|', ('novelty_score', '<', 0.6), ('novelty_score', '>', 0.8)]}">
+                                                    <li attrs="{'invisible': ['|', ('novelty_score', '&lt;', 0.6), ('novelty_score', '>', 0.8)]}">
                                                         <i class="fa fa-check text-success" title="Success"/> Balanced novelty approach
                                                     </li>
-                                                    <li attrs="{'invisible': [('historical_compatibility', '<', 0.5)]}">
+                                                    <li attrs="{'invisible': [('historical_compatibility', '&lt;', 0.5)]}">
                                                         <i class="fa fa-check text-success" title="Success"/> Strong historical alignment
                                                     </li>
                                                     <li attrs="{'invisible': [('budget_variance_percent', '>', 15)]}">
@@ -566,13 +566,13 @@
                                                     <li attrs="{'invisible': [('confidence_score', '>=', 0.7)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> Lower confidence - limited data
                                                     </li>
-                                                    <li attrs="{'invisible': ['&', ('novelty_score', '<=', 0.8), ('novelty_score', '>=', 0.6)]}">
+                                                    <li attrs="{'invisible': ['&', ('novelty_score', '&lt;=', 0.8), ('novelty_score', '>=', 0.6)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> High novelty - client reaction uncertain
                                                     </li>
                                                     <li attrs="{'invisible': [('historical_compatibility', '>=', 0.5)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> Limited historical patterns
                                                     </li>
-                                                    <li attrs="{'invisible': [('budget_variance_percent', '<=', 15)]}">
+                                                    <li attrs="{'invisible': [('budget_variance_percent', '&lt;=', 15)]}">
                                                         <i class="fa fa-exclamation text-warning" title="Warning"/> Budget variance detected
                                                     </li>
                                                 </ul>
