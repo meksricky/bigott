@@ -1,8 +1,8 @@
-# models/client_order_history.py
+# -*- coding: utf-8 -*-
 from odoo import models, fields, api, _
 from collections import defaultdict
-import json
 from datetime import datetime
+import json
 
 class ClientOrderHistory(models.Model):
     _name = 'client.order.history'
@@ -27,11 +27,11 @@ class ClientOrderHistory(models.Model):
     # Products in the box (unique templates)
     product_ids = fields.Many2many('product.template', string='Products in Box')
 
-    # Totals derived from category_breakdown
-    total_products = fields.Integer('Total Products', compute='_compute_totals', store=True)
-
-    # Category analysis - JSON string
+    # Category breakdown (JSON text: {"category": qty, ...})
     category_breakdown = fields.Text('Category Breakdown')
+
+    # Totals
+    total_products = fields.Integer('Total Products', compute='_compute_totals', store=True)
 
     # Dietary considerations
     dietary_restrictions = fields.Text('Dietary Restrictions Applied')
@@ -51,7 +51,7 @@ class ClientOrderHistory(models.Model):
     # Computed fields
     budget_per_product = fields.Float('Budget per Product', compute='_compute_budget_metrics', store=True)
 
-    # ------------------ Computes & helpers ------------------
+    # ---------- Computes ----------
     @api.depends('partner_id', 'order_year', 'box_type')
     def _compute_display_name(self):
         for record in self:
@@ -62,15 +62,18 @@ class ClientOrderHistory(models.Model):
         for rec in self:
             try:
                 data = json.loads(rec.category_breakdown or '{}')
+                if not isinstance(data, dict):
+                    data = {}
             except Exception:
                 data = {}
-            rec.total_products = sum(int(v or 0) for v in (data.values() if isinstance(data, dict) else []))
+            rec.total_products = sum(int(v or 0) for v in data.values())
 
     @api.depends('total_budget', 'total_products')
     def _compute_budget_metrics(self):
         for record in self:
             record.budget_per_product = record.total_budget / record.total_products if record.total_products else 0.0
 
+    # ---------- JSON helpers ----------
     def get_category_structure(self):
         if not self.category_breakdown:
             return {}
@@ -86,7 +89,7 @@ class ClientOrderHistory(models.Model):
         except Exception:
             self.category_breakdown = '{}'
 
-    # ------------------ Analysis API ------------------
+    # ---------- Analyze (used by engine) ----------
     @api.model
     def analyze_client_patterns(self, partner_id):
         histories = self.search([('partner_id', '=', partner_id)], order='order_year desc', limit=3)
@@ -121,7 +124,7 @@ class ClientOrderHistory(models.Model):
             'box_type_preference': histories[0].box_type if histories else 'custom'
         }
 
-    # ------------------ Build history from sales ------------------
+    # ---------- Build history from sales ----------
     _EXPERIENCE_THRESHOLD = 0.7   # ≥70% of an order’s amount looks like an experience
     _LOOKBACK_YEARS = 3
 
@@ -167,7 +170,7 @@ class ClientOrderHistory(models.Model):
             year = (so.confirmation_date or so.date_order or fields.Datetime.now()).year
             key = (so.partner_id.id, year)
 
-            # Use order’s own currency amount_total as-is (your model stores floats in € already)
+            # Use amount_total as-is (your model stores Float in € already)
             buckets[key]['amount'] += so.amount_total
 
             exp_amount = 0.0
