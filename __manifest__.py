@@ -36,7 +36,7 @@
         'views/product_template_views.xml',
         'views/res_partner_views.xml',
         'views/menu_views.xml',
-        'views/rebuild_history_wizard_views.xml',
+        # 'views/rebuild_history_wizard_views.xml',
     ],
     # 'demo': [
     #     'demo/additional_demo_data.xml',

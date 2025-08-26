@@ -2,26 +2,45 @@
 <odoo>
   <data>
 
-    <!-- Tree -->
-    <record id="view_client_order_history_tree" model="ir.ui.view">
-      <field name="name">client.order.history.tree</field>
-      <field name="model">client.order.history</field>
+    <!-- 1) Server Action: Rebuild from Sales -->
+    <record id="action_rebuild_client_history" model="ir.actions.server">
+      <field name="name">Rebuild from Sales</field>
+      <field name="model_id" ref="model_client_order_history"/>
+      <field name="state">code</field>
+      <field name="code">
+        action = env['client.order.history'].rebuild_from_sales() or {'type': 'ir.actions.client', 'tag': 'reload'}
+      </field>
+      <field name="binding_model_id" ref="model_client_order_history"/>
+      <field name="binding_type">action</field>
+      <field name="binding_view_types">list,form</field>
+    </record>
+
+    <!-- 2) Wizard view + action (so header button can reference it) -->
+    <record id="view_rebuild_client_history_wizard_form" model="ir.ui.view">
+      <field name="name">rebuild.client.history.wizard.form</field>
+      <field name="model">rebuild.client.history.wizard</field>
       <field name="arch" type="xml">
-        <tree string="Client Order History" sample="1">
-          <field name="partner_id"/>
-          <field name="order_year"/>
-          <field name="box_type"/>
-          <field name="experience_id"/>
-          <field name="total_budget" widget="monetary"/>
-          <field name="total_products"/>
-          <field name="budget_per_product" widget="monetary"/>
-          <field name="client_satisfaction"/>
-          <field name="dietary_restrictions"/>
-        </tree>
+        <form string="Rebuild Client History">
+          <group>
+            <field name="date_from"/>
+            <field name="date_to"/>
+          </group>
+          <footer>
+            <button string="Run" type="object" name="action_run" class="btn-primary"/>
+            <button string="Cancel" class="btn-secondary" special="cancel"/>
+          </footer>
+        </form>
       </field>
     </record>
 
-    <!-- Form -->
+    <record id="action_open_rebuild_client_history_wizard" model="ir.actions.act_window">
+      <field name="name">Rebuild from Sales</field>
+      <field name="res_model">rebuild.client.history.wizard</field>
+      <field name="view_mode">form</field>
+      <field name="target">new</field>
+    </record>
+
+    <!-- 3) Form view (header button -> wizard) -->
     <record id="view_client_order_history_form" model="ir.ui.view">
       <field name="name">client.order.history.form</field>
       <field name="model">client.order.history</field>
@@ -32,7 +51,6 @@
                     string="🧠 Generate Next Year"
                     type="object"
                     class="btn-primary"/>
-            <!-- Button to open the wizard -->
             <button name="%(bigott.action_open_rebuild_client_history_wizard)d"
                     string="↺ Rebuild from Sales"
                     type="action"
@@ -95,7 +113,26 @@
       </field>
     </record>
 
-    <!-- Search -->
+    <!-- 4) Tree view (unchanged) -->
+    <record id="view_client_order_history_tree" model="ir.ui.view">
+      <field name="name">client.order.history.tree</field>
+      <field name="model">client.order.history</field>
+      <field name="arch" type="xml">
+        <tree string="Client Order History" sample="1">
+          <field name="partner_id"/>
+          <field name="order_year"/>
+          <field name="box_type"/>
+          <field name="experience_id"/>
+          <field name="total_budget" widget="monetary"/>
+          <field name="total_products"/>
+          <field name="budget_per_product" widget="monetary"/>
+          <field name="client_satisfaction"/>
+          <field name="dietary_restrictions"/>
+        </tree>
+      </field>
+    </record>
+
+    <!-- 5) Search view (unchanged) -->
     <record id="view_client_order_history_search" model="ir.ui.view">
       <field name="name">client.order.history.search</field>
       <field name="model">client.order.history</field>
@@ -121,7 +158,7 @@
       </field>
     </record>
 
-    <!-- Window Action -->
+    <!-- 6) Window Action (help includes a button; server action already defined) -->
     <record id="action_client_order_history" model="ir.actions.act_window">
       <field name="name">Client Order History</field>
       <field name="res_model">client.order.history</field>
@@ -138,20 +175,7 @@
       </field>
     </record>
 
-    <!-- Server Action (shows under Action menu in list/form) -->
-    <record id="action_rebuild_client_history" model="ir.actions.server">
-      <field name="name">Rebuild from Sales</field>
-      <field name="model_id" ref="model_client_order_history"/>
-      <field name="state">code</field>
-      <field name="code">
-        action = env['client.order.history'].rebuild_from_sales() or {'type': 'ir.actions.client', 'tag': 'reload'}
-      </field>
-      <field name="binding_model_id" ref="model_client_order_history"/>
-      <field name="binding_type">action</field>
-      <field name="binding_view_types">list,form</field>
-    </record>
-
-    <!-- Nightly cron -->
+    <!-- 7) Nightly cron -->
     <record id="ir_cron_rebuild_client_history" model="ir.cron">
       <field name="name">Client History: Refresh from Sales</field>
       <field name="model_id" ref="model_client_order_history"/>
