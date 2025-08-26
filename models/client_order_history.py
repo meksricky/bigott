@@ -15,28 +15,18 @@ class ClientOrderHistory(models.Model):
     order_year = fields.Integer('Order Year', required=True)
     total_budget = fields.Float('Total Budget (€)', required=True)
 
-    # Box type
     box_type = fields.Selection([
         ('experience', 'Experience-Based Box'),
         ('custom', 'Custom Product Box')
     ], string='Box Type', required=True)
 
-    # Experience tracking
     experience_id = fields.Many2one('gift.experience', 'Experience Used', ondelete='set null')
-
-    # Products in the box (unique templates)
     product_ids = fields.Many2many('product.template', string='Products in Box')
-
-    # Category breakdown (JSON text: {"category": qty, ...})
     category_breakdown = fields.Text('Category Breakdown')
-
-    # Totals
     total_products = fields.Integer('Total Products', compute='_compute_totals', store=True)
 
-    # Dietary considerations
     dietary_restrictions = fields.Text('Dietary Restrictions Applied')
 
-    # Performance tracking
     client_satisfaction = fields.Selection([
         ('1', '⭐'),
         ('2', '⭐⭐'),
@@ -45,13 +35,9 @@ class ClientOrderHistory(models.Model):
         ('5', '⭐⭐⭐⭐⭐')
     ], string='Client Satisfaction')
 
-    # Notes
     notes = fields.Text('Order Notes')
-
-    # Computed fields
     budget_per_product = fields.Float('Budget per Product', compute='_compute_budget_metrics', store=True)
 
-    # ---------- Computes ----------
     @api.depends('partner_id', 'order_year', 'box_type')
     def _compute_display_name(self):
         for record in self:
@@ -73,7 +59,6 @@ class ClientOrderHistory(models.Model):
         for record in self:
             record.budget_per_product = record.total_budget / record.total_products if record.total_products else 0.0
 
-    # ---------- JSON helpers ----------
     def get_category_structure(self):
         if not self.category_breakdown:
             return {}
@@ -89,7 +74,6 @@ class ClientOrderHistory(models.Model):
         except Exception:
             self.category_breakdown = '{}'
 
-    # ---------- Analyze (used by engine) ----------
     @api.model
     def analyze_client_patterns(self, partner_id):
         histories = self.search([('partner_id', '=', partner_id)], order='order_year desc', limit=3)
@@ -125,7 +109,7 @@ class ClientOrderHistory(models.Model):
         }
 
     # ---------- Build history from sales ----------
-    _EXPERIENCE_THRESHOLD = 0.7   # ≥70% of an order’s amount looks like an experience
+    _EXPERIENCE_THRESHOLD = 0.7
     _LOOKBACK_YEARS = 3
 
     def _is_experience_line(self, line):
@@ -170,7 +154,6 @@ class ClientOrderHistory(models.Model):
             year = (so.confirmation_date or so.date_order or fields.Datetime.now()).year
             key = (so.partner_id.id, year)
 
-            # Use amount_total as-is (your model stores Float in € already)
             buckets[key]['amount'] += so.amount_total
 
             exp_amount = 0.0
