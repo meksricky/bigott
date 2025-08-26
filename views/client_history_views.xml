@@ -12,10 +12,9 @@
           <field name="order_year"/>
           <field name="box_type"/>
           <field name="experience_id"/>
-          <field name="currency_id" invisible="1"/>
-          <field name="total_budget" widget="monetary" options="{'currency_field':'currency_id'}"/>
+          <field name="total_budget"/>
           <field name="total_products"/>
-          <field name="budget_per_product" widget="monetary" options="{'currency_field':'currency_id'}"/>
+          <field name="budget_per_product"/>
           <field name="client_satisfaction"/>
           <field name="dietary_restrictions"/>
         </tree>
@@ -44,10 +43,9 @@
                 <field name="partner_id" readonly="1"/>
                 <field name="order_year"/>
                 <field name="box_type" widget="radio"/>
-                <field name="currency_id" invisible="1"/>
-                <field name="total_budget" widget="monetary" options="{'currency_field':'currency_id'}"/>
+                <field name="total_budget"/>
                 <field name="total_products"/>
-                <field name="budget_per_product" widget="monetary" options="{'currency_field':'currency_id'}"/>
+                <field name="budget_per_product"/>
               </group>
               <group string="Performance">
                 <field name="client_satisfaction" widget="radio"/>
@@ -66,7 +64,7 @@
                     <tree>
                       <field name="name"/>
                       <field name="lebiggot_category"/>
-                      <field name="list_price" widget="monetary" options="{'currency_field':'currency_id'}"/>
+                      <field name="list_price"/>
                       <field name="product_grade"/>
                       <field name="brand"/>
                     </tree>
@@ -126,16 +124,6 @@
         <p class="o_view_nocontent_smiling_face">📊 No client history yet!</p>
         <p>Add historical order data to help Señor Bigott learn client preferences and generate better recommendations.</p>
       </field>
-    </record>
-
-    <!-- (Optional) Client Insights Action - keep only if the field exists on res.partner -->
-    
-    <record id="action_client_insights" model="ir.actions.act_window">
-      <field name="name">Client Insights</field>
-      <field name="res_model">res.partner</field>
-      <field name="view_mode">tree,form</field>
-      <field name="domain">[('order_history_ids', '!=', False)]</field>
-      <field name="context">{'search_default_has_gift_history': 1}</field>
     </record>
 
     <!-- Server Action (bound to Action menu on list/form) -->
