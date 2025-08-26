@@ -1,155 +1,216 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-  <data>
+    <data>
+        
+        <!-- Client Order History Tree View -->
+        <record id="view_client_order_history_tree" model="ir.ui.view">
+            <field name="name">client.order.history.tree</field>
+            <field name="model">client.order.history</field>
+            <field name="arch" type="xml">
+                <tree string="Client Order History" sample="1">
+                    <field name="partner_id"/>
+                    <field name="order_year"/>
+                    <field name="box_type"/>
+                    <field name="experience_id"/>
+                    <field name="total_budget" widget="monetary"/>
+                    <field name="total_products"/>
+                    <field name="budget_per_product" widget="monetary"/>
+                    <field name="client_satisfaction"/>
+                    <field name="dietary_restrictions"/>
+                </tree>
+            </field>
+        </record>
 
-    <!-- Client Order History Tree View -->
-    <record id="view_client_order_history_tree" model="ir.ui.view">
-      <field name="name">client.order.history.tree</field>
-      <field name="model">client.order.history</field>
-      <field name="arch" type="xml">
-        <tree string="Client Order History" sample="1">
-          <field name="partner_id"/>
-          <field name="order_year"/>
-          <field name="box_type"/>
-          <field name="experience_id"/>
-          <field name="total_budget"/>
-          <field name="total_products"/>
-          <field name="budget_per_product"/>
-          <field name="client_satisfaction"/>
-          <field name="dietary_restrictions"/>
-        </tree>
-      </field>
-    </record>
+        <record id="view_client_order_history_tree_add_button" model="ir.ui.view">
+            <field name="name">client.order.history.tree.add.rebuild.btn</field>
+            <field name="model">client.order.history</field>
+            <field name="inherit_id" ref="bigott.view_client_order_history_tree"/>
+            <field name="arch" type="xml">
+                <!-- Insert a global button just before the <tree> -->
+                <xpath expr="//tree" position="before">
+                <button type="action"
+                        name="%(bigott.action_rebuild_client_history)d"
+                        string="↺ Rebuild from Sales"
+                        class="oe_highlight oe_inline"/>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- Client Order History Form View -->
+        <record id="view_client_order_history_form" model="ir.ui.view">
+            <field name="name">client.order.history.form</field>
+            <field name="model">client.order.history</field>
+            <field name="arch" type="xml">
+                <form string="Client Order History">
+                    <header>
+                        <button name="action_generate_next_composition" 
+                                string="🧠 Generate Next Year" 
+                                type="object" 
+                                class="btn-primary"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="display_name" readonly="1"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group name="order_details" string="Order Details">
+                                <field name="partner_id" readonly="1"/>
+                                <field name="order_year"/>
+                                <field name="box_type" widget="radio"/>
+                                <field name="total_budget" widget="monetary"/>
+                                <field name="total_products"/>
+                                <field name="budget_per_product" widget="monetary"/>
+                            </group>
+                            <group name="performance" string="Performance">
+                                <field name="client_satisfaction" widget="radio"/>
+                                <field name="dietary_restrictions"/>
+                            </group>
+                        </group>
+                        
+                        <group name="experience_details" string="Experience Details" 
+                               attrs="{'invisible': [('box_type', '!=', 'experience')]}">
+                            <field name="experience_id" readonly="1"/>
+                        </group>
+                        
+                        <notebook>
+                            <page string="Products" name="products">
+                                <group name="products_section" string="Products in Box">
+                                    <field name="product_ids" nolabel="1" readonly="1">
+                                        <tree>
+                                            <field name="name"/>
+                                            <field name="lebiggot_category"/>
+                                            <field name="list_price" widget="monetary"/>
+                                            <field name="product_grade"/>
+                                            <field name="brand"/>
+                                        </tree>
+                                    </field>
+                                </group>
+                            </page>
+                            
+                            <page string="Category Analysis" name="analysis">
+                                <group name="analysis_section" string="Category Breakdown (JSON)">
+                                    <field name="category_breakdown"/>
+                                </group>
+                            </page>
+                            
+                            <page string="Notes" name="notes">
+                                <group name="notes_section" string="Order Notes">
+                                    <field name="notes" nolabel="1"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Client Order History Search View -->
+        <record id="view_client_order_history_search" model="ir.ui.view">
+            <field name="name">client.order.history.search</field>
+            <field name="model">client.order.history</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="partner_id"/>
+                    <field name="order_year"/>
+                    <field name="box_type"/>
+                    <field name="experience_id"/>
+                    
+                    <filter name="recent_years" string="Recent Years (2022+)" 
+                            domain="[('order_year', '>=', 2022)]"/>
+                    <filter name="experience_boxes" string="Experience Boxes" 
+                            domain="[('box_type', '=', 'experience')]"/>
+                    <filter name="custom_boxes" string="Custom Boxes" 
+                            domain="[('box_type', '=', 'custom')]"/>
+                    <filter name="high_satisfaction" string="High Satisfaction (4-5★)" 
+                            domain="[('client_satisfaction', 'in', ['4', '5'])]"/>
+                    
+                    <group expand="0" string="Group By">
+                        <filter name="group_by_client" string="Client" context="{'group_by': 'partner_id'}"/>
+                        <filter name="group_by_year" string="Year" context="{'group_by': 'order_year'}"/>
+                        <filter name="group_by_box_type" string="Box Type" context="{'group_by': 'box_type'}"/>
+                        <filter name="group_by_satisfaction" string="Satisfaction" context="{'group_by': 'client_satisfaction'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+        
+        <!-- Client Order History Action -->
+        <record id="action_client_order_history" model="ir.actions.act_window">
+            <field name="name">Client Order History</field>
+            <field name="res_model">client.order.history</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">📊 No client history yet!</p>
+                <p>
+                    Add historical order data to help Señor Bigott learn client preferences and generate better recommendations.
+                    <br/>
+                    <button type="action" name="%(bigott.action_rebuild_client_history)d" class="btn btn-primary mt16">
+                    ↺ Rebuild from Sales
+                    </button>
+                </p>
+            </field>
+        </record>
+        
+        <!-- Client Insights Action (Partner view with history) -->
+        <record id="action_client_insights" model="ir.actions.act_window">
+            <field name="name">Client Insights</field>
+            <field name="res_model">res.partner</field>
+            <field name="view_mode">tree,form</field>
+            <field name="domain">[('order_history_ids', '!=', False)]</field>
+            <field name="context">{'search_default_has_gift_history': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">
+                    📈 Build your client intelligence!
+                </p>
+                <p>
+                    As you track gift history, Señor Bigott will learn preferences and provide better recommendations.
+                </p>
+            </field>
+        </record>
 
-    <!-- Client Order History Form View -->
-    <record id="view_client_order_history_form" model="ir.ui.view">
-      <field name="name">client.order.history.form</field>
-      <field name="model">client.order.history</field>
-      <field name="arch" type="xml">
-        <form string="Client Order History">
-          <header>
-            <button name="action_generate_next_composition"
-                    string="🧠 Generate Next Year"
-                    type="object"
-                    class="btn-primary"/>
-          </header>
-          <sheet>
-            <div class="oe_title">
-              <h1><field name="display_name" readonly="1"/></h1>
-            </div>
+        <record id="action_rebuild_client_history" model="ir.actions.server">
+            <field name="name">Rebuild from Sales</field>
+            <field name="model_id" ref="model_client_order_history"/>
+            <field name="state">code</field>
+            <field name="code">
+                action = env['client.order.history'].rebuild_from_sales() or {'type': 'ir.actions.client', 'tag': 'reload'}
+            </field>
 
-            <group>
-              <group string="Order Details">
-                <field name="partner_id" readonly="1"/>
-                <field name="order_year"/>
-                <field name="box_type" widget="radio"/>
-                <field name="total_budget"/>
-                <field name="total_products"/>
-                <field name="budget_per_product"/>
-              </group>
-              <group string="Performance">
-                <field name="client_satisfaction" widget="radio"/>
-                <field name="dietary_restrictions"/>
-              </group>
-            </group>
+            <!-- Make it appear under Action menu on list+form views -->
+            <field name="binding_model_id" ref="model_client_order_history"/>
+            <field name="binding_type">action</field>
+            <field name="binding_view_types">list,form</field>
+        </record>
 
-            <group string="Experience Details" attrs="{'invisible': [('box_type', '!=', 'experience')]}">
-              <field name="experience_id" readonly="1"/>
-            </group>
+        <!-- add a smart button in the tree view header -->
+        <record id="view_client_order_history_tree_inherit_btn" model="ir.ui.view">
+            <field name="name">client.order.history.tree.btn</field>
+            <field name="model">client.order.history</field>
+            <field name="inherit_id" ref="your_module.view_client_order_history_tree"/> <!-- replace with your actual view id -->
+            <field name="arch" type="xml">
+                <xpath expr="//tree" position="before">
+                    <button type="action"
+                            name="%(action_rebuild_client_history)d"
+                            class="oe_highlight"
+                            string="Rebuild from Sales"/>
+                </xpath>
+            </field>
+        </record>
 
-            <notebook>
-              <page string="Products">
-                <group string="Products in Box">
-                  <field name="product_ids" nolabel="1" readonly="1">
-                    <tree>
-                      <field name="name"/>
-                      <field name="lebiggot_category"/>
-                      <field name="list_price"/>
-                      <field name="product_grade"/>
-                      <field name="brand"/>
-                    </tree>
-                  </field>
-                </group>
-              </page>
-
-              <page string="Category Analysis">
-                <group string="Category Breakdown (JSON)">
-                  <field name="category_breakdown"/>
-                </group>
-              </page>
-
-              <page string="Notes">
-                <group string="Order Notes">
-                  <field name="notes" nolabel="1"/>
-                </group>
-              </page>
-            </notebook>
-          </sheet>
-        </form>
-      </field>
-    </record>
-
-    <!-- Search View -->
-    <record id="view_client_order_history_search" model="ir.ui.view">
-      <field name="name">client.order.history.search</field>
-      <field name="model">client.order.history</field>
-      <field name="arch" type="xml">
-        <search>
-          <field name="partner_id"/>
-          <field name="order_year"/>
-          <field name="box_type"/>
-          <field name="experience_id"/>
-
-          <filter name="recent_years" string="Recent Years (2022+)" domain="[('order_year', '>=', 2022)]"/>
-          <filter name="experience_boxes" string="Experience Boxes" domain="[('box_type', '=', 'experience')]"/>
-          <filter name="custom_boxes" string="Custom Boxes" domain="[('box_type', '=', 'custom')]"/>
-          <filter name="high_satisfaction" string="High Satisfaction (4-5★)" domain="[('client_satisfaction', 'in', ['4','5'])]"/>
-
-          <group expand="0" string="Group By">
-            <filter name="group_by_client" string="Client" context="{'group_by': 'partner_id'}"/>
-            <filter name="group_by_year" string="Year" context="{'group_by': 'order_year'}"/>
-            <filter name="group_by_box_type" string="Box Type" context="{'group_by': 'box_type'}"/>
-            <filter name="group_by_satisfaction" string="Satisfaction" context="{'group_by': 'client_satisfaction'}"/>
-          </group>
-        </search>
-      </field>
-    </record>
-
-    <!-- Window Action -->
-    <record id="action_client_order_history" model="ir.actions.act_window">
-      <field name="name">Client Order History</field>
-      <field name="res_model">client.order.history</field>
-      <field name="view_mode">tree,form</field>
-      <field name="help" type="html">
-        <p class="o_view_nocontent_smiling_face">📊 No client history yet!</p>
-        <p>Add historical order data to help Señor Bigott learn client preferences and generate better recommendations.</p>
-      </field>
-    </record>
-
-    <!-- Server Action (bound to Action menu on list/form) -->
-    <record id="action_rebuild_client_history" model="ir.actions.server">
-      <field name="name">Rebuild from Sales</field>
-      <field name="model_id" ref="model_client_order_history"/>
-      <field name="state">code</field>
-      <field name="code">
-        action = env['client.order.history'].rebuild_from_sales() or {'type': 'ir.actions.client', 'tag': 'reload'}
-      </field>
-      <field name="binding_model_id" ref="model_client_order_history"/>
-      <field name="binding_type">action</field>
-      <field name="binding_view_types">list,form</field>
-    </record>
-
-    <!-- Nightly cron to keep it fresh -->
-    <record id="ir_cron_rebuild_client_history" model="ir.cron">
-      <field name="name">Client History: Refresh from Sales</field>
-      <field name="model_id" ref="model_client_order_history"/>
-      <field name="state">code</field>
-      <field name="code">model.rebuild_from_sales()</field>
-      <field name="interval_number">1</field>
-      <field name="interval_type">days</field>
-      <field name="numbercall">-1</field>
-      <field name="active">True</field>
-    </record>
-
-  </data>
+        <!-- nightly cron to keep it fresh -->
+        <record id="ir_cron_rebuild_client_history" model="ir.cron">
+            <field name="name">Client History: Refresh from Sales</field>
+            <field name="model_id" ref="model_client_order_history"/>
+            <field name="state">code</field>
+            <field name="code">model.rebuild_from_sales()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="numbercall">-1</field>
+            <field name="active">True</field>
+        </record>
+        
+    </data>
 </odoo>
