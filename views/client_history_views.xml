@@ -51,9 +51,9 @@
                     string="🧠 Generate Next Year"
                     type="object"
                     class="btn-primary"/>
-            <!-- Opens the wizard -->
-            <button name="%(bigott.action_open_rebuild_client_history_wizard)d"
-                    string="↺ Rebuild from Sales"
+            <!-- FIXED: Removed module prefix -->
+            <button name="%(action_open_rebuild_client_history_wizard)d"
+                    string="↻ Rebuild from Sales"
                     type="action"
                     class="oe_highlight"/>
           </header>
@@ -169,8 +169,9 @@
         <p>
           Add historical order data to help Señor Bigott learn client preferences and generate better recommendations.
           <br/>
-          <button type="action" name="%(bigott.action_rebuild_client_history)d" class="btn btn-primary mt16">
-            ↺ Rebuild from Sales
+          <!-- FIXED: Removed module prefix -->
+          <button type="action" name="%(action_rebuild_client_history)d" class="btn btn-primary mt16">
+            ↻ Rebuild from Sales
           </button>
         </p>
       </field>

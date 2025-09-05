@@ -22,161 +22,144 @@
                             <group name="client_selection" string="📋 Client &amp; Budget">
                                 <field name="partner_id" 
                                        placeholder="Select client..."
+                                       domain="[('is_company', '=', False)]"
                                        options="{'no_create': True}"/>
+                                <!-- ADDED: Show partner's dietary restrictions -->
+                                <field name="partner_dietary_restrictions" readonly="1" 
+                                       attrs="{'invisible': [('partner_id', '=', False)]}"
+                                       string="Client's Dietary Profile"/>
                                 <field name="target_year"/>
                                 <field name="target_budget" widget="monetary"/>
                             </group>
                             <group name="composition_preferences" string="⚙️ Preferences">
                                 <field name="force_composition_type" widget="radio"/>
                                 <field name="dietary_restrictions"/>
-                                <field name="additional_notes" placeholder="Any special notes for this recommendation?"/>
+                                <field name="additional_notes" 
+                                       placeholder="Any special notes for this recommendation? (e.g., 'Client loves premium wines', 'Prefers traditional Spanish products', 'Budget flexible for quality')"/>
                             </group>
                         </group>
                         
-                        <!-- Enhanced Client Information Display -->
+                        <!-- FIXED: Dynamic Client Information Display using computed field -->
                         <div attrs="{'invisible': [('partner_id', '=', False)]}" style="margin-top: 20px;">
-                            <div class="alert alert-info" role="alert" style="border-left: 4px solid #17a2b8;">
-                                <h5 style="color: #0c5460; margin-bottom: 15px;">
-                                    📊 Client Insights
+                            <!-- Use the computed client_info field instead of static data -->
+                            <field name="client_info" nolabel="1"/>
+                        </div>
+                        
+                        <!-- ADDED: Dynamic AI Recommendations using computed fields -->
+                        <div attrs="{'invisible': [('partner_id', '=', False)]}" style="margin-top: 20px;">
+                            <div class="alert alert-success" role="alert" style="border-left: 4px solid #28a745;">
+                                <h5 style="color: #155724; margin-bottom: 15px;">
+                                    🤖 Señor Bigott Live Analysis
                                 </h5>
                                 
-                                <!-- Client Profile Cards -->
-                                <div class="row" style="margin-bottom: 15px;">
-                                    <div class="col-md-3">
-                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
-                                            <div style="background: linear-gradient(135deg, #17a2b8, #138496); color: white; 
-                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
-                                                        justify-content: center; margin: 0 auto 10px;">
-                                                <i class="fa fa-star" title="Client Tier" style="font-size: 16px;"/>
-                                            </div>
-                                            <h6 style="color: #17a2b8; margin-bottom: 5px; font-weight: 700;">
-                                                NEW
-                                            </h6>
-                                            <small class="text-muted">Client Tier</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
-                                            <div style="background: linear-gradient(135deg, #28a745, #1e7e34); color: white; 
-                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
-                                                        justify-content: center; margin: 0 auto 10px;">
-                                                <i class="fa fa-calendar" title="Experience" style="font-size: 16px;"/>
-                                            </div>
-                                            <h6 style="color: #28a745; margin-bottom: 5px; font-weight: 700;">0 years</h6>
-                                            <small class="text-muted">Experience</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
-                                            <div style="background: linear-gradient(135deg, #ffc107, #e0a800); color: white; 
-                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
-                                                        justify-content: center; margin: 0 auto 10px;">
-                                                <i class="fa fa-euro-sign" title="Avg Budget" style="font-size: 16px;"/>
-                                            </div>
-                                            <h6 style="color: #ffc107; margin-bottom: 5px; font-weight: 700;">€0</h6>
-                                            <small class="text-muted">Avg Budget</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div style="background: white; padding: 15px; border-radius: 8px; border: 1px solid #bee5eb; text-align: center;">
-                                            <div style="background: linear-gradient(135deg, #dc3545, #c82333); color: white; 
-                                                        width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; 
-                                                        justify-content: center; margin: 0 auto 10px;">
-                                                <i class="fa fa-heart" title="Satisfaction" style="font-size: 16px;"/>
-                                            </div>
-                                            <h6 style="color: #dc3545; margin-bottom: 5px; font-weight: 700;">0.0/5 ⭐</h6>
-                                            <small class="text-muted">Satisfaction</small>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Client Preferences Row -->
                                 <div class="row">
-                                    <div class="col-md-4">
-                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
-                                            <strong style="color: #0c5460;">Preferences:</strong>
-                                            <span class="badge badge-warning" style="margin-left: 8px;">CUSTOM</span>
+                                    <div class="col-md-6">
+                                        <div style="margin-bottom: 12px;">
+                                            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                                <i class="fa fa-lightbulb text-warning" style="margin-right: 8px;"/>
+                                                <strong style="color: #155724;">Budget Strategy:</strong>
+                                            </div>
+                                            <div style="background: #d4edda; padding: 8px 12px; border-radius: 6px; border: 1px solid #c3e6cb;">
+                                                <field name="budget_recommendation" readonly="1" nolabel="1" 
+                                                       style="color: #155724; font-weight: 500;"/>
+                                            </div>
+                                        </div>
+                                        
+                                        <div style="margin-bottom: 12px;">
+                                            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                                <i class="fa fa-bullseye text-primary" style="margin-right: 8px;"/>
+                                                <strong style="color: #155724;">Recommended Approach:</strong>
+                                            </div>
+                                            <div style="background: #d4edda; padding: 8px 12px; border-radius: 6px; border: 1px solid #c3e6cb;">
+                                                <field name="approach_recommendation" readonly="1" nolabel="1"
+                                                       style="color: #155724; font-weight: 500;"/>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div class="col-md-4">
-                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
-                                            <strong style="color: #0c5460;">Diet:</strong>
-                                            <span class="badge badge-secondary" style="margin-left: 8px;">NONE</span>
+                                    
+                                    <div class="col-md-6">
+                                        <div style="margin-bottom: 12px;">
+                                            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                                <i class="fa fa-shield-alt text-info" style="margin-right: 8px;"/>
+                                                <strong style="color: #155724;">Risk Assessment:</strong>
+                                            </div>
+                                            <div style="background: #d4edda; padding: 8px 12px; border-radius: 6px; border: 1px solid #c3e6cb;">
+                                                <field name="risk_level" widget="badge" readonly="1" nolabel="1"
+                                                       decoration-success="risk_level == 'low'"
+                                                       decoration-warning="risk_level == 'medium'"
+                                                       decoration-danger="risk_level == 'high'"/>
+                                                <div style="margin-top: 8px; font-size: 12px; color: #6c757d;">
+                                                    <span attrs="{'invisible': [('risk_level', '!=', 'low')]}">
+                                                        ✅ High confidence - Strong historical data available
+                                                    </span>
+                                                    <span attrs="{'invisible': [('risk_level', '!=', 'medium')]}">
+                                                        ⚠️ Medium confidence - Some historical data available
+                                                    </span>
+                                                    <span attrs="{'invisible': [('risk_level', '!=', 'high')]}">
+                                                        🔄 Limited data - Using industry best practices
+                                                    </span>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bee5eb;">
-                                            <strong style="color: #0c5460;">Status:</strong>
-                                            <span class="badge badge-primary" style="margin-left: 8px;">NEW</span>
+                                        
+                                        <div style="margin-bottom: 0;">
+                                            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                                <i class="fa fa-utensils text-info" style="margin-right: 8px;"/>
+                                                <strong style="color: #155724;">AI Features Active:</strong>
+                                            </div>
+                                            <div style="background: #d4edda; padding: 8px 12px; border-radius: 6px; border: 1px solid #c3e6cb;">
+                                                <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #155724;">
+                                                    <li>Historical pattern analysis</li>
+                                                    <li>Notes sentiment processing</li>
+                                                    <li>Dynamic budget optimization</li>
+                                                    <li>Dietary preference matching</li>
+                                                </ul>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- Enhanced AI Recommendations Display -->
-                        <div class="alert alert-success" role="alert" attrs="{'invisible': [('partner_id', '=', False)]}" 
-                             style="margin-top: 20px; border-left: 4px solid #28a745;">
-                            <h5 style="color: #155724; margin-bottom: 15px;">
-                                🤖 Señor Bigott Live Analysis
-                            </h5>
-                            
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div style="margin-bottom: 12px;">
-                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-                                            <i class="fa fa-lightbulb text-warning" title="Smart Recommendations" style="margin-right: 8px;"/>
-                                            <strong style="color: #155724;">Smart Recommendations:</strong>
-                                        </div>
-                                        <span style="color: #0c5460; background: #d1ecf1; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-                                            AI will analyze client history, preferences, and market trends
-                                        </span>
-                                    </div>
-                                    
-                                    <div style="margin-bottom: 12px;">
-                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-                                            <i class="fa fa-euro-sign text-success" title="Budget Optimization" style="margin-right: 8px;"/>
-                                            <strong style="color: #155724;">Budget Optimization:</strong>
-                                        </div>
-                                        <span style="color: #155724; font-size: 12px;">
-                                            Dynamic product selection within your target budget range
-                                        </span>
-                                    </div>
-                                </div>
-                                
-                                <div class="col-md-6">
-                                    <div style="margin-bottom: 12px;">
-                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-                                            <i class="fa fa-utensils text-info" title="Dietary Intelligence" style="margin-right: 8px;"/>
-                                            <strong style="color: #155724;">Dietary Intelligence:</strong>
-                                        </div>
-                                        <span style="color: #155724; font-size: 12px;">
-                                            Automatic filtering based on selected dietary restrictions
-                                        </span>
-                                    </div>
-                                    
-                                    <div style="margin-bottom: 0;">
-                                        <div style="display: flex; align-items: center; margin-bottom: 5px;">
-                                            <i class="fa fa-bullseye text-primary" title="Personalization" style="margin-right: 8px;"/>
-                                            <strong style="color: #155724;">Personalization:</strong>
-                                        </div>
-                                        <span style="color: #856404; background: #fff3cd; padding: 4px 8px; border-radius: 4px; font-size: 12px;">
-                                            Tailored to client tier, satisfaction history, and proven preferences
-                                        </span>
-                                    </div>
+                        <!-- Warning for high-risk clients -->
+                        <div attrs="{'invisible': ['|', ('partner_id', '=', False), ('risk_level', '!=', 'high')]}" 
+                             class="alert alert-warning" role="alert" style="margin-top: 15px;">
+                            <div style="display: flex; align-items: center;">
+                                <i class="fa fa-info-circle" style="font-size: 20px; margin-right: 12px; color: #856404;"/>
+                                <div>
+                                    <strong>New Client Advisory</strong><br/>
+                                    <small>Limited purchase history available. Consider adding detailed notes above to help the AI generate better recommendations.</small>
                                 </div>
                             </div>
+                        </div>
+                        
+                        <!-- Enhanced call-to-action for generation -->
+                        <div attrs="{'invisible': [('partner_id', '=', False)]}" 
+                             style="background: linear-gradient(135deg, #875A7B 0%, #6f4c6b 100%); 
+                                    color: white; padding: 20px; border-radius: 12px; text-align: center; margin: 20px 0;">
+                            <i class="fa fa-robot" style="font-size: 28px; margin-bottom: 10px;"/>
+                            <h5 style="color: white; margin-bottom: 8px;">Ready to Generate AI Composition?</h5>
+                            <p style="color: rgba(255,255,255,0.9); margin: 0; font-size: 13px;">
+                                The AI will analyze client history, preferences, notes, and market data to create the perfect gift
+                            </p>
                         </div>
                         
                     </sheet>
                     <footer>
                         <button name="action_generate_composition" 
-                                string="🚀 Generate Composition" 
+                                string="🚀 Generate AI Composition" 
                                 type="object" 
                                 class="btn-primary btn-lg"
                                 data-hotkey="q"
-                                style="min-width: 200px;"/>
+                                style="min-width: 200px; background: linear-gradient(135deg, #875A7B 0%, #6f4c6b 100%); border: none;"
+                                attrs="{'invisible': [('partner_id', '=', False)]}"/>
                         <button string="Cancel" class="btn-secondary" special="cancel"/>
+                        
+                        <!-- Help text -->
+                        <div class="float-right" style="color: #6c757d; font-size: 12px; margin-top: 8px;"
+                             attrs="{'invisible': [('partner_id', '!=', False)]}">
+                            <i class="fa fa-arrow-up"/> Select a client above to begin AI analysis
+                        </div>
                     </footer>
                 </form>
             </field>
