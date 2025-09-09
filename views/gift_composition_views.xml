@@ -58,11 +58,11 @@
                                 type="object" 
                                 class="btn-success"
                                 attrs="{'invisible': [('state', '!=', 'proposed')]}"/>
-                        <button name="action_create_order" 
+                        <!-- <button name="action_create_order" 
                                 string="Create Sale Order" 
                                 type="object" 
                                 class="btn-success"
-                                attrs="{'invisible': [('state', '!=', 'approved')]}"/>
+                                attrs="{'invisible': [('state', '!=', 'approved')]}"/> -->
                         <button name="action_deliver" 
                                 string="Mark as Delivered" 
                                 type="object" 
