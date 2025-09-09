@@ -7,41 +7,335 @@
                   name="🎁 Señor Bigott" 
                   sequence="40"/>
         
-        <!-- Core Operations -->
+        <!-- ========== MAIN OPERATIONS ========== -->
         <menuitem id="menu_operations" 
                   name="Operations" 
                   parent="menu_senor_bigott_main" 
                   sequence="10"/>
         
+        <!-- Generate Composition Wizard -->
+        <menuitem id="menu_generate_composition" 
+                  name="🧠 Generate Composition" 
+                  parent="menu_operations" 
+                  action="action_composition_wizard" 
+                  sequence="10"/>
+        
+        <!-- Compositions Menu -->
         <menuitem id="menu_compositions" 
                   name="Gift Compositions" 
                   parent="menu_operations" 
                   action="action_gift_composition" 
                   sequence="20"/>
         
-        <!-- Master Data -->
+        <!-- Batch Processing -->
+        <!-- <menuitem id="menu_batch_processing" 
+                  name="🚀 Batch Processing" 
+                  parent="menu_operations" 
+                  sequence="30"/>
+        
+        <menuitem id="menu_create_batch" 
+                  name="Create New Batch" 
+                  parent="menu_batch_processing" 
+                  action="action_batch_wizard" 
+                  sequence="10"/>
+        
+        <menuitem id="menu_batch_processors" 
+                  name="Batch Processes" 
+                  parent="menu_batch_processing" 
+                  action="action_batch_processor" 
+                  sequence="20"/> -->
+        
+        <!-- ========== WAREHOUSE & FULFILLMENT ========== -->
+        <!-- <menuitem id="menu_warehouse_fulfillment" 
+                  name="Warehouse &amp; Fulfillment" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="20"/> -->
+        
+        <!-- Assembly Operations -->
+        <!-- <menuitem id="menu_assembly_operations" 
+                  name="📦 Assembly" 
+                  parent="menu_warehouse_fulfillment" 
+                  sequence="10"/>
+        
+        <menuitem id="menu_assembly_sheets" 
+                  name="Assembly Sheets" 
+                  parent="menu_assembly_operations" 
+                  action="action_assembly_sheets" 
+                  sequence="10"/> -->
+        
+        <!-- Delivery Operations -->
+        <!-- <menuitem id="menu_delivery_operations" 
+                  name="🚚 Delivery" 
+                  parent="menu_warehouse_fulfillment" 
+                  sequence="20"/>
+        
+        <menuitem id="menu_delivery_notes" 
+                  name="Delivery Notes" 
+                  parent="menu_delivery_operations" 
+                  action="action_delivery_notes" 
+                  sequence="10"/> -->
+        
+        <!-- ========== MASTER DATA ========== -->
         <menuitem id="menu_master_data" 
                   name="Master Data" 
                   parent="menu_senor_bigott_main" 
                   sequence="30"/>
         
+        <!-- Client Data -->
+        <menuitem id="menu_client_data" 
+                  name="👥 Client Data" 
+                  parent="menu_master_data" 
+                  sequence="10"/>
+        
         <menuitem id="menu_client_history" 
                   name="Client History" 
-                  parent="menu_master_data" 
+                  parent="menu_client_data" 
                   action="action_client_order_history" 
                   sequence="10"/>
         
+        <!-- Experience Management -->
+        <menuitem id="menu_experience_management" 
+                  name="🎨 Experience Management" 
+                  parent="menu_master_data" 
+                  sequence="20"/>
+        
         <menuitem id="menu_experiences" 
                   name="Gift Experiences" 
-                  parent="menu_master_data" 
+                  parent="menu_experience_management" 
                   action="action_gift_experience" 
+                  sequence="10"/>
+        
+        <menuitem id="menu_experience_importer" 
+                  name="Import Experience Pools" 
+                  parent="menu_experience_management" 
+                  action="action_experience_importer" 
                   sequence="20"/>
+        
+        <!-- Product Configuration -->
+        <menuitem id="menu_product_config" 
+                  name="🍷 Product Configuration" 
+                  parent="menu_master_data" 
+                  sequence="30"/>
         
         <menuitem id="menu_products_lebiggot" 
                   name="Le Biggot Products" 
-                  parent="menu_master_data" 
+                  parent="menu_product_config" 
                   action="product.product_template_action" 
+                  sequence="10"/>
+        
+        <!-- ========== ANALYTICS & REPORTS ========== -->
+        <menuitem id="menu_analytics" 
+                  name="📊 Analytics &amp; Reports" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="40"/>
+        
+        <!-- Client Analytics -->
+        <menuitem id="menu_client_analytics" 
+                  name="Client Analytics" 
+                  parent="menu_analytics" 
+                  action="action_client_insights" 
+                  sequence="10"/>
+        
+        <!-- Performance Reports -->
+        <menuitem id="menu_performance_reports" 
+                  name="📈 Performance Reports" 
+                  parent="menu_analytics" 
+                  sequence="20"/>
+        
+        <!-- Business Rules Reports -->
+        <menuitem id="menu_business_rules_reports" 
+                  name="⚖️ Business Rules Compliance" 
+                  parent="menu_analytics" 
                   sequence="30"/>
+        
+        <!-- ========== CONFIGURATION ========== -->
+        <menuitem id="menu_configuration" 
+                  name="⚙️ Configuration" 
+                  parent="menu_senor_bigott_main" 
+                  sequence="50"/>
+        
+        <!-- System Settings -->
+        <menuitem id="menu_system_settings" 
+                  name="System Settings" 
+                  parent="menu_configuration" 
+                  sequence="10"/>
+        
+        <!-- AI Configuration -->
+        <menuitem id="menu_ai_configuration" 
+                  name="🤖 AI Configuration" 
+                  parent="menu_configuration" 
+                  sequence="20"/>
+        
+        <!-- Business Rules Configuration -->
+        <menuitem id="menu_business_rules_config" 
+                  name="📋 Business Rules" 
+                  parent="menu_configuration" 
+                  sequence="30"/>
+        
+        <!-- Document Templates -->
+        <menuitem id="menu_document_templates" 
+                  name="📄 Document Templates" 
+                  parent="menu_configuration" 
+                  sequence="40"/>
+        
+        <!-- ========== ADDITIONAL ACTIONS ========== -->
+        
+        <!-- Client Insights Action -->
+        <record id="action_client_insights" model="ir.actions.act_window">
+            <field name="name">📊 Client Analytics &amp; Insights</field>
+            <field name="res_model">res.partner</field>
+            <field name="view_mode">tree,form</field>
+            <field name="domain">[('is_company', '=', False)]</field>
+            <field name="context">{'search_default_has_gift_history': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">📈 No client analytics available yet!</p>
+                <p>
+                    Client insights will appear here once you have historical data from sales orders.
+                    <br/>
+                    <button type="action" name="%(action_client_order_history)d" class="btn btn-primary mt16">
+                        ↻ Build Client History
+                    </button>
+                </p>
+            </field>
+        </record>
+        
+        <!-- Batch Wizard View -->
+        <record id="view_batch_wizard_form" model="ir.ui.view">
+            <field name="name">batch.wizard.form</field>
+            <field name="model">batch.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Create Batch Process">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>🚀 Create Batch Process</h1>
+                            <p>Generate compositions for multiple clients efficiently</p>
+                        </div>
+                        
+                        <group>
+                            <group name="batch_config" string="Batch Configuration">
+                                <field name="target_year"/>
+                                <field name="client_selection" widget="radio"/>
+                                <field name="client_tier" attrs="{'invisible': [('client_selection', '!=', 'by_tier')], 'required': [('client_selection', '=', 'by_tier')]}"/>
+                            </group>
+                            <group name="budget_config" string="Budget Configuration">
+                                <field name="default_budget" widget="monetary"/>
+                                <field name="budget_adjustment_factor"/>
+                            </group>
+                        </group>
+                        
+                        <group name="client_selection_manual" string="Manual Client Selection"
+                               attrs="{'invisible': [('client_selection', '!=', 'manual')]}">
+                            <field name="selected_client_ids" nolabel="1">
+                                <tree>
+                                    <field name="name"/>
+                                    <field name="client_tier" widget="badge"/>
+                                    <field name="average_annual_budget" widget="monetary"/>
+                                </tree>
+                            </field>
+                        </group>
+                    </sheet>
+                    <footer>
+                        <button name="action_create_batch" 
+                                string="Create Batch" 
+                                type="object" 
+                                class="btn-primary"/>
+                        <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Experience Retirement Wizard View -->
+        <record id="view_experience_retirement_wizard_form" model="ir.ui.view">
+            <field name="name">experience.retirement.wizard.form</field>
+            <field name="model">experience.retirement.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Retire Experience">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>🚫 Retire Experience</h1>
+                        </div>
+                        
+                        <group>
+                            <field name="experience_id" readonly="1"/>
+                            <field name="retirement_date"/>
+                            <field name="replacement_experience_id"/>
+                            <field name="notify_users"/>
+                        </group>
+                        
+                        <group>
+                            <field name="retirement_reason" nolabel="1" placeholder="Explain why this experience is being retired..."/>
+                        </group>
+                    </sheet>
+                    <footer>
+                        <button name="action_retire_experience" 
+                                string="Retire Experience" 
+                                type="object" 
+                                class="btn-primary"/>
+                        <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Enhanced Experience Views with Lifecycle -->
+        <record id="view_gift_experience_form_enhanced" model="ir.ui.view">
+            <field name="name">gift.experience.form.enhanced</field>
+            <field name="model">gift.experience</field>
+            <field name="inherit_id" ref="view_gift_experience_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//header" position="inside">
+                    <button name="action_test_experience" 
+                            string="🧪 Test Experience" 
+                            type="object" 
+                            class="btn-warning"
+                            attrs="{'invisible': [('lifecycle_stage', '!=', 'draft')]}"/>
+                    <button name="action_activate_experience" 
+                            string="✅ Activate" 
+                            type="object" 
+                            class="btn-success"
+                            attrs="{'invisible': [('lifecycle_stage', 'not in', ['draft', 'testing'])]}"/>
+                    <button name="action_retire_experience" 
+                            string="🚫 Retire" 
+                            type="object" 
+                            class="btn-secondary"
+                            attrs="{'invisible': [('lifecycle_stage', '!=', 'active')]}"/>
+                    <field name="lifecycle_stage" widget="statusbar"/>
+                </xpath>
+                
+                <xpath expr="//group[@name='experience_details']" position="after">
+                    <group name="lifecycle_management" string="Lifecycle Management">
+                        <field name="experience_code" readonly="1"/>
+                        <field name="seasonal_availability"/>
+                        <field name="target_client_tier"/>
+                        <field name="budget_flexibility"/>
+                    </group>
+                </xpath>
+                
+                <xpath expr="//page[@name='usage_history']" position="after">
+                    <page string="📊 Performance Metrics" name="performance_metrics">
+                        <group>
+                            <group name="usage_stats" string="Usage Statistics">
+                                <field name="usage_count" readonly="1"/>
+                                <field name="clients_used" readonly="1"/>
+                                <field name="last_used_date" readonly="1"/>
+                            </group>
+                            <group name="quality_metrics" string="Quality Metrics">
+                                <field name="average_client_rating" readonly="1" widget="percentage"/>
+                                <field name="repeat_request_rate" readonly="1" widget="percentage"/>
+                                <field name="complaint_count" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <group name="stock_status" string="Stock Status" 
+                               attrs="{'invisible': [('all_products_available', '=', True)]}">
+                            <field name="all_products_available" readonly="1"/>
+                            <field name="stock_issues" readonly="1" nolabel="1"/>
+                        </group>
+                    </page>
+                </xpath>
+            </field>
+        </record>
         
     </data>
 </odoo>
