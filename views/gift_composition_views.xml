@@ -63,7 +63,7 @@
                                 type="object" 
                                 class="btn-success"
                                 attrs="{'invisible': [('state', '!=', 'approved')]}"/> -->
-                        <button name="action_deliver" 
+                        <!-- <button name="action_deliver" 
                                 string="Mark as Delivered" 
                                 type="object" 
                                 class="btn-info"
@@ -72,7 +72,7 @@
                                 string="Cancel" 
                                 type="object" 
                                 class="btn-secondary"
-                                attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/>
+                                attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/> -->
                         <field name="state" widget="statusbar"/>
                     </header>
                     <sheet>
