@@ -337,6 +337,90 @@ class GiftComposition(models.Model):
             }
         }
 
+    def action_create_order(self):
+        """Create sale order from composition"""
+        self.ensure_one()
+        
+        if self.state != 'approved':
+            raise UserError("Only approved compositions can be converted to orders.")
+        
+        # TODO: Implement sale order creation logic
+        # For now, just show a notification
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Sale Order Creation',
+                'message': 'Sale order creation is not yet implemented. This will integrate with Odoo Sales module.',
+                'type': 'info',
+                'sticky': False,
+            }
+        }
+
+    def action_deliver(self):
+        """Mark composition as delivered"""
+        self.ensure_one()
+        
+        if self.state != 'approved':
+            raise UserError("Only approved compositions can be marked as delivered.")
+        
+        self.write({
+            'state': 'delivered',
+            'delivery_date': fields.Datetime.now()
+        })
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Composition Delivered',
+                'message': 'Gift composition has been marked as delivered.',
+                'type': 'success',
+                'sticky': False,
+            }
+        }
+
+    def action_cancel(self):
+        """Cancel the composition"""
+        self.ensure_one()
+        
+        if self.state in ['delivered']:
+            raise UserError("Cannot cancel delivered compositions.")
+        
+        self.write({
+            'state': 'cancelled',
+        })
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Composition Cancelled',
+                'message': 'Gift composition has been cancelled.',
+                'type': 'warning',
+                'sticky': False,
+            }
+        }
+
+    def action_view_order_history(self):
+        """View client order history"""
+        self.ensure_one()
+        
+        if not self.partner_id:
+            raise UserError("No client selected for this composition.")
+        
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'Order History - {self.partner_id.name}',
+            'res_model': 'client.order.history',
+            'view_mode': 'tree,form',
+            'domain': [('partner_id', '=', self.partner_id.id)],
+            'context': {
+                'default_partner_id': self.partner_id.id,
+                'search_default_partner_id': self.partner_id.id
+            }
+        }
+
     def action_generate_documents(self):
         """Generate all required documents for this composition"""
         self.ensure_one()
