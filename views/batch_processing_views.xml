@@ -1,0 +1,744 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- ========== BATCH PROCESSING VIEWS ========== -->
+        
+        <!-- Batch Processing Tree View -->
+        <record id="view_batch_processor_tree" model="ir.ui.view">
+            <field name="name">batch.composition.processor.tree</field>
+            <field name="model">batch.composition.processor</field>
+            <field name="arch" type="xml">
+                <tree string="Batch Processing" 
+                      decoration-info="state=='processing'" 
+                      decoration-success="state=='completed'" 
+                      decoration-danger="state=='failed'"
+                      sample="1">
+                    <field name="name"/>
+                    <field name="batch_date"/>
+                    <field name="target_year"/>
+                    <field name="client_count"/>
+                    <field name="processed_clients"/>
+                    <field name="successful_compositions"/>
+                    <field name="failed_compositions"/>
+                    <field name="processing_duration" widget="float_time"/>
+                    <field name="compositions_per_hour"/>
+                    <field name="state" widget="badge" 
+                           decoration-info="state=='processing'"
+                           decoration-success="state=='completed'"
+                           decoration-danger="state=='failed'"/>
+                </tree>
+            </field>
+        </record>
+        
+        <!-- Batch Processing Form View -->
+        <record id="view_batch_processor_form" model="ir.ui.view">
+            <field name="name">batch.composition.processor.form</field>
+            <field name="model">batch.composition.processor</field>
+            <field name="arch" type="xml">
+                <form string="Batch Processor">
+                    <header>
+                        <button name="action_add_all_eligible_clients" 
+                                string="🎯 Add All Eligible Clients" 
+                                type="object" 
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                        <button name="action_start_batch_processing" 
+                                string="🚀 Start Processing" 
+                                type="object" 
+                                class="btn-primary"
+                                attrs="{'invisible': [('state', 'not in', ['draft', 'ready'])]}"/>
+                        <button name="action_retry_failed_clients" 
+                                string="🔄 Retry Failed" 
+                                type="object" 
+                                class="btn-warning"
+                                attrs="{'invisible': ['|', ('state', '!=', 'completed'), ('failed_compositions', '==', 0)]}"/>
+                        <button name="action_view_results" 
+                                string="📊 View Results" 
+                                type="object" 
+                                class="btn-info"
+                                attrs="{'invisible': [('state', 'not in', ['completed', 'failed'])]}"/>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_button_box" name="button_box">
+                            <button name="action_view_results" 
+                                    type="object" 
+                                    class="oe_stat_button" 
+                                    icon="fa-gift">
+                                <field name="successful_compositions" widget="statinfo" 
+                                       string="Successful"/>
+                            </button>
+                            <button name="action_generate_batch_report" 
+                                    type="object" 
+                                    class="oe_stat_button" 
+                                    icon="fa-file-pdf-o">
+                                <div class="o_field_widget o_stat_info">
+                                    <span class="o_stat_text">Batch</span>
+                                    <span class="o_stat_text">Report</span>
+                                </div>
+                            </button>
+                        </div>
+                        
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name"/>
+                            </h1>
+                            <div class="oe_subtitle">
+                                <field name="batch_date" widget="datetime"/>
+                            </div>
+                        </div>
+                        
+                        <!-- Progress Dashboard -->
+                        <div attrs="{'invisible': [('state', 'in', ['draft'])]}" 
+                             class="alert alert-info" style="margin: 20px 0;">
+                            <h5>📈 Processing Progress</h5>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <h3><field name="processed_clients"/>/<field name="total_clients"/></h3>
+                                    <small>Clients Processed</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h3><field name="successful_compositions"/></h3>
+                                    <small>Successful</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h3><field name="failed_compositions"/></h3>
+                                    <small>Failed</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h3><field name="compositions_per_hour" widget="float" digits="[16,1]"/></h3>
+                                    <small>Compositions/Hour</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <group>
+                            <group name="batch_config" string="Batch Configuration">
+                                <field name="target_year"/>
+                                <field name="default_budget" widget="monetary"/>
+                                <field name="budget_adjustment_factor"/>
+                                <field name="retry_failed"/>
+                            </group>
+                            <group name="timing" string="Processing Timing">
+                                <field name="processing_start_time" readonly="1"/>
+                                <field name="processing_end_time" readonly="1"/>
+                                <field name="processing_duration" widget="float_time" readonly="1"/>
+                                <field name="average_processing_time" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <notebook>
+                            <page string="👥 Clients" name="clients">
+                                <field name="client_ids">
+                                    <tree>
+                                        <field name="name"/>
+                                        <field name="client_tier" widget="badge"/>
+                                        <field name="years_as_client"/>
+                                        <field name="average_annual_budget" widget="monetary"/>
+                                        <field name="dietary_restrictions"/>
+                                    </tree>
+                                </field>
+                            </page>
+                            
+                            <page string="📋 Processing Log" name="processing_log">
+                                <field name="processing_log_ids" readonly="1">
+                                    <tree decoration-success="status=='success'" 
+                                          decoration-danger="status=='failed'">
+                                        <field name="client_id"/>
+                                        <field name="status" widget="badge"/>
+                                        <field name="processing_time"/>
+                                        <field name="composition_id"/>
+                                        <field name="error_message"/>
+                                    </tree>
+                                </field>
+                            </page>
+                            
+                            <page string="🎁 Generated Compositions" name="compositions">
+                                <field name="composition_ids" readonly="1">
+                                    <tree>
+                                        <field name="name"/>
+                                        <field name="partner_id"/>
+                                        <field name="target_budget" widget="monetary"/>
+                                        <field name="actual_cost" widget="monetary"/>
+                                        <field name="confidence_score" widget="percentage"/>
+                                        <field name="state" widget="badge"/>
+                                    </tree>
+                                </field>
+                            </page>
+                            
+                            <page string="❌ Errors" name="errors" 
+                                  attrs="{'invisible': [('failed_compositions', '==', 0)]}">
+                                <group>
+                                    <field name="error_summary" nolabel="1"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <div class="oe_chatter">
+                        <field name="message_follower_ids"/>
+                        <field name="activity_ids"/>
+                        <field name="message_ids"/>
+                    </div>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ========== ASSEMBLY SHEET VIEWS ========== -->
+        
+        <!-- Assembly Sheet Tree View -->
+        <record id="view_assembly_sheet_tree" model="ir.ui.view">
+            <field name="name">gift.assembly.sheet.tree</field>
+            <field name="model">gift.assembly.sheet</field>
+            <field name="arch" type="xml">
+                <tree string="Assembly Sheets" 
+                      decoration-info="state=='ready'" 
+                      decoration-warning="state=='in_progress'" 
+                      decoration-success="state=='completed'"
+                      sample="1">
+                    <field name="name"/>
+                    <field name="partner_id"/>
+                    <field name="assembly_date"/>
+                    <field name="product_count"/>
+                    <field name="assigned_user_id"/>
+                    <field name="assembly_duration" widget="float_time"/>
+                    <field name="state" widget="badge"/>
+                </tree>
+            </field>
+        </record>
+        
+        <!-- Assembly Sheet Form View -->
+        <record id="view_assembly_sheet_form" model="ir.ui.view">
+            <field name="name">gift.assembly.sheet.form</field>
+            <field name="model">gift.assembly.sheet</field>
+            <field name="arch" type="xml">
+                <form string="Assembly Sheet">
+                    <header>
+                        <button name="action_start_assembly" 
+                                string="▶️ Start Assembly" 
+                                type="object" 
+                                class="btn-primary"
+                                attrs="{'invisible': [('state', '!=', 'ready')]}"/>
+                        <button name="action_complete_assembly" 
+                                string="✅ Complete Assembly" 
+                                type="object" 
+                                class="btn-success"
+                                attrs="{'invisible': [('state', '!=', 'in_progress')]}"/>
+                        <button name="action_print_assembly_sheet" 
+                                string="🖨️ Print" 
+                                type="object" 
+                                class="btn-secondary"/>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" readonly="1"/>
+                            </h1>
+                            <div class="oe_subtitle">
+                                Assembly for <field name="partner_id" readonly="1"/>
+                            </div>
+                        </div>
+                        
+                        <!-- Assembly Progress -->
+                        <div class="alert alert-info" style="margin: 20px 0;">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <h4><field name="product_count"/> Products</h4>
+                                    <small>Total Items to Assemble</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <h4><field name="assigned_user_id" readonly="1"/></h4>
+                                    <small>Assigned Assembler</small>
+                                </div>
+                                <div class="col-md-4">
+                                    <h4><field name="assembly_duration" widget="float_time" readonly="1"/></h4>
+                                    <small>Assembly Duration</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <group>
+                            <group name="assembly_info" string="Assembly Information">
+                                <field name="composition_id" readonly="1"/>
+                                <field name="assembly_date"/>
+                                <field name="start_time" readonly="1"/>
+                                <field name="completion_time" readonly="1"/>
+                            </group>
+                            <group name="special_handling" string="Special Instructions">
+                                <field name="special_instructions" nolabel="1"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Assembly Lines -->
+                        <notebook>
+                            <page string="📦 Assembly Items" name="assembly_lines">
+                                <field name="assembly_line_ids">
+                                    <tree editable="bottom" 
+                                          decoration-success="checked==True" 
+                                          decoration-muted="checked==False">
+                                        <field name="sequence" widget="handle"/>
+                                        <field name="product_id" readonly="1"/>
+                                        <field name="location"/>
+                                        <field name="special_handling"/>
+                                        <field name="checked" widget="boolean_toggle"/>
+                                        <field name="checked_by" readonly="1"/>
+                                        <field name="checked_time" readonly="1"/>
+                                        <field name="notes"/>
+                                    </tree>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <div class="oe_chatter">
+                        <field name="message_follower_ids"/>
+                        <field name="activity_ids"/>
+                        <field name="message_ids"/>
+                    </div>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ========== DELIVERY NOTE VIEWS ========== -->
+        
+        <!-- Delivery Note Tree View -->
+        <record id="view_delivery_note_tree" model="ir.ui.view">
+            <field name="name">gift.delivery.note.tree</field>
+            <field name="model">gift.delivery.note</field>
+            <field name="arch" type="xml">
+                <tree string="Delivery Notes" 
+                      decoration-info="state=='ready'" 
+                      decoration-warning="state=='in_transit'" 
+                      decoration-success="state=='delivered'"
+                      decoration-danger="state=='failed'"
+                      sample="1">
+                    <field name="name"/>
+                    <field name="partner_id"/>
+                    <field name="delivery_date"/>
+                    <field name="actual_delivery_date"/>
+                    <field name="product_count"/>
+                    <field name="carrier_id"/>
+                    <field name="tracking_number"/>
+                    <field name="state" widget="badge"/>
+                </tree>
+            </field>
+        </record>
+        
+        <!-- Delivery Note Form View -->
+        <record id="view_delivery_note_form" model="ir.ui.view">
+            <field name="name">gift.delivery.note.form</field>
+            <field name="model">gift.delivery.note</field>
+            <field name="arch" type="xml">
+                <form string="Delivery Note">
+                    <header>
+                        <button name="action_confirm_delivery" 
+                                string="✅ Confirm Delivery" 
+                                type="object" 
+                                class="btn-success"
+                                attrs="{'invisible': [('state', '!=', 'in_transit')]}"/>
+                        <button name="action_print_delivery_note" 
+                                string="🖨️ Print Delivery Note" 
+                                type="object" 
+                                class="btn-secondary"/>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name" readonly="1"/>
+                            </h1>
+                            <div class="oe_subtitle">
+                                Delivery to <field name="partner_id" readonly="1"/>
+                            </div>
+                        </div>
+                        
+                        <group>
+                            <group name="delivery_info" string="Delivery Information">
+                                <field name="composition_id" readonly="1"/>
+                                <field name="delivery_date"/>
+                                <field name="actual_delivery_date"/>
+                                <field name="carrier_id"/>
+                                <field name="tracking_number"/>
+                            </group>
+                            <group name="delivery_details" string="Delivery Details">
+                                <field name="delivery_person"/>
+                                <field name="recipient_name"/>
+                                <field name="product_count" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <group name="addresses" string="Delivery Address">
+                            <field name="delivery_address" nolabel="1"/>
+                        </group>
+                        
+                        <group name="instructions" string="Special Instructions">
+                            <field name="special_delivery_instructions" nolabel="1"/>
+                        </group>
+                        
+                        <notebook>
+                            <page string="📦 Delivery Items" name="delivery_lines">
+                                <field name="delivery_line_ids">
+                                    <tree editable="bottom">
+                                        <field name="product_id" readonly="1"/>
+                                        <field name="quantity"/>
+                                        <field name="temperature_requirements"/>
+                                        <field name="fragile" widget="boolean_toggle"/>
+                                        <field name="delivered" widget="boolean_toggle"/>
+                                        <field name="delivery_notes"/>
+                                    </tree>
+                                </field>
+                            </page>
+                            
+                            <page string="📸 Delivery Proof" name="delivery_proof">
+                                <group>
+                                    <field name="delivery_signature" widget="image"/>
+                                    <field name="delivery_photo" widget="image"/>
+                                </group>
+                            </page>
+                        </notebook>
+                    </sheet>
+                    <div class="oe_chatter">
+                        <field name="message_follower_ids"/>
+                        <field name="activity_ids"/>
+                        <field name="message_ids"/>
+                    </div>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ========== EXPERIENCE POOL IMPORTER VIEWS ========== -->
+        
+        <!-- Experience Importer Tree View -->
+        <record id="view_experience_importer_tree" model="ir.ui.view">
+            <field name="name">experience.pool.importer.tree</field>
+            <field name="model">experience.pool.importer</field>
+            <field name="arch" type="xml">
+                <tree string="Experience Imports" 
+                      decoration-info="state=='validating'" 
+                      decoration-warning="state=='importing'" 
+                      decoration-success="state=='completed'" 
+                      decoration-danger="state=='failed'">
+                    <field name="name"/>
+                    <field name="import_filename"/>
+                    <field name="file_type"/>
+                    <field name="import_date"/>
+                    <field name="total_rows"/>
+                    <field name="successful_imports"/>
+                    <field name="failed_imports"/>
+                    <field name="state" widget="badge"/>
+                </tree>
+            </field>
+        </record>
+        
+        <!-- Experience Importer Form View -->
+        <record id="view_experience_importer_form" model="ir.ui.view">
+            <field name="name">experience.pool.importer.form</field>
+            <field name="model">experience.pool.importer</field>
+            <field name="arch" type="xml">
+                <form string="Experience Import">
+                    <header>
+                        <button name="action_validate_import" 
+                                string="✅ Validate File" 
+                                type="object" 
+                                class="btn-primary"
+                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                        <button name="action_start_import" 
+                                string="🚀 Start Import" 
+                                type="object" 
+                                class="btn-success"
+                                attrs="{'invisible': [('state', '!=', 'draft'), ('total_rows', '==', 0)]}"/>
+                        <field name="state" widget="statusbar"/>
+                    </header>
+                    
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>
+                                <field name="name"/>
+                            </h1>
+                        </div>
+                        
+                        <group>
+                            <group name="import_config" string="Import Configuration">
+                                <field name="import_file" filename="import_filename"/>
+                                <field name="import_filename" invisible="1"/>
+                                <field name="file_type" widget="radio"/>
+                                <field name="import_date" readonly="1"/>
+                                <field name="imported_by" readonly="1"/>
+                            </group>
+                            <group name="import_results" string="Import Results">
+                                <field name="total_rows" readonly="1"/>
+                                <field name="successful_imports" readonly="1"/>
+                                <field name="failed_imports" readonly="1"/>
+                            </group>
+                        </group>
+                        
+                        <notebook>
+                            <page string="📋 Import Log" name="import_log">
+                                <group>
+                                    <field name="import_log" nolabel="1" readonly="1"/>
+                                </group>
+                            </page>
+                            
+                            <page string="❌ Errors" name="errors" 
+                                  attrs="{'invisible': [('failed_imports', '==', 0)]}">
+                                <group>
+                                    <field name="error_details" nolabel="1" readonly="1"/>
+                                </group>
+                            </page>
+                            
+                            <page string="🎁 Imported Experiences" name="imported_experiences">
+                                <field name="imported_experience_ids" readonly="1">
+                                    <tree>
+                                        <field name="name"/>
+                                        <field name="experience_theme"/>
+                                        <field name="product_count"/>
+                                        <field name="base_cost" widget="monetary"/>
+                                        <field name="lifecycle_stage" widget="badge"/>
+                                    </tree>
+                                </field>
+                            </page>
+                        </notebook>
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ========== ENHANCED PRODUCT TEMPLATE VIEWS ========== -->
+        
+        <!-- Enhanced Product Form View for Business Rules -->
+        <record id="view_product_template_form_business_rules" model="ir.ui.view">
+            <field name="name">product.template.form.business.rules</field>
+            <field name="model">product.template</field>
+            <field name="inherit_id" ref="product.product_template_form_view"/>
+            <field name="arch" type="xml">
+                <xpath expr="//div[@name='button_box']" position="inside">
+                    <button name="action_view_business_rules" 
+                            type="object" 
+                            class="oe_stat_button" 
+                            icon="fa-cogs">
+                        <div class="o_field_widget o_stat_info">
+                            <span class="o_stat_text">Business</span>
+                            <span class="o_stat_text">Rules</span>
+                        </div>
+                    </button>
+                </xpath>
+                
+                <xpath expr="//page[@name='lebiggot_details']" position="after">
+                    <page string="⚖️ Business Rules" name="business_rules">
+                        <group>
+                            <group name="beverage_rules" string="Beverage Classification (R1 &amp; R2)">
+                                <field name="beverage_family"/>
+                                <field name="wine_color" attrs="{'invisible': [('beverage_family', '!=', 'wine')]}"/>
+                                <field name="volume_ml" attrs="{'invisible': [('beverage_family', '==', False)]}"/>
+                            </group>
+                            <group name="specialty_rules" string="Specialty Classification">
+                                <field name="foie_variant" attrs="{'invisible': [('lebiggot_category', '!=', 'foie_gras')]}"/>
+                                <field name="sweets_subtype" attrs="{'invisible': [('lebiggot_category', '!=', 'sweets')]}"/>
+                                <field name="is_paletilla" attrs="{'invisible': [('lebiggot_category', '!=', 'charcuterie')]}"/>
+                                <field name="is_charcuterie_item" attrs="{'invisible': [('lebiggot_category', '!=', 'charcuterie')]}"/>
+                                <field name="is_experience_only"/>
+                            </group>
+                        </group>
+                        
+                        <group>
+                            <group name="substitution_rules" string="Substitution Rules">
+                                <field name="rule_locked"/>
+                                <field name="substitute_group"/>
+                                <field name="supplier_code"/>
+                                <field name="production_batch"/>
+                            </group>
+                            <group name="quality_control" string="Quality Control">
+                                <field name="vintage_year" attrs="{'invisible': [('beverage_family', '!=', 'wine')]}"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Business Rules Information Panel -->
+                        <div class="alert alert-info" style="margin: 20px 0;">
+                            <h5>📋 Applicable Business Rules</h5>
+                            <ul>
+                                <li attrs="{'invisible': [('beverage_family', 'not in', ['cava', 'champagne', 'vermouth', 'tokaj'])]}">
+                                    <strong>R1:</strong> Exact Repetition Rule - This product will be repeated exactly in compositions
+                                </li>
+                                <li attrs="{'invisible': [('beverage_family', '!=', 'wine')]}">
+                                    <strong>R2:</strong> Wine Brand Variation - Same color, different brand, same size &amp; grade
+                                </li>
+                                <li attrs="{'invisible': [('is_experience_only', '!=', True)]}">
+                                    <strong>R3:</strong> Experience Bundle Replacement - Will be replaced with new bundles
+                                </li>
+                                <li attrs="{'invisible': ['&amp;', ('is_paletilla', '!=', True), ('is_charcuterie_item', '!=', True)]}">
+                                    <strong>R4:</strong> Charcuterie Exact Repetition - Will be repeated exactly
+                                </li>
+                                <li attrs="{'invisible': [('lebiggot_category', '!=', 'foie_gras')]}">
+                                    <strong>R5:</strong> Foie Gras Alternation - Duck ↔ Goose alternation
+                                </li>
+                                <li attrs="{'invisible': [('lebiggot_category', '!=', 'sweets')]}">
+                                    <strong>R6:</strong> Sweet Product Rules - Lingote exact, Turrón brand may change
+                                </li>
+                            </ul>
+                        </div>
+                    </page>
+                </xpath>
+            </field>
+        </record>
+        
+        <!-- ========== MENU ACTIONS ========== -->
+        
+        <!-- Batch Processing Action -->
+        <record id="action_batch_processor" model="ir.actions.act_window">
+            <field name="name">Batch Processing</field>
+            <field name="res_model">batch.composition.processor</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">🚀 No batch processes yet!</p>
+                <p>
+                    Create batch processes to generate compositions for multiple clients efficiently.
+                    The system can process up to 200 clients per hour with deterministic business rules.
+                </p>
+            </field>
+        </record>
+        
+        <!-- Assembly Sheets Action -->
+        <record id="action_assembly_sheets" model="ir.actions.act_window">
+            <field name="name">Assembly Sheets</field>
+            <field name="res_model">gift.assembly.sheet</field>
+            <field name="view_mode">tree,form</field>
+            <field name="context">{'search_default_today': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">📦 No assembly sheets yet!</p>
+                <p>
+                    Assembly sheets are generated automatically when compositions are finalized.
+                    They provide step-by-step instructions for warehouse operations.
+                </p>
+            </field>
+        </record>
+        
+        <!-- Delivery Notes Action -->
+        <record id="action_delivery_notes" model="ir.actions.act_window">
+            <field name="name">Delivery Notes</field>
+            <field name="res_model">gift.delivery.note</field>
+            <field name="view_mode">tree,form</field>
+            <field name="context">{'search_default_today': 1}</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">🚚 No delivery notes yet!</p>
+                <p>
+                    Delivery notes track the shipping and delivery of gift compositions.
+                    They include special handling instructions and proof of delivery.
+                </p>
+            </field>
+        </record>
+        
+        <!-- Experience Pool Importer Action -->
+        <record id="action_experience_importer" model="ir.actions.act_window">
+            <field name="name">Experience Pool Importer</field>
+            <field name="res_model">experience.pool.importer</field>
+            <field name="view_mode">tree,form</field>
+            <field name="help" type="html">
+                <p class="o_view_nocontent_smiling_face">📤 No imports yet!</p>
+                <p>
+                    Import curated experience pools from CSV or Excel files.
+                    Each experience should contain 3-5 products with preparation instructions.
+                </p>
+            </field>
+        </record>
+        
+        <!-- Batch Wizard Action -->
+        <record id="action_batch_wizard" model="ir.actions.act_window">
+            <field name="name">🚀 Create Batch Process</field>
+            <field name="res_model">batch.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+        
+        <!-- ========== SEARCH VIEWS ========== -->
+        
+        <!-- Batch Processor Search -->
+        <record id="view_batch_processor_search" model="ir.ui.view">
+            <field name="name">batch.composition.processor.search</field>
+            <field name="model">batch.composition.processor</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="name"/>
+                    <field name="target_year"/>
+                    <field name="state"/>
+                    
+                    <filter name="current_year" string="Current Year" 
+                            domain="[('target_year', '=', context_today().year)]"/>
+                    <filter name="next_year" string="Next Year" 
+                            domain="[('target_year', '=', context_today().year + 1)]"/>
+                    <separator/>
+                    <filter name="processing" string="Processing" domain="[('state', '=', 'processing')]"/>
+                    <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
+                    <filter name="failed" string="Failed" domain="[('state', '=', 'failed')]"/>
+                    
+                    <group expand="0" string="Group By">
+                        <filter name="group_by_year" string="Year" context="{'group_by': 'target_year'}"/>
+                        <filter name="group_by_state" string="Status" context="{'group_by': 'state'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+        
+        <!-- Assembly Sheet Search -->
+        <record id="view_assembly_sheet_search" model="ir.ui.view">
+            <field name="name">gift.assembly.sheet.search</field>
+            <field name="model">gift.assembly.sheet</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="name"/>
+                    <field name="partner_id"/>
+                    <field name="assigned_user_id"/>
+                    <field name="state"/>
+                    
+                    <filter name="today" string="Today" 
+                            domain="[('assembly_date', '=', context_today())]"/>
+                    <filter name="this_week" string="This Week" 
+                            domain="[('assembly_date', '>=', (context_today() - relativedelta(days=7)))]"/>
+                    <separator/>
+                    <filter name="ready" string="Ready" domain="[('state', '=', 'ready')]"/>
+                    <filter name="in_progress" string="In Progress" domain="[('state', '=', 'in_progress')]"/>
+                    <filter name="completed" string="Completed" domain="[('state', '=', 'completed')]"/>
+                    
+                    <group expand="0" string="Group By">
+                        <filter name="group_by_date" string="Assembly Date" context="{'group_by': 'assembly_date'}"/>
+                        <filter name="group_by_state" string="Status" context="{'group_by': 'state'}"/>
+                        <filter name="group_by_user" string="Assigned User" context="{'group_by': 'assigned_user_id'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+        
+        <!-- Delivery Note Search -->
+        <record id="view_delivery_note_search" model="ir.ui.view">
+            <field name="name">gift.delivery.note.search</field>
+            <field name="model">gift.delivery.note</field>
+            <field name="arch" type="xml">
+                <search>
+                    <field name="name"/>
+                    <field name="partner_id"/>
+                    <field name="carrier_id"/>
+                    <field name="tracking_number"/>
+                    <field name="state"/>
+                    
+                    <filter name="today" string="Today" 
+                            domain="[('delivery_date', '=', context_today())]"/>
+                    <filter name="this_week" string="This Week" 
+                            domain="[('delivery_date', '>=', (context_today() - relativedelta(days=7)))]"/>
+                    <separator/>
+                    <filter name="ready" string="Ready" domain="[('state', '=', 'ready')]"/>
+                    <filter name="in_transit" string="In Transit" domain="[('state', '=', 'in_transit')]"/>
+                    <filter name="delivered" string="Delivered" domain="[('state', '=', 'delivered')]"/>
+                    
+                    <group expand="0" string="Group By">
+                        <filter name="group_by_date" string="Delivery Date" context="{'group_by': 'delivery_date'}"/>
+                        <filter name="group_by_state" string="Status" context="{'group_by': 'state'}"/>
+                        <filter name="group_by_carrier" string="Carrier" context="{'group_by': 'carrier_id'}"/>
+                    </group>
+                </search>
+            </field>
+        </record>
+        
+    </data>
+</odoo>
