@@ -105,7 +105,7 @@
         
         # Wizard Views
         'wizard/composition_wizard_views.xml',
-        'wizard/rebuild_history_wizard_views.xml',
+        # 'wizard/rebuild_history_wizard_views.xml',
         
         # Core Views
         'views/client_history_views.xml',
