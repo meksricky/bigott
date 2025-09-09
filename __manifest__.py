@@ -116,9 +116,9 @@
         
         # Advanced Feature Views
         'views/batch_processing_views.xml',
-        'views/assembly_delivery_views.xml',
-        'views/experience_management_views.xml',
-        'views/document_management_views.xml',
+        # 'views/assembly_delivery_views.xml',
+        # 'views/experience_management_views.xml',
+        # 'views/document_management_views.xml',
         
         # Menu Structure
         'views/menu_views.xml',
