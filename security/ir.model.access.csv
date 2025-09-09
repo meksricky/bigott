@@ -17,4 +17,4 @@ access_assembly_line_user,assembly.line.user,model_gift_assembly_line,base.group
 access_delivery_note_user,delivery.note.user,model_gift_delivery_note,base.group_user,1,1,1,1
 access_delivery_line_user,delivery.line.user,model_gift_delivery_line,base.group_user,1,1,1,1
 access_experience_importer_user,experience.importer.user,model_experience_pool_importer,base.group_user,1,1,1,1
-access_experience_line_user,experience.line.user,model_experience_pool_line,base.group_user,1,1,1,1
+
