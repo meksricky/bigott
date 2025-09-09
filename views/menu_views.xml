@@ -105,11 +105,11 @@
                   action="action_gift_experience" 
                   sequence="10"/>
         
-        <menuitem id="menu_experience_importer" 
+        <!-- <menuitem id="menu_experience_importer" 
                   name="Import Experience Pools" 
                   parent="menu_experience_management" 
                   action="action_experience_importer" 
-                  sequence="20"/>
+                  sequence="20"/> -->
         
         <!-- Product Configuration -->
         <menuitem id="menu_product_config" 
