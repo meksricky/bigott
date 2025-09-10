@@ -42,7 +42,7 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         # 'data/cron_jobs.xml',
         'data/default_data.xml',
         'data/sequences.xml',
-        'data/system_config.xml',
+        # 'data/system_config.xml',
         'data/product_categories_data.xml',
         
         # Views - Core
