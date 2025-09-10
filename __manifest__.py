@@ -72,7 +72,7 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         # 'wizard/ml_training_wizard_views.xml',
         # 'wizard/batch_composition_wizard_views.xml',
         # 'wizard/rebuild_history_wizard_views.xml',
-        'wizard/composition_wizard.py',
+        # 'wizard/composition_wizard.py',
         
     ],
     'demo': [
