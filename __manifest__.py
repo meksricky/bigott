@@ -59,19 +59,19 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'views/integration_manager_views.xml',
         # 'views/stock_aware_composition_views.xml',
         # 'views/business_rules_engine_views.xml',
-        'views/composition_engine_views.xml',
-        'views/document_generation_views.xml',
+        # 'views/composition_engine_views.xml',
+        # 'views/document_generation_views.xml',
         
         # Views - Rebuilding history
-        'views/rebuild_history_wizard_views.xml',
+        # 'views/rebuild_history_wizard_views.xml',
         
         # Menu
         'views/menu_views.xml',
         
         # Wizards
         'wizard/ml_training_wizard_views.xml',
-        'wizard/batch_composition_wizard_views.xml',
-        'wizard/rebuild_history_wizard_views.xml',
+        # 'wizard/batch_composition_wizard_views.xml',
+        # 'wizard/rebuild_history_wizard_views.xml',
         'wizard/composition_wizard.py',
         
     ],
