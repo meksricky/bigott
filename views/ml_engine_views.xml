@@ -1,93 +1,419 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <data>
-        
-        <!-- ML Engine Form View -->
-        <record id="view_ml_recommendation_engine_form" model="ir.ui.view">
-            <field name="name">ml.recommendation.engine.form</field>
-            <field name="model">ml.recommendation.engine</field>
-            <field name="arch" type="xml">
-                <form string="ML Recommendation Engine" create="false" delete="false">
-                    <header>
-                        <button name="%(action_ml_training_wizard)d" 
-                                string="🎯 Train Models" 
-                                type="action" 
-                                class="btn-primary"/>
-                        <field name="is_model_trained" widget="badge" 
-                               decoration-success="is_model_trained == True"
-                               decoration-danger="is_model_trained == False"/>
-                    </header>
-                    <sheet>
-                        <div class="oe_title">
-                            <h1>🧠 ML Recommendation Engine</h1>
-                            <h2>Status &amp; Performance Metrics</h2>
-                        </div>
-                        
-                        <group>
-                            <group name="model_info" string="Model Information">
-                                <field name="model_version" readonly="1"/>
-                                <field name="last_training_date" readonly="1"/>
-                                <field name="training_samples" readonly="1"/>
-                                <field name="model_accuracy" readonly="1" widget="percentage"/>
-                            </group>
-                            <group name="performance" string="Performance Metrics">
-                                <field name="is_model_trained" readonly="1"/>
-                                <!-- Add more performance fields as needed -->
-                            </group>
+    <!-- ML Recommendation Engine Views -->
+    
+    <!-- Form View -->
+    <record id="view_ml_recommendation_engine_form" model="ir.ui.view">
+        <field name="name">ml.recommendation.engine.form</field>
+        <field name="model">ml.recommendation.engine</field>
+        <field name="arch" type="xml">
+            <form string="ML Recommendation Engine">
+                <header>
+                    <button name="%(action_ml_training_wizard)d" 
+                            type="action" 
+                            string="Train Model" 
+                            class="btn-primary"
+                            icon="fa-brain"/>
+                    <button name="evaluate_model_performance" 
+                            type="object" 
+                            string="Evaluate Model" 
+                            attrs="{'invisible': [('is_model_trained', '=', False)]}"
+                            icon="fa-chart-line"/>
+                    <field name="is_model_trained" invisible="1"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Engine Name"/>
+                        </h1>
+                        <h3>
+                            <field name="model_version" readonly="1"/>
+                        </h3>
+                    </div>
+                    
+                    <group>
+                        <group string="Training Status">
+                            <field name="is_model_trained" widget="boolean_toggle"/>
+                            <field name="last_training_date" readonly="1"/>
+                            <field name="training_samples" readonly="1"/>
+                            <field name="training_duration" readonly="1" widget="float_time"/>
                         </group>
+                        <group string="Model Performance">
+                            <field name="model_accuracy" readonly="1" widget="percentage"/>
+                            <field name="r2_score" readonly="1" digits="[16,4]"/>
+                            <field name="mse_score" readonly="1" digits="[16,4]"/>
+                            <field name="cv_score" readonly="1" digits="[16,4]"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Configuration">
+                            <group>
+                                <group string="Training Settings">
+                                    <field name="min_training_samples"/>
+                                    <field name="test_size" widget="percentage"/>
+                                    <field name="random_state"/>
+                                </group>
+                                <group string="Auto-Training">
+                                    <field name="auto_retrain_enabled" widget="boolean_toggle"/>
+                                    <field name="retrain_frequency_days" attrs="{'invisible': [('auto_retrain_enabled', '=', False)]}"/>
+                                </group>
+                            </group>
+                        </page>
                         
-                        <!-- Model Performance Dashboard -->
-                        <div class="row" style="margin-top: 20px;">
-                            <div class="col-md-4">
-                                <div class="panel panel-info">
-                                    <div class="panel-heading">
-                                        <h4>📊 Training Data</h4>
-                                    </div>
-                                    <div class="panel-body">
-                                        <p><strong>Samples:</strong> <field name="training_samples" readonly="1" nolabel="1"/></p>
-                                        <p><strong>Last Updated:</strong> <field name="last_training_date" readonly="1" nolabel="1"/></p>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <div class="panel panel-success">
-                                    <div class="panel-heading">
-                                        <h4>🎯 Model Accuracy</h4>
-                                    </div>
-                                    <div class="panel-body">
-                                        <p><strong>Accuracy:</strong> <field name="model_accuracy" readonly="1" nolabel="1" widget="percentage"/></p>
-                                        <p><strong>Version:</strong> <field name="model_version" readonly="1" nolabel="1"/></p>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="col-md-4">
-                                <div class="panel panel-warning">
-                                    <div class="panel-heading">
-                                        <h4>⚡ Status</h4>
-                                    </div>
-                                    <div class="panel-body">
-                                        <p><strong>Trained:</strong> <field name="is_model_trained" readonly="1" nolabel="1"/></p>
-                                        <p><strong>Ready:</strong> <span class="text-success">✓ Active</span></p>
-                                    </div>
+                        <page string="Learning Data">
+                            <field name="learning_data_ids" readonly="1">
+                                <tree>
+                                    <field name="partner_id"/>
+                                    <field name="target_budget"/>
+                                    <field name="actual_cost"/>
+                                    <field name="product_count"/>
+                                    <field name="created_date"/>
+                                    <field name="used_for_training"/>
+                                </tree>
+                            </field>
+                        </page>
+                        
+                        <page string="Features">
+                            <group>
+                                <field name="feature_names" widget="text" readonly="1"/>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Tree View -->
+    <record id="view_ml_recommendation_engine_tree" model="ir.ui.view">
+        <field name="name">ml.recommendation.engine.tree</field>
+        <field name="model">ml.recommendation.engine</field>
+        <field name="arch" type="xml">
+            <tree string="ML Engines">
+                <field name="name"/>
+                <field name="model_version"/>
+                <field name="is_model_trained" widget="boolean_toggle"/>
+                <field name="model_accuracy" widget="percentage"/>
+                <field name="last_training_date"/>
+                <field name="training_samples"/>
+            </tree>
+        </field>
+    </record>
+    
+    <!-- AI Product Recommender Views -->
+    
+    <record id="view_ai_product_recommender_form" model="ir.ui.view">
+        <field name="name">ai.product.recommender.form</field>
+        <field name="model">ai.product.recommender</field>
+        <field name="arch" type="xml">
+            <form string="AI Product Recommender">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Recommender Name"/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Configuration">
+                            <field name="min_confidence_threshold" widget="percentage"/>
+                            <field name="max_recommendation_attempts"/>
+                        </group>
+                        <group string="Learning Settings">
+                            <field name="learning_enabled" widget="boolean_toggle"/>
+                            <field name="feedback_weight" widget="percentage" attrs="{'invisible': [('learning_enabled', '=', False)]}"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Integration Manager Views -->
+    
+    <record id="view_integration_manager_form" model="ir.ui.view">
+        <field name="name">integration.manager.form</field>
+        <field name="model">integration.manager</field>
+        <field name="arch" type="xml">
+            <form string="Integration Manager">
+                <header>
+                    <button name="analyze_engine_performance" 
+                            type="object" 
+                            string="Analyze Performance" 
+                            class="btn-secondary"
+                            icon="fa-chart-bar"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Engine Preferences">
+                            <field name="use_ml_engine" widget="boolean_toggle"/>
+                            <field name="use_ai_recommender" widget="boolean_toggle"/>
+                            <field name="use_stock_aware" widget="boolean_toggle"/>
+                            <field name="use_business_rules" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Strategy">
+                            <field name="fallback_strategy"/>
+                            <field name="success_rate" readonly="1" widget="percentage"/>
+                            <field name="last_generation_time" readonly="1"/>
+                            <field name="total_generations" readonly="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- ML Training Wizard Views -->
+    
+    <record id="view_ml_training_wizard_form" model="ir.ui.view">
+        <field name="name">ml.training.wizard.form</field>
+        <field name="model">ml.training.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Train ML Model">
+                <sheet>
+                    <div class="alert alert-info" role="alert">
+                        <h4 class="alert-heading">ML Model Training</h4>
+                        <p>Configure and train the machine learning model for gift recommendations.</p>
+                    </div>
+                    
+                    <group>
+                        <group string="Training Configuration">
+                            <field name="training_type" widget="radio"/>
+                            <field name="date_from" attrs="{'invisible': [('training_type', '!=', 'custom')], 'required': [('training_type', '=', 'custom')]}"/>
+                            <field name="date_to" attrs="{'invisible': [('training_type', '!=', 'custom')], 'required': [('training_type', '=', 'custom')]}"/>
+                        </group>
+                        <group string="Training Info">
+                            <field name="estimated_samples" readonly="1"/>
+                            <field name="min_samples" readonly="1"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Data Sources">
+                            <group>
+                                <field name="use_sales_data" widget="boolean_toggle"/>
+                                <field name="use_composition_data" widget="boolean_toggle"/>
+                                <field name="use_client_history" widget="boolean_toggle"/>
+                                <field name="use_learning_data" widget="boolean_toggle"/>
+                            </group>
+                        </page>
+                        
+                        <page string="Model Settings">
+                            <group>
+                                <group string="Training Parameters">
+                                    <field name="test_size" widget="percentage"/>
+                                    <field name="cross_validation_folds"/>
+                                    <field name="model_type" widget="radio"/>
+                                </group>
+                                <group string="Advanced">
+                                    <field name="feature_selection" widget="boolean_toggle"/>
+                                    <field name="hyperparameter_tuning" widget="boolean_toggle"/>
+                                </group>
+                            </group>
+                        </page>
+                        
+                        <page string="Current Model">
+                            <field name="current_model_info" widget="text" readonly="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+                <footer>
+                    <button name="action_train_model" 
+                            type="object" 
+                            string="Train Model" 
+                            class="btn-primary"
+                            icon="fa-brain"/>
+                    <button name="action_evaluate_model" 
+                            type="object" 
+                            string="Evaluate Current" 
+                            class="btn-secondary"
+                            icon="fa-chart-line"/>
+                    <button name="action_export_training_data" 
+                            type="object" 
+                            string="Export Data" 
+                            class="btn-secondary"
+                            icon="fa-download"/>
+                    <button name="action_reset_model" 
+                            type="object" 
+                            string="Reset Model" 
+                            class="btn-danger"
+                            icon="fa-trash"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    
+    <!-- ML Training Reset Confirmation -->
+    
+    <record id="view_ml_training_reset_confirm_form" model="ir.ui.view">
+        <field name="name">ml.training.reset.confirm.form</field>
+        <field name="model">ml.training.reset.confirm</field>
+        <field name="arch" type="xml">
+            <form string="Confirm Model Reset">
+                <sheet>
+                    <div class="alert alert-danger" role="alert">
+                        <h4 class="alert-heading">⚠️ Warning: Model Reset</h4>
+                        <p>This action will permanently delete the trained ML model.</p>
+                        <p>All training data and model parameters will be lost.</p>
+                    </div>
+                    
+                    <group>
+                        <field name="ml_engine_id" invisible="1"/>
+                        <field name="keep_learning_data" widget="boolean_toggle"/>
+                        <field name="confirm_text" placeholder="Type 'RESET' to confirm" required="1"/>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_confirm_reset" 
+                            type="object" 
+                            string="Confirm Reset" 
+                            class="btn-danger"
+                            icon="fa-exclamation-triangle"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Actions -->
+    
+    <record id="action_ml_recommendation_engine" model="ir.actions.act_window">
+        <field name="name">ML Recommendation Engine</field>
+        <field name="res_model">ml.recommendation.engine</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Configure ML Recommendation Engine
+            </p>
+            <p>
+                Train and manage machine learning models for intelligent gift recommendations.
+            </p>
+        </field>
+    </record>
+    
+    <record id="action_ai_product_recommender" model="ir.actions.act_window">
+        <field name="name">AI Product Recommender</field>
+        <field name="res_model">ai.product.recommender</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+    
+    <record id="action_integration_manager" model="ir.actions.act_window">
+        <field name="name">Integration Manager</field>
+        <field name="res_model">integration.manager</field>
+        <field name="view_mode">form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                Configure AI/ML Integration
+            </p>
+            <p>
+                Manage how different AI and ML engines work together.
+            </p>
+        </field>
+    </record>
+    
+    <record id="action_ml_training_wizard" model="ir.actions.act_window">
+        <field name="name">Train ML Model</field>
+        <field name="res_model">ml.training.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+    
+    <!-- Menu Items -->
+    
+    <menuitem id="menu_ml_ai_root"
+              name="AI/ML Systems"
+              parent="sale.menu_sale_config"
+              sequence="100"/>
+    
+    <menuitem id="menu_ml_recommendation_engine"
+              name="ML Engine"
+              parent="menu_ml_ai_root"
+              action="action_ml_recommendation_engine"
+              sequence="10"/>
+    
+    <menuitem id="menu_ai_product_recommender"
+              name="AI Recommender"
+              parent="menu_ml_ai_root"
+              action="action_ai_product_recommender"
+              sequence="20"/>
+    
+    <menuitem id="menu_integration_manager"
+              name="Integration Manager"
+              parent="menu_ml_ai_root"
+              action="action_integration_manager"
+              sequence="30"/>
+    
+    <menuitem id="menu_ml_training"
+              name="Train Model"
+              parent="menu_ml_ai_root"
+              action="action_ml_training_wizard"
+              sequence="40"/>
+    
+    <!-- Dashboard View (Optional) -->
+    
+    <record id="view_ml_dashboard" model="ir.ui.view">
+        <field name="name">ml.dashboard</field>
+        <field name="model">ml.recommendation.engine</field>
+        <field name="priority">20</field>
+        <field name="arch" type="xml">
+            <form string="ML/AI Dashboard" create="false" edit="false">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>AI/ML Performance Dashboard</h1>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-body text-center">
+                                    <h2><field name="model_accuracy" widget="percentage"/></h2>
+                                    <p>Model Accuracy</p>
                                 </div>
                             </div>
                         </div>
-                        
-                    </sheet>
-                </form>
-            </field>
-        </record>
-        
-        <!-- ML Engine Action -->
-        <record id="action_ml_recommendation_engine" model="ir.actions.act_window">
-            <field name="name">🧠 ML Engine Status</field>
-            <field name="res_model">ml.recommendation.engine</field>
-            <field name="view_mode">form</field>
-            <field name="target">current</field>
-            <field name="limit">1</field>
-        </record>
-        
-    </data>
+                        <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-body text-center">
+                                    <h2><field name="training_samples"/></h2>
+                                    <p>Training Samples</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card">
+                                <div class="card-body text-center">
+                                    <h2><field name="r2_score" digits="[16,3]"/></h2>
+                                    <p>R² Score</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-4">
+                        <div class="col-md-12">
+                            <button name="%(action_ml_training_wizard)d" 
+                                    type="action" 
+                                    string="Train New Model" 
+                                    class="btn-primary btn-lg"
+                                    icon="fa-brain"/>
+                            <button name="evaluate_model_performance" 
+                                    type="object" 
+                                    string="Evaluate Performance" 
+                                    class="btn-secondary btn-lg"
+                                    icon="fa-chart-line"/>
+                        </div>
+                    </div>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
 </odoo>

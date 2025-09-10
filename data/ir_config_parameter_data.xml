@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- data/ir_config_parameter_data.xml -->
+    <data noupdate="1">
+        
+        <!-- ML/AI Configuration Parameters -->
+        <record id="config_ml_enabled" model="ir.config_parameter">
+            <field name="key">lebigott_ai.ml_enabled</field>
+            <field name="value">true</field>
+        </record>
+        
+        <record id="config_ollama_enabled" model="ir.config_parameter">
+            <field name="key">lebigott_ai.ollama_enabled</field>
+            <field name="value">true</field>
+        </record>
+        
+        <record id="config_ollama_url" model="ir.config_parameter">
+            <field name="key">lebigott_ai.ollama_url</field>
+            <field name="value">http://localhost:11434</field>
+        </record>
+        
+        <record id="config_ollama_model" model="ir.config_parameter">
+            <field name="key">lebigott_ai.ollama_model</field>
+            <field name="value">llama3.2:3b</field>
+        </record>
+        
+        <record id="config_auto_training" model="ir.config_parameter">
+            <field name="key">lebigott_ai.auto_training_enabled</field>
+            <field name="value">false</field>
+        </record>
+        
+        <record id="config_min_training_samples" model="ir.config_parameter">
+            <field name="key">lebigott_ai.min_training_samples</field>
+            <field name="value">50</field>
+        </record>
+        
+        <record id="config_max_recommendation_attempts" model="ir.config_parameter">
+            <field name="key">lebigott_ai.max_recommendation_attempts</field>
+            <field name="value">3</field>
+        </record>
+        
+        <record id="config_budget_flexibility" model="ir.config_parameter">
+            <field name="key">lebigott_ai.budget_flexibility</field>
+            <field name="value">0.15</field>
+        </record>
+        
+        <record id="config_cache_ttl" model="ir.config_parameter">
+            <field name="key">lebigott_ai.cache_ttl_hours</field>
+            <field name="value">24</field>
+        </record>
+        
+        <record id="config_enable_learning" model="ir.config_parameter">
+            <field name="key">lebigott_ai.enable_learning</field>
+            <field name="value">true</field>
+        </record>
+        
+    </data>
+
+</odoo

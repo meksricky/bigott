@@ -2,501 +2,640 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import json
 import logging
-import random
+import numpy as np
 from collections import defaultdict
-import statistics
+from datetime import datetime, timedelta
+import random
 
 _logger = logging.getLogger(__name__)
 
 class AIProductRecommender(models.Model):
     _name = 'ai.product.recommender'
-    _description = 'AI-Powered Product Recommendation Engine'
+    _description = 'AI-Powered Product Recommendation System'
     
-    def recommend_products_for_budget(self, partner_id, target_budget, dietary_restrictions=None, 
-                                    notes_text=None, attempt_number=1):
+    name = fields.Char(string="Recommender Name", default="AI Product Recommender")
+    
+    # Configuration
+    min_confidence_threshold = fields.Float(string="Min Confidence Threshold", default=0.6)
+    max_recommendation_attempts = fields.Integer(string="Max Attempts", default=3)
+    
+    # Learning Settings
+    learning_enabled = fields.Boolean(string="Learning Enabled", default=True)
+    feedback_weight = fields.Float(string="Feedback Weight", default=0.2)
+    
+    @api.model
+    def get_ai_recommendations(self, partner_id, target_budget, dietary_restrictions=None, 
+                              notes_text=None, use_ml=True):
         """
-        Smart AI recommendation system that learns from sales data
-        Returns products within ±5% budget (extendable to ±15%)
+        Main entry point for AI recommendations
+        Integrates with ML engine when available
         """
         
-        # Get validated product pool
-        available_products = self._get_validated_product_pool(dietary_restrictions)
+        _logger.info(f"Starting AI recommendations for partner {partner_id}, budget €{target_budget}")
+        
+        # Check if ML engine is available and trained
+        ml_engine = self.env['ml.recommendation.engine'].get_or_create_engine()
+        
+        if use_ml and ml_engine.is_model_trained:
+            # Use full ML recommendations
+            return ml_engine.get_smart_recommendations(
+                partner_id=partner_id,
+                target_budget=target_budget,
+                dietary_restrictions=dietary_restrictions,
+                notes_text=notes_text,
+                max_attempts=self.max_recommendation_attempts
+            )
+        else:
+            # Use AI-enhanced recommendations without ML
+            return self._ai_only_recommendations(
+                partner_id=partner_id,
+                target_budget=target_budget,
+                dietary_restrictions=dietary_restrictions,
+                notes_text=notes_text
+            )
+    
+    def _ai_only_recommendations(self, partner_id, target_budget, dietary_restrictions=None, notes_text=None):
+        """AI recommendations without ML model"""
+        
+        # Get client insights
+        client_insights = self._analyze_client_comprehensive(partner_id, notes_text)
+        
+        # Get available products
+        available_products = self._get_filtered_products(dietary_restrictions)
+        
         if not available_products:
-            raise UserError("No available products meet your criteria")
+            raise UserError("No products available matching the criteria")
         
-        # Get AI-powered client insights
-        client_insights = self._get_ai_client_insights(partner_id, notes_text)
-        
-        # Get budget flexibility parameters
-        budget_params = self._calculate_budget_flexibility(target_budget, client_insights, attempt_number)
-        
-        # Use AI to score and select products
+        # AI score products
         scored_products = self._ai_score_products(
-            available_products, client_insights, target_budget, notes_text
+            available_products, 
+            client_insights, 
+            target_budget, 
+            notes_text
         )
         
-        # Smart budget-aware selection
-        selected_products = self._smart_budget_selection(
-            scored_products, budget_params, client_insights
+        # Select optimal products
+        selected_products = self._ai_select_products(
+            scored_products, 
+            target_budget, 
+            client_insights
         )
         
-        # Learn from this recommendation for future use
-        self._record_recommendation_for_learning(partner_id, selected_products, client_insights)
+        if not selected_products:
+            raise UserError("Could not find suitable product combination")
+        
+        # Generate result
+        actual_cost = sum(p.list_price for p in selected_products)
+        variance = abs(actual_cost - target_budget) / target_budget * 100
         
         return {
             'products': selected_products,
-            'actual_cost': sum(p.list_price for p in selected_products),
-            'ai_reasoning': self._generate_ai_reasoning(selected_products, client_insights, target_budget),
-            'confidence': self._calculate_ai_confidence(selected_products, client_insights),
-            'learning_applied': True
+            'actual_cost': actual_cost,
+            'budget_variance': variance,
+            'ai_confidence': self._calculate_confidence(selected_products, client_insights),
+            'reasoning': self._generate_ai_reasoning(selected_products, client_insights, target_budget),
+            'method': 'AI-Enhanced',
+            'client_insights': client_insights
         }
     
-    def _get_validated_product_pool(self, dietary_restrictions=None):
-        """Get products that pass all validation checks"""
+    def _analyze_client_comprehensive(self, partner_id, notes_text=None):
+        """Comprehensive client analysis with AI enhancement"""
         
-        # Base domain for valid products
+        # Get historical data
+        history_analysis = self.env['client.order.history'].analyze_client_patterns(partner_id)
+        
+        # AI text analysis
+        ai_enhanced = {}
+        if notes_text and self._ollama_enabled():
+            ai_enhanced = self._ai_analyze_notes(notes_text, history_analysis)
+        
+        # Market position
+        market_position = self._analyze_market_position(partner_id)
+        
+        # Learning from past recommendations
+        past_recommendations = self._get_past_recommendations(partner_id)
+        
+        return {
+            'partner_id': partner_id,
+            'historical': history_analysis,
+            'ai_enhanced': ai_enhanced,
+            'market_position': market_position,
+            'past_recommendations': past_recommendations,
+            'confidence': self._calculate_analysis_confidence(history_analysis, ai_enhanced)
+        }
+    
+    def _ai_analyze_notes(self, notes_text, base_analysis):
+        """AI-powered notes analysis using Ollama"""
+        
+        if not self._ollama_enabled():
+            return self._fallback_notes_analysis(notes_text)
+        
+        try:
+            prompt = f"""
+            Analyze these luxury gift notes for a client with this history:
+            - Years of data: {base_analysis.get('years_of_data', 0)}
+            - Budget trend: {base_analysis.get('budget_trend', 'stable')}
+            - Average satisfaction: {base_analysis.get('average_satisfaction', 0)}/5
+            
+            Notes: "{notes_text}"
+            
+            Extract JSON with these fields:
+            {{
+                "style_preference": "traditional|modern|premium|eclectic",
+                "price_sensitivity": "low|medium|high",
+                "novelty_seeking": true/false,
+                "sophistication_level": 1-10,
+                "flavor_profile": "bold|mild|varied|premium",
+                "occasion_type": "business|personal|celebration",
+                "quality_focus": "artisanal|branded|exclusive|value",
+                "gift_purpose": "appreciation|celebration|relationship|incentive",
+                "personalization_need": "high|medium|low",
+                "cultural_preferences": ["spanish", "french", "italian", "international"]
+            }}
+            
+            Return only valid JSON.
+            """
+            
+            response = self._ollama_complete(prompt)
+            if response:
+                import re
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group())
+        
+        except Exception as e:
+            _logger.warning(f"AI notes analysis failed: {e}")
+        
+        return self._fallback_notes_analysis(notes_text)
+    
+    def _fallback_notes_analysis(self, notes_text):
+        """Rule-based fallback when AI unavailable"""
+        
+        notes_lower = (notes_text or '').lower()
+        
+        return {
+            'style_preference': self._detect_style(notes_lower),
+            'price_sensitivity': self._detect_price_sensitivity(notes_lower),
+            'novelty_seeking': any(word in notes_lower for word in ['variety', 'different', 'new', 'unique']),
+            'sophistication_level': 7,
+            'flavor_profile': 'varied',
+            'occasion_type': self._detect_occasion(notes_lower),
+            'quality_focus': 'artisanal',
+            'gift_purpose': 'appreciation',
+            'personalization_need': 'medium',
+            'cultural_preferences': ['spanish']
+        }
+    
+    def _detect_style(self, notes_lower):
+        """Detect style preference from notes"""
+        if any(word in notes_lower for word in ['traditional', 'classic', 'authentic']):
+            return 'traditional'
+        elif any(word in notes_lower for word in ['modern', 'contemporary', 'innovative']):
+            return 'modern'
+        elif any(word in notes_lower for word in ['premium', 'luxury', 'exclusive']):
+            return 'premium'
+        elif any(word in notes_lower for word in ['varied', 'diverse', 'eclectic']):
+            return 'eclectic'
+        return 'traditional'
+    
+    def _detect_price_sensitivity(self, notes_lower):
+        """Detect price sensitivity from notes"""
+        if any(word in notes_lower for word in ['budget', 'affordable', 'cost', 'value']):
+            return 'high'
+        elif any(word in notes_lower for word in ['premium', 'luxury', 'best', 'finest']):
+            return 'low'
+        return 'medium'
+    
+    def _detect_occasion(self, notes_lower):
+        """Detect occasion type from notes"""
+        if any(word in notes_lower for word in ['business', 'corporate', 'client', 'partner']):
+            return 'business'
+        elif any(word in notes_lower for word in ['birthday', 'anniversary', 'celebration']):
+            return 'celebration'
+        return 'personal'
+    
+    def _get_filtered_products(self, dietary_restrictions=None):
+        """Get products filtered by availability and dietary restrictions"""
+        
         domain = [
             ('active', '=', True),
             ('sale_ok', '=', True),
-            ('default_code', '!=', False),  # Must have internal reference
             ('list_price', '>', 0),
-            ('lebiggot_category', '!=', False),  # Must have category
+            ('lebiggot_category', '!=', False),
         ]
         
         products = self.env['product.template'].search(domain)
         
-        # Stock validation
-        validated_products = []
-        for product in products:
-            if self._validate_product_availability(product):
-                validated_products.append(product)
-        
-        # Dietary restrictions filtering
+        # Filter by dietary restrictions
         if dietary_restrictions:
-            validated_products = self._apply_dietary_filters(validated_products, dietary_restrictions)
+            products = products.filtered(
+                lambda p: self._check_dietary_compliance(p, dietary_restrictions)
+            )
         
-        return validated_products
+        # Filter by stock availability
+        products = products.filtered(lambda p: self._check_stock_availability(p))
+        
+        return products
     
-    def _validate_product_availability(self, product):
-        """Validate product stock and business rules"""
+    def _check_dietary_compliance(self, product, restrictions):
+        """Check if product meets dietary restrictions"""
         
-        # Check stock for stockable products
-        if product.type == 'product':
-            stock_quants = self.env['stock.quant'].search([
-                ('product_id', 'in', product.product_variant_ids.ids),
-                ('location_id.usage', '=', 'internal')
-            ])
-            available_qty = sum(quant.available_quantity for quant in stock_quants)
-            if available_qty <= 0:
-                return False
-        
-        # Internal reference validation
-        if not product.default_code or not product.default_code.strip():
-            return False
-        
-        # Category validation
-        if not product.lebiggot_category:
-            return False
+        for restriction in restrictions:
+            if restriction == 'vegan':
+                if hasattr(product, 'is_vegan') and not product.is_vegan:
+                    return False
+                if any(word in product.name.lower() for word in ['meat', 'fish', 'dairy', 'cheese']):
+                    return False
+            
+            elif restriction == 'halal':
+                if hasattr(product, 'is_halal') and not product.is_halal:
+                    return False
+                if any(word in product.name.lower() for word in ['pork', 'wine', 'alcohol']):
+                    return False
+            
+            elif restriction == 'non_alcoholic':
+                if any(word in product.name.lower() for word in ['wine', 'champagne', 'alcohol']):
+                    return False
         
         return True
     
-    def _get_ai_client_insights(self, partner_id, notes_text=None):
-        """Get comprehensive AI-powered client analysis"""
+    def _check_stock_availability(self, product):
+        """Check if product has available stock"""
         
-        # Base analysis from existing system
-        base_analysis = self.env['client.order.history'].analyze_client_patterns(partner_id)
+        if product.type != 'product':
+            return True
         
-        # Enhanced AI analysis using Ollama if available
-        ai_insights = {}
-        if self.env['composition.engine']._ollama_enabled() and notes_text:
-            ai_insights = self._get_ollama_client_insights(partner_id, notes_text, base_analysis)
+        stock_quants = self.env['stock.quant'].search([
+            ('product_id', 'in', product.product_variant_ids.ids),
+            ('location_id.usage', '=', 'internal')
+        ])
         
-        # Merge insights
-        return {
-            'historical': base_analysis,
-            'ai_enhanced': ai_insights,
-            'partner_id': partner_id,
-            'notes': notes_text
-        }
-    
-    def _get_ollama_client_insights(self, partner_id, notes_text, base_analysis):
-        """Use Ollama AI to analyze client preferences"""
-        
-        partner = self.env['res.partner'].browse(partner_id)
-        
-        # Build comprehensive prompt
-        prompt = f"""
-        Analyze this client for luxury gourmet gift recommendations:
-        
-        CLIENT: {partner.name}
-        NOTES: {notes_text}
-        HISTORY: {base_analysis.get('years_of_data', 0)} years, avg budget €{base_analysis.get('average_budget', 0):.0f}
-        TREND: {base_analysis.get('budget_trend', 'unknown')}
-        SATISFACTION: {base_analysis.get('average_satisfaction', 0)}/5
-        
-        Extract and return JSON with:
-        {{
-            "style_preference": "traditional|modern|premium|experimental",
-            "price_sensitivity": "low|medium|high",
-            "novelty_seeking": true/false,
-            "category_priorities": ["category1", "category2", ...],
-            "flavor_profile": "bold|mild|varied|premium",
-            "gift_occasion": "business|personal|celebration|thank_you",
-            "risk_tolerance": "conservative|moderate|adventurous"
-        }}
-        
-        Only return valid JSON.
-        """
-        
-        try:
-            ollama_response = self.env['composition.engine']._ollama_complete(prompt)
-            if ollama_response:
-                # Extract JSON from response
-                import re
-                json_match = re.search(r'\{.*\}', ollama_response, re.DOTALL)
-                if json_match:
-                    return json.loads(json_match.group())
-        except Exception as e:
-            _logger.warning(f"Ollama analysis failed: {e}")
-        
-        # Fallback to rule-based analysis
-        return self._fallback_client_analysis(notes_text, base_analysis)
-    
-    def _fallback_client_analysis(self, notes_text, base_analysis):
-        """Rule-based client analysis when AI is unavailable"""
-        
-        notes_lower = (notes_text or '').lower()
-        
-        # Style preference
-        if any(word in notes_lower for word in ['traditional', 'classic', 'authentic']):
-            style = 'traditional'
-        elif any(word in notes_lower for word in ['modern', 'contemporary', 'innovative']):
-            style = 'modern'
-        elif any(word in notes_lower for word in ['premium', 'luxury', 'exclusive']):
-            style = 'premium'
-        else:
-            style = 'traditional'  # Default
-        
-        return {
-            'style_preference': style,
-            'price_sensitivity': 'medium',
-            'novelty_seeking': 'variety' in notes_lower or 'different' in notes_lower,
-            'category_priorities': list(base_analysis.get('latest_category_structure', {}).keys()),
-            'flavor_profile': 'varied',
-            'gift_occasion': 'business',
-            'risk_tolerance': 'moderate'
-        }
+        available_qty = sum(quant.available_quantity for quant in stock_quants)
+        return available_qty > 0
     
     def _ai_score_products(self, products, client_insights, target_budget, notes_text):
-        """AI-powered product scoring based on client insights"""
+        """AI-powered product scoring"""
         
         scored_products = []
-        historical = client_insights.get('historical', {})
-        ai_enhanced = client_insights.get('ai_enhanced', {})
         
         for product in products:
             score = 0.0
             
-            # Base compatibility score
-            score += self._score_historical_compatibility(product, historical)
+            # Historical compatibility (30%)
+            if client_insights['historical'].get('has_history'):
+                score += self._score_historical_match(product, client_insights['historical']) * 0.30
+            else:
+                score += 0.15  # Default for new clients
             
-            # AI-enhanced scoring
-            if ai_enhanced:
-                score += self._score_ai_compatibility(product, ai_enhanced)
+            # AI analysis compatibility (25%)
+            if client_insights['ai_enhanced']:
+                score += self._score_ai_match(product, client_insights['ai_enhanced']) * 0.25
             
-            # Budget fit score
-            score += self._score_budget_fit(product, target_budget)
+            # Budget fitness (20%)
+            score += self._score_budget_fitness(product, target_budget) * 0.20
             
-            # Notes relevance score
-            if notes_text:
-                score += self._score_notes_relevance(product, notes_text)
+            # Quality indicators (15%)
+            score += self._score_quality(product) * 0.15
             
-            # Learning from sales data score
-            score += self._score_market_learning(product, client_insights)
+            # Market trends (10%)
+            score += self._score_market_trends(product) * 0.10
             
             scored_products.append({
                 'product': product,
-                'score': min(1.0, score),
-                'reasons': self._get_scoring_reasons(product, score)
+                'score': min(1.0, max(0.0, score)),
+                'scoring_breakdown': {
+                    'historical': self._score_historical_match(product, client_insights['historical']),
+                    'ai_match': self._score_ai_match(product, client_insights['ai_enhanced']) if client_insights['ai_enhanced'] else 0,
+                    'budget': self._score_budget_fitness(product, target_budget),
+                    'quality': self._score_quality(product),
+                    'trends': self._score_market_trends(product)
+                }
             })
         
         return sorted(scored_products, key=lambda x: x['score'], reverse=True)
     
-    def _score_historical_compatibility(self, product, historical):
-        """Score based on client's historical preferences"""
+    def _score_historical_match(self, product, historical):
+        """Score based on historical preferences"""
         
-        if not historical.get('has_history'):
-            return 0.3  # Neutral score for new clients
+        score = 0.5  # Base score
         
-        score = 0.0
+        # Category match
+        if historical.get('category_preferences'):
+            if product.lebiggot_category in historical['category_preferences']:
+                score += 0.3
         
-        # Category preference
-        category_prefs = historical.get('latest_category_structure', {})
-        if product.lebiggot_category in category_prefs:
-            score += 0.3
-        
-        # Budget range compatibility
-        avg_budget = historical.get('average_budget', 0)
-        if avg_budget > 0:
-            budget_per_product = avg_budget / historical.get('average_products', 5)
-            price_ratio = product.list_price / budget_per_product
-            if 0.8 <= price_ratio <= 1.2:  # Within 20% of expected price
+        # Price range match
+        avg_price = historical.get('average_product_price', 0)
+        if avg_price > 0:
+            price_diff = abs(product.list_price - avg_price) / avg_price
+            if price_diff < 0.2:
                 score += 0.2
         
-        # Satisfaction correlation
-        if historical.get('average_satisfaction', 0) >= 4:
-            score += 0.1  # Boost for historically satisfied clients
-        
-        return score
+        return min(1.0, score)
     
-    def _score_ai_compatibility(self, product, ai_insights):
-        """Score based on AI analysis of client preferences"""
+    def _score_ai_match(self, product, ai_enhanced):
+        """Score based on AI analysis"""
         
-        score = 0.0
+        score = 0.5
         
-        # Style preference matching
-        style_pref = ai_insights.get('style_preference', 'traditional')
-        if style_pref == 'premium' and hasattr(product, 'product_grade') and product.product_grade in ['premium', 'luxury']:
-            score += 0.3
-        elif style_pref == 'traditional' and any(word in product.name.lower() for word in ['tradicional', 'artisan', 'classic']):
+        # Style preference match
+        style = ai_enhanced.get('style_preference', 'traditional')
+        if style == 'premium' and hasattr(product, 'product_grade'):
+            if product.product_grade in ['premium', 'luxury']:
+                score += 0.3
+        
+        # Quality focus match
+        quality_focus = ai_enhanced.get('quality_focus', 'artisanal')
+        if quality_focus == 'artisanal' and 'artisan' in product.name.lower():
+            score += 0.2
+        elif quality_focus == 'exclusive' and 'exclusive' in product.name.lower():
             score += 0.2
         
-        # Category priority matching
-        category_priorities = ai_insights.get('category_priorities', [])
-        if product.lebiggot_category in category_priorities[:3]:  # Top 3 priorities
-            position = category_priorities.index(product.lebiggot_category)
-            score += 0.3 - (position * 0.1)  # Higher score for higher priority
-        
-        # Risk tolerance matching
-        risk_tolerance = ai_insights.get('risk_tolerance', 'moderate')
-        if risk_tolerance == 'adventurous':
-            score += 0.1  # Boost for unique products
-        
-        return score
+        return min(1.0, score)
     
-    def _score_budget_fit(self, product, target_budget):
-        """Score how well product fits target budget per item"""
+    def _score_budget_fitness(self, product, target_budget):
+        """Score based on budget fit"""
         
-        # Estimate products per composition (5-7 typical)
-        estimated_products = 6
-        budget_per_product = target_budget / estimated_products
+        # Ideal product price is 10-20% of total budget
+        ideal_price = target_budget * 0.15
+        price_diff = abs(product.list_price - ideal_price) / ideal_price
         
-        price_ratio = product.list_price / budget_per_product
-        
-        if 0.5 <= price_ratio <= 1.5:  # Good fit
-            return 0.3 - abs(1.0 - price_ratio) * 0.2
-        elif price_ratio < 0.5:  # Too cheap
-            return 0.1
-        else:  # Too expensive
-            return 0.05
+        if price_diff < 0.2:
+            return 1.0
+        elif price_diff < 0.5:
+            return 0.7
+        elif price_diff < 1.0:
+            return 0.4
+        else:
+            return 0.2
     
-    def _calculate_budget_flexibility(self, target_budget, client_insights, attempt_number):
-        """Calculate budget flexibility based on client and attempt"""
+    def _score_quality(self, product):
+        """Score based on quality indicators"""
         
-        # Base flexibility: ±5%
-        base_flexibility = 0.05
+        score = 0.5
         
-        # Extend to ±15% if needed
-        max_flexibility = 0.15
+        # Premium grade
+        if hasattr(product, 'product_grade'):
+            if product.product_grade == 'luxury':
+                score += 0.5
+            elif product.product_grade == 'premium':
+                score += 0.3
         
-        # Increase flexibility with attempts
-        flexibility = min(base_flexibility + (attempt_number - 1) * 0.03, max_flexibility)
+        # Price as quality proxy
+        if product.list_price > 50:
+            score += 0.2
         
-        # Adjust based on client profile
-        historical = client_insights.get('historical', {})
-        if historical.get('budget_trend') == 'increasing':
-            flexibility += 0.02  # More flexible for growing budgets
-        
-        ai_enhanced = client_insights.get('ai_enhanced', {})
-        if ai_enhanced.get('price_sensitivity') == 'low':
-            flexibility += 0.03  # More flexible for price-insensitive clients
-        
-        return {
-            'target': target_budget,
-            'min_budget': target_budget * (1 - flexibility),
-            'max_budget': target_budget * (1 + flexibility),
-            'flexibility_percent': flexibility * 100
-        }
+        return min(1.0, score)
     
-    def _smart_budget_selection(self, scored_products, budget_params, client_insights):
-        """Smart selection algorithm that optimizes for budget and quality"""
+    def _score_market_trends(self, product):
+        """Score based on market trends and popularity"""
         
-        target_budget = budget_params['target']
-        min_budget = budget_params['min_budget']
-        max_budget = budget_params['max_budget']
+        # Check recent sales
+        recent_sales = self.env['sale.order.line'].search_count([
+            ('product_id.product_tmpl_id', '=', product.id),
+            ('create_date', '>=', fields.Date.today() - timedelta(days=90))
+        ])
         
-        # Multiple selection strategies
-        strategies = [
-            self._greedy_selection,
-            self._balanced_selection,
-            self._premium_selection,
+        if recent_sales > 10:
+            return 1.0
+        elif recent_sales > 5:
+            return 0.7
+        elif recent_sales > 0:
+            return 0.5
+        else:
+            return 0.3
+    
+    def _ai_select_products(self, scored_products, target_budget, client_insights):
+        """AI-powered product selection with budget optimization"""
+        
+        selected_products = []
+        current_cost = 0
+        min_budget = target_budget * 0.85
+        max_budget = target_budget * 1.15
+        
+        # Category diversity tracking
+        categories_used = defaultdict(int)
+        max_per_category = 2
+        
+        # Selection strategy based on client insights
+        if client_insights['ai_enhanced'].get('style_preference') == 'premium':
+            # Premium strategy: fewer, higher-value items
+            target_count = 4
+        else:
+            # Standard strategy: balanced selection
+            target_count = 6
+        
+        for item in scored_products:
+            product = item['product']
+            category = product.lebiggot_category
+            
+            # Skip if category limit reached
+            if categories_used[category] >= max_per_category:
+                continue
+            
+            # Check if adding product keeps within budget
+            if current_cost + product.list_price <= max_budget:
+                selected_products.append(product)
+                current_cost += product.list_price
+                categories_used[category] += 1
+                
+                # Stop if target reached
+                if len(selected_products) >= target_count:
+                    if current_cost >= min_budget:
+                        break
+        
+        # Validate selection
+        if current_cost < min_budget or not selected_products:
+            # Try alternative selection strategy
+            return self._fallback_selection(scored_products, target_budget)
+        
+        return selected_products
+    
+    def _fallback_selection(self, scored_products, target_budget):
+        """Fallback selection when primary strategy fails"""
+        
+        selected = []
+        current_cost = 0
+        max_budget = target_budget * 1.2
+        
+        # Simple greedy selection
+        for item in scored_products[:10]:  # Top 10 products
+            product = item['product']
+            if current_cost + product.list_price <= max_budget:
+                selected.append(product)
+                current_cost += product.list_price
+                
+                if current_cost >= target_budget * 0.8:
+                    break
+        
+        return selected if selected else []
+    
+    def _calculate_confidence(self, selected_products, client_insights):
+        """Calculate confidence score for recommendation"""
+        
+        base_confidence = 0.5
+        
+        # Historical data bonus
+        if client_insights['historical'].get('has_history'):
+            base_confidence += 0.2
+        
+        # AI analysis bonus
+        if client_insights['ai_enhanced']:
+            base_confidence += 0.15
+        
+        # Product diversity bonus
+        categories = set(p.lebiggot_category for p in selected_products)
+        if len(categories) >= 3:
+            base_confidence += 0.1
+        
+        # Past recommendation success bonus
+        if client_insights['past_recommendations']:
+            base_confidence += 0.05
+        
+        return min(1.0, base_confidence)
+    
+    def _generate_ai_reasoning(self, selected_products, client_insights, target_budget):
+        """Generate comprehensive AI reasoning"""
+        
+        actual_cost = sum(p.list_price for p in selected_products)
+        variance = abs(actual_cost - target_budget) / target_budget * 100
+        
+        reasoning_parts = [
+            f"<div class='ai-reasoning'>",
+            f"<h4>🤖 AI-Powered Recommendation Analysis</h4>",
+            
+            f"<div class='recommendation-summary'>",
+            f"<p><strong>Products Selected:</strong> {len(selected_products)}</p>",
+            f"<p><strong>Total Cost:</strong> €{actual_cost:.2f}</p>",
+            f"<p><strong>Budget Variance:</strong> {variance:.1f}%</p>",
+            f"<p><strong>Confidence Score:</strong> {self._calculate_confidence(selected_products, client_insights):.1%}</p>",
+            f"</div>"
         ]
         
-        best_selection = None
-        best_score = 0
+        # Client insights
+        if client_insights['historical'].get('has_history'):
+            historical = client_insights['historical']
+            reasoning_parts.extend([
+                f"<h5>📊 Historical Analysis</h5>",
+                f"<ul>",
+                f"<li>Experience: {historical.get('years_of_data', 0)} years of data</li>",
+                f"<li>Budget trend: {historical.get('budget_trend', 'stable').title()}</li>",
+                f"<li>Satisfaction: {historical.get('average_satisfaction', 0):.1f}/5</li>",
+                f"</ul>"
+            ])
         
-        for strategy in strategies:
-            try:
-                selection = strategy(scored_products, budget_params, client_insights)
-                if selection:
-                    total_cost = sum(p.list_price for p in selection)
-                    
-                    # Check budget compliance
-                    if min_budget <= total_cost <= max_budget:
-                        # Calculate selection quality score
-                        quality_score = self._evaluate_selection_quality(selection, client_insights)
-                        if quality_score > best_score:
-                            best_selection = selection
-                            best_score = quality_score
-            except Exception as e:
-                _logger.warning(f"Selection strategy failed: {e}")
-                continue
+        # AI insights
+        if client_insights['ai_enhanced']:
+            ai = client_insights['ai_enhanced']
+            reasoning_parts.extend([
+                f"<h5>🧠 AI Analysis</h5>",
+                f"<ul>",
+                f"<li>Style: {ai.get('style_preference', 'N/A').title()}</li>",
+                f"<li>Quality Focus: {ai.get('quality_focus', 'N/A').title()}</li>",
+                f"<li>Occasion: {ai.get('occasion_type', 'N/A').title()}</li>",
+                f"</ul>"
+            ])
         
-        if not best_selection:
-            # Fallback: simple budget-constrained selection
-            best_selection = self._fallback_selection(scored_products, budget_params)
+        # Product categories
+        categories = defaultdict(list)
+        for product in selected_products:
+            categories[product.lebiggot_category].append(product.name)
         
-        return best_selection
+        reasoning_parts.append(f"<h5>🎁 Selected Products</h5>")
+        for category, products in categories.items():
+            category_name = category.replace('_', ' ').title()
+            reasoning_parts.append(f"<p><strong>{category_name}:</strong> {', '.join(products)}</p>")
+        
+        reasoning_parts.append(f"</div>")
+        
+        return ''.join(reasoning_parts)
     
-    def _greedy_selection(self, scored_products, budget_params, client_insights):
-        """Greedy selection: best score per euro"""
+    def _analyze_market_position(self, partner_id):
+        """Analyze client's market position"""
         
-        # Calculate value score (score per euro)
-        value_products = []
-        for item in scored_products:
-            value_score = item['score'] / max(item['product'].list_price, 1)
-            value_products.append({
-                'product': item['product'],
-                'score': item['score'],
-                'value_score': value_score
+        # Calculate percentile based on order history
+        all_clients = self.env['client.order.history'].search([])
+        client_budgets = [c.total_budget for c in all_clients if c.total_budget > 0]
+        
+        if not client_budgets:
+            return {'percentile': 50, 'segment': 'standard'}
+        
+        client_history = self.env['client.order.history'].search([
+            ('partner_id', '=', partner_id)
+        ], limit=1)
+        
+        if not client_history or not client_history.total_budget:
+            return {'percentile': 50, 'segment': 'standard'}
+        
+        client_budget = client_history.total_budget
+        percentile = (sum(1 for b in client_budgets if b <= client_budget) / len(client_budgets)) * 100
+        
+        if percentile >= 80:
+            segment = 'premium'
+        elif percentile >= 50:
+            segment = 'standard'
+        else:
+            segment = 'value'
+        
+        return {
+            'percentile': percentile,
+            'segment': segment,
+            'average_market_budget': np.mean(client_budgets)
+        }
+    
+    def _get_past_recommendations(self, partner_id):
+        """Get past recommendation data for learning"""
+        
+        # Check for past compositions
+        past_compositions = self.env['gift.composition'].search([
+            ('partner_id', '=', partner_id),
+            ('state', 'in', ['approved', 'delivered'])
+        ], limit=5)
+        
+        if not past_compositions:
+            return []
+        
+        recommendations = []
+        for comp in past_compositions:
+            recommendations.append({
+                'date': comp.create_date,
+                'products': comp.product_ids.mapped('name'),
+                'budget': comp.target_budget,
+                'actual_cost': comp.actual_cost,
+                'categories': list(set(comp.product_ids.mapped('lebiggot_category')))
             })
         
-        value_products.sort(key=lambda x: x['value_score'], reverse=True)
-        
-        selected = []
-        current_cost = 0
-        categories_used = set()
-        
-        for item in value_products:
-            product = item['product']
-            
-            # Avoid category repetition (max 2 per category)
-            category = product.lebiggot_category
-            category_count = sum(1 for p in selected if p.lebiggot_category == category)
-            if category_count >= 2:
-                continue
-            
-            if current_cost + product.list_price <= budget_params['max_budget']:
-                selected.append(product)
-                current_cost += product.list_price
-                categories_used.add(category)
-                
-                # Target 5-7 products
-                if len(selected) >= 7:
-                    break
-        
-        return selected if len(selected) >= 3 else None
+        return recommendations
     
-    def _balanced_selection(self, scored_products, budget_params, client_insights):
-        """Balanced selection across categories"""
-        
-        # Group by category
-        by_category = defaultdict(list)
-        for item in scored_products:
-            by_category[item['product'].lebiggot_category].append(item)
-        
-        # Sort each category by score
-        for category in by_category:
-            by_category[category].sort(key=lambda x: x['score'], reverse=True)
-        
-        selected = []
-        current_cost = 0
-        category_budget = budget_params['target'] / len(by_category)
-        
-        # Select best from each category
-        for category, items in by_category.items():
-            category_spent = 0
-            for item in items:
-                product = item['product']
-                if (current_cost + product.list_price <= budget_params['max_budget'] and
-                    category_spent + product.list_price <= category_budget * 1.5):  # Allow 50% over category budget
-                    selected.append(product)
-                    current_cost += product.list_price
-                    category_spent += product.list_price
-                    break  # One per category first
-        
-        # Fill remaining budget with highest scoring products
-        remaining_products = [item for cat_items in by_category.values() 
-                            for item in cat_items[1:]]  # Skip first (already selected)
-        remaining_products.sort(key=lambda x: x['score'], reverse=True)
-        
-        for item in remaining_products:
-            product = item['product']
-            if current_cost + product.list_price <= budget_params['max_budget']:
-                selected.append(product)
-                current_cost += product.list_price
-                if len(selected) >= 7:
-                    break
-        
-        return selected if len(selected) >= 3 else None
+    def _ollama_enabled(self):
+        """Check if Ollama is enabled"""
+        return self.env['ir.config_parameter'].sudo().get_param(
+            'lebigott_ai.ollama_enabled', 'false'
+        ).lower() == 'true'
     
-    def _record_recommendation_for_learning(self, partner_id, selected_products, client_insights):
-        """Record this recommendation for future learning"""
+    def _ollama_complete(self, prompt):
+        """Get Ollama completion"""
+        try:
+            composition_engine = self.env['composition.engine']
+            return composition_engine._ollama_complete(prompt)
+        except:
+            return None
+    
+    def record_feedback(self, partner_id, products, satisfaction_score):
+        """Record feedback for continuous learning"""
+        
+        if not self.learning_enabled:
+            return
         
         learning_data = {
             'partner_id': partner_id,
-            'timestamp': fields.Datetime.now(),
-            'products': [p.id for p in selected_products],
-            'total_cost': sum(p.list_price for p in selected_products),
-            'client_insights': client_insights,
-            'categories': [p.lebiggot_category for p in selected_products]
+            'products': [p.id for p in products],
+            'satisfaction': satisfaction_score,
+            'timestamp': datetime.now().isoformat()
         }
         
-        # Store in a simple learning cache (could be database or file)
-        # This builds the learning dataset for future improvements
-        cache_key = f"recommendation_learning_{partner_id}_{fields.Date.today()}"
+        # Store for future training
+        cache_key = f"ai_feedback_{partner_id}_{fields.Date.today()}"
         self.env['ir.config_parameter'].sudo().set_param(cache_key, json.dumps(learning_data))
-    
-    def _generate_ai_reasoning(self, selected_products, client_insights, target_budget):
-        """Generate AI-powered reasoning for the selection"""
         
-        historical = client_insights.get('historical', {})
-        ai_enhanced = client_insights.get('ai_enhanced', {})
-        
-        reasoning_parts = [
-            f"<h4>🤖 AI-Powered Recommendation</h4>",
-            f"<p><strong>Target Budget:</strong> €{target_budget:.2f}</p>",
-            f"<p><strong>Selected Products:</strong> {len(selected_products)}</p>",
-            f"<p><strong>Total Cost:</strong> €{sum(p.list_price for p in selected_products):.2f}</p>",
-        ]
-        
-        if historical.get('has_history'):
-            reasoning_parts.extend([
-                f"<h5>📊 Learning from History</h5>",
-                f"<ul>",
-                f"<li>Client data: {historical.get('years_of_data', 0)} years of preferences</li>",
-                f"<li>Budget trend: {historical.get('budget_trend', 'stable').title()}</li>",
-                f"<li>Satisfaction: {historical.get('average_satisfaction', 0):.1f}/5 stars</li>",
-                f"</ul>"
-            ])
-        
-        if ai_enhanced:
-            reasoning_parts.extend([
-                f"<h5>🧠 AI Analysis Applied</h5>",
-                f"<ul>",
-                f"<li>Style preference: {ai_enhanced.get('style_preference', 'N/A').title()}</li>",
-                f"<li>Risk tolerance: {ai_enhanced.get('risk_tolerance', 'N/A').title()}</li>",
-                f"<li>Price sensitivity: {ai_enhanced.get('price_sensitivity', 'N/A').title()}</li>",
-                f"</ul>"
-            ])
-        
-        # Product breakdown
-        categories = defaultdict(list)
-        for product in selected_products:
-            categories[product.lebiggot_category].append(product)
-        
-        reasoning_parts.append("<h5>🎁 Selected Products by Category</h5>")
-        for category, products in categories.items():
-            reasoning_parts.append(f"<p><strong>{category.replace('_', ' ').title()}:</strong> {', '.join([p.name for p in products])}</p>")
-        
-        return ''.join(reasoning_parts)
+        _logger.info(f"Recorded AI feedback: Partner {partner_id}, Satisfaction {satisfaction_score}")

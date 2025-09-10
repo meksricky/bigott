@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_batch_composition_wizard_form" model="ir.ui.view">
+        <field name="name">batch.composition.wizard.form</field>
+        <field name="model">batch.composition.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Batch Composition Generator">
+                <group>
+                    <field name="partner_ids" widget="many2many_tags"/>
+                    <field name="target_budget"/>
+                    <field name="target_year"/>
+                </group>
+                <footer>
+                    <button name="action_generate_batch" type="object" string="Generate" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+    
+    <record id="action_batch_composition_wizard" model="ir.actions.act_window">
+        <field name="name">Batch Composition Generator</field>
+        <field name="res_model">batch.composition.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+</odoo>

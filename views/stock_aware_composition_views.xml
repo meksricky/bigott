@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Stock-Aware Composition Engine Form View -->
+    <record id="view_stock_aware_composition_engine_form" model="ir.ui.view">
+        <field name="name">stock.aware.composition.engine.form</field>
+        <field name="model">stock.aware.composition.engine</field>
+        <field name="arch" type="xml">
+            <form string="Stock-Aware Composition Engine">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>Stock-Aware Composition Engine</h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Stock Settings">
+                            <field name="stock_validation_enabled"/>
+                            <field name="min_stock_threshold"/>
+                            <field name="warehouse_id"/>
+                        </group>
+                        <group string="Performance">
+                            <field name="cache_enabled"/>
+                            <field name="cache_ttl"/>
+                            <field name="last_cache_update" readonly="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Action -->
+    <record id="action_stock_aware_composition_engine" model="ir.actions.act_window">
+        <field name="name">Stock-Aware Engine</field>
+        <field name="res_model">stock.aware.composition.engine</field>
+        <field name="view_mode">form</field>
+    </record>
+</odoo>

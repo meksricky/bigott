@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Business Rules Engine Form View -->
+    <record id="view_business_rules_engine_form" model="ir.ui.view">
+        <field name="name">business.rules.engine.form</field>
+        <field name="model">business.rules.engine</field>
+        <field name="arch" type="xml">
+            <form string="Business Rules Engine">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>Business Rules Engine</h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Budget Rules">
+                            <field name="min_budget"/>
+                            <field name="max_budget"/>
+                            <field name="budget_flexibility"/>
+                        </group>
+                        <group string="Product Rules">
+                            <field name="min_products"/>
+                            <field name="max_products"/>
+                            <field name="require_category_diversity"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Action -->
+    <record id="action_business_rules_engine" model="ir.actions.act_window">
+        <field name="name">Business Rules Engine</field>
+        <field name="res_model">business.rules.engine</field>
+        <field name="view_mode">form</field>
+    </record>
+</odoo>

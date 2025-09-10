@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Composition Engine Form View -->
+    <record id="view_composition_engine_form" model="ir.ui.view">
+        <field name="name">composition.engine.form</field>
+        <field name="model">composition.engine</field>
+        <field name="arch" type="xml">
+            <form string="Composition Engine">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>Composition Engine</h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Configuration">
+                            <field name="ollama_enabled"/>
+                            <field name="ollama_url" attrs="{'invisible': [('ollama_enabled', '=', False)]}"/>
+                            <field name="ollama_model" attrs="{'invisible': [('ollama_enabled', '=', False)]}"/>
+                        </group>
+                        <group string="Performance">
+                            <field name="cache_enabled"/>
+                            <field name="max_cache_size"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Action -->
+    <record id="action_composition_engine" model="ir.actions.act_window">
+        <field name="name">Composition Engine</field>
+        <field name="res_model">composition.engine</field>
+        <field name="view_mode">form</field>
+    </record>
+</odoo>

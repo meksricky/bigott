@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Integration Manager Form View -->
+    <record id="view_integration_manager_form" model="ir.ui.view">
+        <field name="name">integration.manager.form</field>
+        <field name="model">integration.manager</field>
+        <field name="arch" type="xml">
+            <form string="Integration Manager">
+                <header>
+                    <button name="analyze_engine_performance" 
+                            type="object" 
+                            string="Analyze Performance" 
+                            class="btn-secondary"
+                            icon="fa-chart-bar"/>
+                </header>
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name"/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Engine Preferences">
+                            <field name="use_ml_engine" widget="boolean_toggle"/>
+                            <field name="use_ai_recommender" widget="boolean_toggle"/>
+                            <field name="use_stock_aware" widget="boolean_toggle"/>
+                            <field name="use_business_rules" widget="boolean_toggle"/>
+                        </group>
+                        <group string="Strategy &amp; Performance">
+                            <field name="fallback_strategy"/>
+                            <field name="success_rate" readonly="1" widget="percentage"/>
+                            <field name="last_generation_time" readonly="1"/>
+                            <field name="total_generations" readonly="1"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Action -->
+    <record id="action_integration_manager" model="ir.actions.act_window">
+        <field name="name">Integration Manager</field>
+        <field name="res_model">integration.manager</field>
+        <field name="view_mode">form</field>
+    </record>
+</odoo>

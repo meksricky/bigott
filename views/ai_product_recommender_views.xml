@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- AI Product Recommender Form View -->
+    <record id="view_ai_product_recommender_form" model="ir.ui.view">
+        <field name="name">ai.product.recommender.form</field>
+        <field name="model">ai.product.recommender</field>
+        <field name="arch" type="xml">
+            <form string="AI Product Recommender">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Recommender Name"/>
+                        </h1>
+                    </div>
+                    
+                    <group>
+                        <group string="Configuration">
+                            <field name="min_confidence_threshold" widget="percentage"/>
+                            <field name="max_recommendation_attempts"/>
+                        </group>
+                        <group string="Learning Settings">
+                            <field name="learning_enabled" widget="boolean_toggle"/>
+                            <field name="feedback_weight" widget="percentage" attrs="{'invisible': [('learning_enabled', '=', False)]}"/>
+                        </group>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Action -->
+    <record id="action_ai_product_recommender" model="ir.actions.act_window">
+        <field name="name">AI Product Recommender</field>
+        <field name="res_model">ai.product.recommender</field>
+        <field name="view_mode">form</field>
+    </record>
+</odoo>
