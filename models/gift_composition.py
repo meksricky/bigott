@@ -252,104 +252,51 @@ class GiftComposition(models.Model):
 
     @api.constrains('product_ids', 'target_budget')
     def _check_budget_compliance(self):
-        """Ensure ±5% budget compliance"""
-        for comp in self:
-            if comp.target_budget and comp.product_ids:
-                variance_percent = abs(comp.actual_cost - comp.target_budget) / comp.target_budget * 100
-                if variance_percent > 5 and comp.state in ['proposed', 'approved']:
-                    raise ValidationError(
-                        f"Budget variance of {variance_percent:.1f}% exceeds ±5% limit.\n"
-                        f"Actual: €{comp.actual_cost:.2f}, Target: €{comp.target_budget:.2f}"
-                    )
-                    
-    # Advanced Action Methods
-    
-    def action_regenerate(self):
-        """ML-powered regeneration"""
-        self.ensure_one()
-        
-        try:
-            ml_engine = self.env['ml.recommendation.engine']
-            
-            dietary_list = []
-            if self.dietary_restrictions:
-                dietary_list = [d.strip() for d in self.dietary_restrictions.split(',') if d.strip()]
-            
-            # Get ML recommendations
-            ml_result = ml_engine.get_smart_recommendations(
-                partner_id=self.partner_id.id,
-                target_budget=self.target_budget,
-                dietary_restrictions=dietary_list,
-                notes_text=self.notes
-            )
-            
-            # Update composition
-            self.write({
-                'product_ids': [(6, 0, [p.id for p in ml_result['products']])],
-                'confidence_score': ml_result['ml_confidence'],
-                'reasoning': ml_result['reasoning'],
-                'state': 'draft',
-                'generated_date': fields.Datetime.now(),
-            })
-            
-            variance = ml_result['budget_variance']
-            method = ml_result['method']
-            
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': f'🤖 {method} Regeneration Complete',
-                    'message': f'{len(ml_result["products"])} products, €{ml_result["actual_cost"]:.2f} (±{variance:.1f}%)',
-                    'type': 'success',
-                    'sticky': False,
-                }
-            }
-            
-        except Exception as e:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'ML Regeneration Failed',
-                    'message': str(e),
-                    'type': 'danger',
-                    'sticky': True,
-                }
-            }
-            
-        except Exception as e:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'AI Regeneration Failed',
-                    'message': str(e),
-                    'type': 'danger',
-                    'sticky': True,
-                }
-            }
+        """Validate budget compliance on state changes"""
+        for composition in self:
+            if composition.state in ['proposed', approved'] and composition.target_budget > 0:
+                if composition.actual_cost > 0:
+                    variance_percent = abs(composition.actual_cost - composition.target_budget) / composition.target_budget * 100
+                    if variance_percent > 15:  # Hard limit at 15%
+                        raise ValidationError(
+                            f"Budget compliance violation: {variance_percent:.1f}% variance exceeds 15% limit.\n"
+                            f"Target: €{composition.target_budget:.2f}, Actual: €{composition.actual_cost:.2f}\n"
+                            f"Please regenerate or adjust the composition."
+                        )
 
     def action_propose(self):
-        """Propose composition to client - SIMPLIFIED VERSION"""
+        """Enhanced propose with budget validation"""
         self.ensure_one()
         
         if self.actual_cost <= 0:
-            raise UserError("Cannot propose composition with zero cost. Please add products first.")
+            raise UserError("Cannot propose composition with zero cost.")
         
-        # Simple budget check without wizard
-        if abs(self.budget_variance_percent) > 5:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Budget Variance Warning',
-                    'message': f'This composition is {self.budget_variance_percent:.1f}% over budget. Consider regenerating.',
-                    'type': 'warning',
-                    'sticky': True,
+        # Check budget compliance
+        variance_percent = abs(self.actual_cost - self.target_budget) / self.target_budget * 100
+        
+        # Allow proposal but warn if outside preferred range
+        if variance_percent > 5:
+            if variance_percent > 15:
+                raise UserError(
+                    f"Cannot propose composition with {variance_percent:.1f}% budget variance.\n"
+                    f"Maximum allowed: 15%. Please regenerate."
+                )
+            else:
+                # Show warning but allow proposal
+                return {
+                    'type': 'ir.actions.act_window',
+                    'name': 'Budget Variance Warning',
+                    'res_model': 'budget.warning.wizard',
+                    'view_mode': 'form',
+                    'target': 'new',
+                    'context': {
+                        'default_composition_id': self.id,
+                        'default_variance_percent': variance_percent,
+                        'default_message': f'Budget variance is {variance_percent:.1f}%. Proceed with proposal?'
+                    }
                 }
-            }
         
+        # Normal proposal
         self.write({
             'state': 'proposed',
             'proposed_date': fields.Datetime.now()
@@ -359,11 +306,184 @@ class GiftComposition(models.Model):
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': 'Composition Proposed',
-                'message': 'Gift composition has been proposed to the client.',
+                'title': '✅ Composition Proposed',
+                'message': f'Budget compliant composition (±{variance_percent:.1f}%) proposed successfully.',
                 'type': 'success',
+                'sticky': False,
             }
         }
+                    
+    # Advanced Action Methods
+    
+    def action_regenerate(self):
+        """Enhanced regeneration using existing AI engines with budget compliance"""
+        self.ensure_one()
+        _logger.info(f"Regenerating Gift Composition: {self.name} (ID: {self.id})")
+        
+        if self.state == 'approved':
+            raise UserError("Cannot regenerate approved compositions. Create a new draft version.")
+        
+        # Store original data
+        original_products = self.product_ids.ids.copy()
+        original_cost = self.actual_cost
+        
+        # Budget flexibility: ±5% preferred, ±15% maximum
+        preferred_min = self.target_budget * 0.95
+        preferred_max = self.target_budget * 1.05
+        absolute_min = self.target_budget * 0.85
+        absolute_max = self.target_budget * 1.15
+        
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                _logger.info(f"Regeneration attempt {attempt}/{max_attempts}")
+                
+                # Use your existing integration manager
+                integration_manager = self.env['integration.manager']
+                
+                # Extract dietary restrictions
+                dietary_list = []
+                if self.dietary_restrictions:
+                    dietary_list = [d.strip() for d in self.dietary_restrictions.split(',') if d.strip()]
+                
+                # Generate new composition with attempt-based flexibility
+                new_composition = integration_manager.generate_complete_composition(
+                    partner_id=self.partner_id.id,
+                    target_budget=self.target_budget,
+                    target_year=self.target_year,
+                    dietary_restrictions=dietary_list,
+                    notes_text=getattr(self, 'notes', None),
+                    use_batch=True,
+                    attempt_number=attempt  # Add variation for different attempts
+                )
+                
+                if new_composition and new_composition.id != self.id:
+                    new_cost = new_composition.actual_cost
+                    variance_percent = abs(new_cost - self.target_budget) / self.target_budget * 100
+                    
+                    # Check budget compliance with flexible limits
+                    is_preferred = preferred_min <= new_cost <= preferred_max
+                    is_acceptable = absolute_min <= new_cost <= absolute_max
+                    
+                    if is_preferred or (attempt == max_attempts and is_acceptable):
+                        # Accept this composition
+                        budget_status = "✅ Preferred" if is_preferred else "⚠️ Acceptable"
+                        
+                        # Update composition
+                        self.write({
+                            'product_ids': [(6, 0, new_composition.product_ids.ids)],
+                            'experience_id': new_composition.experience_id.id if new_composition.experience_id else False,
+                            'confidence_score': new_composition.confidence_score or 0.85,
+                            'novelty_score': new_composition.novelty_score or 0.75,
+                            'historical_compatibility': new_composition.historical_compatibility or 0.80,
+                            'reasoning': self._enhance_reasoning_with_regeneration(new_composition.reasoning, attempt, variance_percent, budget_status),
+                            'category_structure': new_composition.category_structure,
+                            'rule_applications': new_composition.rule_applications,
+                            'state': 'draft',
+                            'generated_date': fields.Datetime.now(),
+                        })
+                        
+                        # Clean up
+                        new_composition.unlink()
+                        self.invalidate_cache()
+                        
+                        return {
+                            'type': 'ir.actions.client',
+                            'tag': 'display_notification',
+                            'params': {
+                                'title': f'🎉 Regeneration Complete ({budget_status})',
+                                'message': f'New selection: {len(self.product_ids)} products, €{new_cost:.2f} (±{variance_percent:.1f}%)',
+                                'type': 'success',
+                                'sticky': False,
+                            }
+                        }
+                    else:
+                        # Try again with different parameters
+                        _logger.warning(f"Attempt {attempt}: Budget variance {variance_percent:.1f}% outside acceptable range")
+                        new_composition.unlink()
+                        continue
+                else:
+                    _logger.warning(f"Attempt {attempt}: Failed to generate new composition")
+                    continue
+                    
+            except Exception as e:
+                _logger.error(f"Attempt {attempt} failed: {str(e)}")
+                if attempt == max_attempts:
+                    return {
+                        'type': 'ir.actions.client',
+                        'tag': 'display_notification',
+                        'params': {
+                            'title': '❌ Regeneration Failed',
+                            'message': f'Could not generate suitable composition after {max_attempts} attempts: {str(e)}',
+                            'type': 'danger',
+                            'sticky': True,
+                        }
+                    }
+        
+        # If we get here, all attempts failed
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': '❌ Regeneration Failed',
+                'message': f'Could not generate budget-compliant composition after {max_attempts} attempts',
+                'type': 'danger',
+                'sticky': True,
+            }
+        }
+
+    def _enhance_reasoning_with_regeneration(self, original_reasoning, attempt, variance_percent, budget_status):
+        """Enhance reasoning with regeneration details"""
+        
+        regeneration_note = f"""
+        <div class="alert alert-info" style="margin-bottom: 15px;">
+            <h5><strong>🔄 Regeneration Report</strong> - {fields.Datetime.now().strftime('%Y-%m-%d %H:%M')}</h5>
+            <ul style="margin: 5px 0;">
+                <li><strong>Attempt:</strong> {attempt}/3</li>
+                <li><strong>Budget Status:</strong> {budget_status}</li>
+                <li><strong>Cost:</strong> €{sum(p.list_price for p in self.product_ids):.2f}</li>
+                <li><strong>Variance:</strong> ±{variance_percent:.1f}%</li>
+                <li><strong>Products:</strong> {len(self.product_ids)} items selected</li>
+            </ul>
+        </div>
+        """
+        
+        return regeneration_note + (original_reasoning or "AI-powered regeneration completed.")
+
+    # def action_propose(self):
+    #     """Propose composition to client - SIMPLIFIED VERSION"""
+    #     self.ensure_one()
+        
+    #     if self.actual_cost <= 0:
+    #         raise UserError("Cannot propose composition with zero cost. Please add products first.")
+        
+    #     # Simple budget check without wizard
+    #     if abs(self.budget_variance_percent) > 5:
+    #         return {
+    #             'type': 'ir.actions.client',
+    #             'tag': 'display_notification',
+    #             'params': {
+    #                 'title': 'Budget Variance Warning',
+    #                 'message': f'This composition is {self.budget_variance_percent:.1f}% over budget. Consider regenerating.',
+    #                 'type': 'warning',
+    #                 'sticky': True,
+    #             }
+    #         }
+        
+    #     self.write({
+    #         'state': 'proposed',
+    #         'proposed_date': fields.Datetime.now()
+    #     })
+        
+    #     return {
+    #         'type': 'ir.actions.client',
+    #         'tag': 'display_notification',
+    #         'params': {
+    #             'title': 'Composition Proposed',
+    #             'message': 'Gift composition has been proposed to the client.',
+    #             'type': 'success',
+    #         }
+    #     }
 
     def action_approve(self):
         """Approve composition"""
