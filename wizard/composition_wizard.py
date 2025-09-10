@@ -50,120 +50,73 @@ class CompositionWizard(models.TransientModel):
 
     @api.depends('partner_id')
     def _compute_client_info(self):
-        for wizard in self:
-            if wizard.partner_id:
-                partner = wizard.partner_id
-                
-                # Safe field access with defaults
-                years_as_client = getattr(partner, 'years_as_client', 0) or 0
-                client_tier = getattr(partner, 'client_tier', 'new') or 'new'
-                avg_budget = getattr(partner, 'average_annual_budget', 0.0) or 0.0
-                preferred_type = getattr(partner, 'preferred_box_type', 'custom') or 'custom'
-                satisfaction = getattr(partner, 'client_satisfaction_avg', 0.0) or 0.0
-                dietary = getattr(partner, 'dietary_restrictions', 'none') or 'none'
-
-                # FIXED: Use simple div structure that Odoo can render properly
-                wizard.client_info = f"""
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #007bff;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 10px;">
-                        <div>
-                            <strong style="color: #495057;">Client Tier</strong><br/>
-                            <span style="background: #007bff; color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px;">
-                                {client_tier.upper()}
-                            </span>
-                        </div>
-                        <div>
-                            <strong style="color: #495057;">Experience</strong><br/>
-                            <span style="color: #007bff; font-weight: bold;">{years_as_client} years</span>
-                        </div>
-                        <div>
-                            <strong style="color: #495057;">Avg Budget</strong><br/>
-                            <span style="color: #28a745; font-weight: bold;">€{avg_budget:.0f}</span>
-                        </div>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
-                        <div>
-                            <strong style="color: #495057;">Prefers</strong><br/>
-                            <span style="background: #ffc107; color: #212529; padding: 3px 8px; border-radius: 12px; font-size: 12px;">
-                                {preferred_type.upper()}
-                            </span>
-                        </div>
-                        <div>
-                            <strong style="color: #495057;">Satisfaction</strong><br/>
-                            <span style="color: #dc3545; font-weight: bold;">{satisfaction:.1f}/5 ⭐</span>
-                        </div>
-                        <div>
-                            <strong style="color: #495057;">Diet</strong><br/>
-                            <span style="background: #6c757d; color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px;">
-                                {dietary.replace('_', ' ').upper()}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                """
+        for record in self:
+            if record.partner_id:
+                # Get client history analysis
+                try:
+                    client_history = self.env['client.order.history'].analyze_client_patterns(record.partner_id.id)
+                    
+                    info_html = "<div style='background: #f8f9fa; padding: 10px; border-radius: 5px;'>"
+                    
+                    if client_history.get('has_history'):
+                        info_html += f"<p><strong>📊 Client History:</strong> {client_history.get('years_of_data', 0)} years</p>"
+                        info_html += f"<p><strong>💰 Average Budget:</strong> €{client_history.get('average_budget', 0):.2f}</p>"
+                        info_html += f"<p><strong>🎁 Preferred Type:</strong> {client_history.get('box_type_preference', 'Mixed').title()}</p>"
+                        info_html += f"<p><strong>⭐ Satisfaction:</strong> {client_history.get('average_satisfaction', 0):.1f}/5</p>"
+                    else:
+                        info_html += "<p><strong>🆕 New Client:</strong> No purchase history available</p>"
+                        info_html += "<p>The AI will use market trends and preferences analysis.</p>"
+                    
+                    info_html += "</div>"
+                    record.client_info = info_html
+                except:
+                    record.client_info = "<p>Client analysis not available.</p>"
             else:
-                wizard.client_info = """
-                <div style="text-align: center; padding: 40px; color: #6c757d;">
-                    <i class="fa fa-user-plus" style="font-size: 48px; margin-bottom: 15px;"></i><br/>
-                    <strong>Select a client to see their profile insights</strong><br/>
-                    <small>Señor Bigott will analyze their preferences and history</small>
-                </div>
-                """
+                record.client_info = ""
 
     @api.depends('partner_id', 'target_budget')
     def _compute_recommendations(self):
-        for wizard in self:
-            if wizard.partner_id:
-                partner = wizard.partner_id
-                
-                # Budget recommendation logic
-                if hasattr(partner, 'average_annual_budget') and partner.average_annual_budget > 0:
-                    if wizard.target_budget > partner.average_annual_budget * 1.2:
-                        wizard.budget_recommendation = "Above typical range - high upsell opportunity"
-                    elif wizard.target_budget < partner.average_annual_budget * 0.8:
-                        wizard.budget_recommendation = "Below typical range - consider increasing"
+        for record in self:
+            if record.partner_id:
+                try:
+                    client_history = self.env['client.order.history'].analyze_client_patterns(record.partner_id.id)
+                    
+                    # Budget recommendation
+                    if client_history.get('has_history'):
+                        avg_budget = client_history.get('average_budget', 200)
+                        if record.target_budget < avg_budget * 0.8:
+                            record.budget_recommendation = f"Consider increasing to €{avg_budget:.0f} (client's average)"
+                        elif record.target_budget > avg_budget * 1.5:
+                            record.budget_recommendation = f"High budget vs. average (€{avg_budget:.0f})"
+                        else:
+                            record.budget_recommendation = "Budget looks appropriate"
                     else:
-                        wizard.budget_recommendation = "Within optimal range"
-                else:
-                    wizard.budget_recommendation = "New client - tier-based recommendation"
-                
-                # Approach recommendation
-                if hasattr(partner, 'client_tier') and partner.client_tier == 'new':
-                    wizard.approach_recommendation = "Experience-based recommended for onboarding"
-                elif hasattr(partner, 'preferred_box_type') and getattr(partner, 'preferred_box_type', '') == 'experience':
-                    wizard.approach_recommendation = "Experience-based preferred by client"
-                else:
-                    wizard.approach_recommendation = "Custom composition based on preferences"
+                        record.budget_recommendation = "Standard budget for new client"
                     
-                # Risk assessment
-                confidence = 1.0
-                years_as_client = getattr(partner, 'years_as_client', 0) or 0
-                avg_budget = getattr(partner, 'average_annual_budget', 0.0) or 0.0
-                
-                if years_as_client < 1:
-                    confidence -= 0.3
-                if not getattr(partner, 'dietary_restrictions', None):
-                    confidence -= 0.1
-                if avg_budget == 0:
-                    confidence -= 0.2
-                    
-                if confidence >= 0.7:
-                    wizard.risk_level = 'low'
-                elif confidence >= 0.4:
-                    wizard.risk_level = 'medium'
-                else:
-                    wizard.risk_level = 'high'
+                    # Approach recommendation
+                    if client_history.get('has_history'):
+                        preferred_type = client_history.get('box_type_preference', 'custom')
+                        record.approach_recommendation = f"Recommend {preferred_type} composition"
+                        record.risk_level = 'low'
+                    else:
+                        record.approach_recommendation = "Experience-based recommended for new clients"
+                        record.risk_level = 'high'
+                        
+                except:
+                    record.budget_recommendation = "Analysis not available"
+                    record.approach_recommendation = "Standard approach"
+                    record.risk_level = 'medium'
             else:
-                wizard.budget_recommendation = False
-                wizard.approach_recommendation = False
-                wizard.risk_level = False
-    
+                record.budget_recommendation = ""
+                record.approach_recommendation = ""
+                record.risk_level = 'medium'
+
     @api.onchange('partner_id')
     def _onchange_partner_id(self):
-        """Auto-fill based on client data"""
+        """Auto-populate fields when partner is selected"""
         if self.partner_id:
-            # Set dietary restrictions from client profile
-            if hasattr(self.partner_id, 'dietary_restrictions') and self.partner_id.dietary_restrictions and self.partner_id.dietary_restrictions != 'none':
+            # Set dietary restrictions from partner
+            if self.partner_id.dietary_restrictions and self.partner_id.dietary_restrictions != 'none':
                 self.dietary_restrictions = self.partner_id.dietary_restrictions
             
             # Suggest budget based on historical data
@@ -172,7 +125,7 @@ class CompositionWizard(models.TransientModel):
                 self.target_budget = self.partner_id.average_annual_budget * 1.1
     
     def action_generate_composition(self):
-        """Generate composition using Señor Bigott engine"""
+        """Generate composition using Integration Manager (FIXED VERSION)"""
         
         if self.target_budget <= 0:
             raise UserError("Target budget must be greater than 0")
@@ -192,23 +145,68 @@ class CompositionWizard(models.TransientModel):
         if self.force_composition_type != 'auto':
             force_type = self.force_composition_type
         
-        # Generate composition
-        engine = self.env['composition.engine']
-        composition = engine.generate_composition(
-            partner_id=self.partner_id.id,
-            target_budget=self.target_budget,
-            target_year=self.target_year,
-            dietary_restrictions=dietary_list,
-            force_type=force_type,
-            notes_text=self.additional_notes
-        )
-        
-        # Return action to view the generated composition
-        return {
-            'type': 'ir.actions.act_window',
-            'name': f'Generated Composition - {composition.name}',
-            'res_model': 'gift.composition',
-            'res_id': composition.id,
-            'view_mode': 'form',
-            'target': 'current',
-        }
+        try:
+            # ✅ FIXED: Use Integration Manager instead of composition.engine
+            integration_manager = self.env['integration.manager']
+            
+            # Get or create the default integration manager
+            if not integration_manager.search([]):
+                integration_manager = integration_manager.create({
+                    'name': 'Default Integration Manager',
+                    'use_ml_engine': True,
+                    'use_ai_recommender': True,
+                    'use_stock_aware': True,
+                    'use_business_rules': True,
+                    'fallback_strategy': 'cascade'
+                })
+            else:
+                integration_manager = integration_manager.search([], limit=1)
+            
+            # Generate composition using the new integrated system
+            composition = integration_manager.generate_complete_composition(
+                partner_id=self.partner_id.id,
+                target_budget=self.target_budget,
+                target_year=self.target_year,
+                dietary_restrictions=dietary_list,
+                notes_text=self.additional_notes,
+                use_batch=False,
+                attempt_number=1,
+                force_engine=None  # Let the system decide the best engine
+            )
+            
+            if not composition:
+                raise UserError("Failed to generate composition. Please check system configuration.")
+            
+            # Return action to view the generated composition
+            return {
+                'type': 'ir.actions.act_window',
+                'name': f'Generated Composition - {composition.name}',
+                'res_model': 'gift.composition',
+                'res_id': composition.id,
+                'view_mode': 'form',
+                'target': 'current',
+                'context': {
+                    'default_composition_id': composition.id
+                }
+            }
+            
+        except Exception as e:
+            # Enhanced error handling with specific messages
+            error_msg = str(e)
+            
+            if "No products available" in error_msg:
+                raise UserError("No suitable products found. Please check:\n"
+                              "• Product categories are properly set\n"
+                              "• Products have prices and are active\n"
+                              "• Dietary restrictions aren't too restrictive")
+            elif "ML recommendation failed" in error_msg:
+                raise UserError("ML system error. Falling back to AI recommender.\n"
+                              "Please try again or contact administrator.")
+            elif "Integration Manager" in error_msg:
+                raise UserError("System configuration error. Please check:\n"
+                              "• Integration Manager is properly configured\n"
+                              "• All engines are enabled\n"
+                              "• ML model is trained")
+            else:
+                raise UserError(f"Composition generation failed: {error_msg}\n\n"
+                              "Please check system logs for details.")

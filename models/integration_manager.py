@@ -576,3 +576,87 @@ class IntegrationManager(models.Model):
                 stats['success_rate'] = ((stats['approved'] + stats['delivered']) / stats['count']) * 100
         
         return engine_stats
+
+    def _cascade_fallback(self, partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number):
+        """Try each engine in cascade order - SAFE VERSION"""
+        
+        engines = ['ml', 'ai', 'stock_aware', 'business_rules']
+        
+        for engine in engines:
+            try:
+                _logger.info(f"Cascade fallback trying: {engine}")
+                
+                # FIXED: Call individual engine methods directly instead of generate_complete_composition
+                # to prevent infinite recursion
+                if engine == 'ml':
+                    composition = self._generate_ml_composition(
+                        partner_id, target_budget, target_year, 
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                elif engine == 'ai':
+                    composition = self._generate_ai_composition(
+                        partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                elif engine == 'stock_aware':
+                    composition = self._generate_stock_aware_composition(
+                        partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                else:  # business_rules
+                    composition = self._generate_business_rules_composition(
+                        partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text
+                    )
+                
+                if composition:
+                    return composition
+                    
+            except Exception as e:
+                _logger.warning(f"Cascade engine {engine} failed: {e}")
+                continue
+        
+        raise UserError("All engines failed to generate composition")
+
+    def _parallel_fallback(self, partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number):
+        """Try multiple engines and select best result - SAFE VERSION"""
+        
+        results = []
+        engines = ['ml', 'ai', 'stock_aware']
+        
+        for engine in engines:
+            try:
+                # FIXED: Call individual engine methods directly
+                if engine == 'ml':
+                    composition = self._generate_ml_composition(
+                        partner_id, target_budget, target_year, 
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                elif engine == 'ai':
+                    composition = self._generate_ai_composition(
+                        partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                elif engine == 'stock_aware':
+                    composition = self._generate_stock_aware_composition(
+                        partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number
+                    )
+                
+                if composition:
+                    # Score the composition
+                    score = self._score_composition(composition, target_budget)
+                    results.append((composition, score, engine))
+                    
+            except Exception as e:
+                _logger.warning(f"Parallel engine {engine} failed: {e}")
+        
+        if results:
+            # Select best result
+            best_composition, best_score, best_engine = max(results, key=lambda x: x[1])
+            _logger.info(f"Selected best composition from {best_engine} with score {best_score:.2f}")
+            return best_composition
+        
+        raise UserError("No engines produced valid compositions")
