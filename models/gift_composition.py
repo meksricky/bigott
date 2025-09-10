@@ -253,28 +253,73 @@ class GiftComposition(models.Model):
     # Advanced Action Methods
     
     def action_regenerate(self):
-        """Regenerate composition with improved metrics"""
+        """Regenerate composition using the actual composition engine"""
         self.ensure_one()
         _logger.info(f"Regenerating Gift Composition: {self.name} (ID: {self.id})")
         
-        self.write({
-            'reasoning': "AI regenerated based on new parameters/data.",
-            'confidence_score': min(1.0, self.confidence_score * 1.05),
-            'novelty_score': min(1.0, self.novelty_score * 1.05),
-            'state': 'draft',
-            'generated_date': fields.Datetime.now(),
-        })
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Regeneration Initiated',
-                'message': 'AI regeneration for this composition has been initiated.',
-                'type': 'success',
-                'sticky': False,
+        try:
+            # Use the integration manager for full regeneration
+            integration_manager = self.env['integration.manager']
+            
+            # Prepare regeneration parameters
+            dietary_list = []
+            if self.dietary_restrictions:
+                dietary_list = self.dietary_restrictions.split(',')
+            
+            # Generate new composition using the same parameters
+            new_composition = integration_manager.generate_complete_composition(
+                partner_id=self.partner_id.id,
+                target_budget=self.target_budget,
+                target_year=self.target_year,
+                dietary_restrictions=dietary_list,
+                force_type=self.composition_type if self.composition_type != 'auto' else None,
+                notes_text=None  # Could extract from existing reasoning if needed
+            )
+            
+            if new_composition:
+                # Update current composition with new data
+                self.write({
+                    'product_ids': [(6, 0, new_composition.product_ids.ids)],
+                    'experience_id': new_composition.experience_id.id if new_composition.experience_id else False,
+                    'actual_cost': new_composition.actual_cost,
+                    'confidence_score': new_composition.confidence_score,
+                    'novelty_score': new_composition.novelty_score,
+                    'historical_compatibility': new_composition.historical_compatibility,
+                    'reasoning': new_composition.reasoning,
+                    'category_structure': new_composition.category_structure,
+                    'rule_applications': new_composition.rule_applications,
+                    'state': 'draft',
+                    'generated_date': fields.Datetime.now(),
+                })
+                
+                # Delete the temporary new composition
+                new_composition.unlink()
+                
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': 'Composition Regenerated',
+                        'message': f'New composition generated with {len(self.product_ids)} products. Cost: €{self.actual_cost:.2f}',
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            else:
+                raise UserError("Failed to generate new composition")
+                
+        except Exception as e:
+            _logger.error(f"Regeneration failed for composition {self.name}: {str(e)}")
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Regeneration Failed',
+                    'message': f'Could not regenerate composition: {str(e)}',
+                    'type': 'danger',
+                    'sticky': True,
+                }
             }
-        }
 
     def action_propose(self):
         """Propose composition to client"""
