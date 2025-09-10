@@ -253,54 +253,59 @@ class GiftComposition(models.Model):
     # Advanced Action Methods
     
     def action_regenerate(self):
-        """Regenerate composition using the actual composition engine"""
+        """Regenerate composition using the composition engine"""
         self.ensure_one()
         _logger.info(f"Regenerating Gift Composition: {self.name} (ID: {self.id})")
         
         try:
-            # Use the integration manager for full regeneration
-            integration_manager = self.env['integration.manager']
+            # Use the composition engine directly
+            composition_engine = self.env['composition.engine']
             
-            # Prepare regeneration parameters
+            # Extract dietary restrictions from stored data
             dietary_list = []
             if self.dietary_restrictions:
-                dietary_list = self.dietary_restrictions.split(',')
+                dietary_list = [d.strip() for d in self.dietary_restrictions.split(',') if d.strip()]
             
-            # Generate new composition using the same parameters
-            new_composition = integration_manager.generate_complete_composition(
+            # Generate new composition using the same parameters as original
+            new_composition = composition_engine.generate_composition(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget,
                 target_year=self.target_year,
                 dietary_restrictions=dietary_list,
                 force_type=self.composition_type if self.composition_type != 'auto' else None,
-                notes_text=None  # Could extract from existing reasoning if needed
+                notes_text=None  # Could add a notes field to store original notes if needed
             )
             
-            if new_composition:
-                # Update current composition with new data
-                self.write({
+            if new_composition and new_composition.id != self.id:
+                # Extract the new data from the generated composition
+                new_data = {
                     'product_ids': [(6, 0, new_composition.product_ids.ids)],
                     'experience_id': new_composition.experience_id.id if new_composition.experience_id else False,
-                    'actual_cost': new_composition.actual_cost,
                     'confidence_score': new_composition.confidence_score,
                     'novelty_score': new_composition.novelty_score,
                     'historical_compatibility': new_composition.historical_compatibility,
                     'reasoning': new_composition.reasoning,
                     'category_structure': new_composition.category_structure,
                     'rule_applications': new_composition.rule_applications,
-                    'state': 'draft',
+                    'state': 'draft',  # Reset to draft after regeneration
                     'generated_date': fields.Datetime.now(),
-                })
+                }
                 
-                # Delete the temporary new composition
+                # Update current composition with new data
+                self.write(new_data)
+                
+                # Clean up - delete the temporary composition
                 new_composition.unlink()
+                
+                # Force recalculation of computed fields
+                self.invalidate_cache()
                 
                 return {
                     'type': 'ir.actions.client',
                     'tag': 'display_notification',
                     'params': {
-                        'title': 'Composition Regenerated',
-                        'message': f'New composition generated with {len(self.product_ids)} products. Cost: €{self.actual_cost:.2f}',
+                        'title': 'Composition Regenerated Successfully',
+                        'message': f'New composition with {len(self.product_ids)} products. Total: €{self.actual_cost:.2f}',
                         'type': 'success',
                         'sticky': False,
                     }
@@ -315,7 +320,7 @@ class GiftComposition(models.Model):
                 'tag': 'display_notification',
                 'params': {
                     'title': 'Regeneration Failed',
-                    'message': f'Could not regenerate composition: {str(e)}',
+                    'message': f'Error: {str(e)}',
                     'type': 'danger',
                     'sticky': True,
                 }
