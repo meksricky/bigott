@@ -51,7 +51,7 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'views/gift_composition_views.xml',
         'views/client_history_views.xml',
         'views/experience_views.xml',
-        # 'views/batch_processing_views.xml',
+        'views/batch_processing_views.xml',
         
         # Views - Engines
         # 'views/ml_engine_views.xml',
