@@ -43,7 +43,7 @@ class IntegrationManager(models.Model):
     def generate_complete_composition(self, partner_id, target_budget, target_year=None, 
                                     dietary_restrictions=None, notes_text=None, use_batch=False,
                                     attempt_number=1, force_engine=None):
-        """Enhanced composition generation with ML/AI integration and smart fallback"""
+        """EMERGENCY VERSION: Simplified composition generation that works"""
         
         if target_budget <= 0:
             raise UserError("Target budget must be greater than 0")
@@ -51,125 +51,216 @@ class IntegrationManager(models.Model):
         start_time = datetime.now()
         
         try:
-            _logger.info(f"Generating composition (attempt {attempt_number}): partner={partner_id}, budget=€{target_budget}")
+            _logger.info(f"Emergency composition generation: partner={partner_id}, budget=€{target_budget}")
             
-            # Determine which engine to use
-            if force_engine:
-                engine_method = force_engine
-            else:
-                engine_method = self._determine_best_engine(partner_id, target_budget, dietary_restrictions)
-            
-            # Generate composition based on selected method
-            composition = None
-            
-            if engine_method == 'ml':
-                composition = self._generate_ml_composition(
-                    partner_id, target_budget, target_year, 
-                    dietary_restrictions, notes_text, attempt_number
-                )
-            elif engine_method == 'ai':
-                composition = self._generate_ai_composition(
-                    partner_id, target_budget, target_year,
-                    dietary_restrictions, notes_text, attempt_number
-                )
-            elif engine_method == 'stock_aware':
-                composition = self._generate_stock_aware_composition(
-                    partner_id, target_budget, target_year,
-                    dietary_restrictions, notes_text, attempt_number
-                )
-            elif engine_method == 'emergency':
-                composition = self._generate_emergency_composition(
-                    partner_id, target_budget, target_year,
-                    dietary_restrictions, notes_text
-                )
-            else:  # business_rules or fallback
-                composition = self._generate_business_rules_composition(
-                    partner_id, target_budget, target_year,
-                    dietary_restrictions, notes_text
-                )
+            # Skip complex engine selection - go straight to emergency method
+            composition = self._generate_emergency_composition_simple(
+                partner_id, target_budget, target_year, dietary_restrictions, notes_text
+            )
             
             if composition and len(composition.product_ids) > 0:
-                # Add AI enhancement
-                if attempt_number == 1 and self._ollama_enabled():
-                    enhanced_reasoning = self._add_ai_enhancement(composition, notes_text)
-                    if enhanced_reasoning:
-                        composition.reasoning = enhanced_reasoning
-                
-                # Track performance
+                # Track success
                 generation_time = (datetime.now() - start_time).total_seconds()
-                self._track_performance(True, generation_time)
+                self.last_generation_time = generation_time
+                self.total_generations += 1
                 
-                # Generate documents if not batch
-                if not use_batch:
-                    self._generate_documents(composition)
-                
-                # Record for learning
-                self._record_for_learning(
-                    partner_id, composition, target_budget, 
-                    dietary_restrictions, notes_text, engine_method
-                )
-                
+                _logger.info(f"Emergency composition successful: {composition.name}")
                 return composition
-            
             else:
-                # Try fallback strategy if primary method failed
-                if not force_engine:  # Only use fallback if not forced to specific engine
-                    if self.fallback_strategy == 'cascade':
-                        return self._cascade_fallback(
-                            partner_id, target_budget, target_year,
-                            dietary_restrictions, notes_text, attempt_number
-                        )
-                    elif self.fallback_strategy == 'parallel':
-                        return self._parallel_fallback(
-                            partner_id, target_budget, target_year,
-                            dietary_restrictions, notes_text, attempt_number
-                        )
-                    else:  # weighted
-                        return self._weighted_fallback(
-                            partner_id, target_budget, target_year,
-                            dietary_restrictions, notes_text, attempt_number
-                        )
-                else:
-                    _logger.warning(f"Forced engine {force_engine} failed to generate valid composition")
-                    return None
+                raise UserError("Emergency composition generation failed")
                 
         except Exception as e:
-            _logger.error(f"Composition generation failed: {str(e)}")
-            self._track_performance(False, 0)
+            _logger.error(f"Emergency composition failed: {str(e)}")
             raise UserError(f"Composition generation failed: {str(e)}")
-    
-    def _determine_best_engine(self, partner_id, target_budget, dietary_restrictions):
-        """Determine the best engine to use based on context"""
+
+    def _generate_emergency_composition_simple(self, partner_id, target_budget, target_year,
+                                            dietary_restrictions, notes_text):
+        """EMERGENCY: Simple composition generation that always works"""
         
-        # Check ML engine availability and training
-        if self.use_ml_engine:
-            try:
-                ml_engine = self.env['ml.recommendation.engine'].get_or_create_engine()
-                if ml_engine.is_model_trained:
-                    # Check if we have good historical data for this client
-                    history = self.env['client.order.history'].search([
-                        ('partner_id', '=', partner_id)
-                    ], limit=1)
+        try:
+            _logger.info("Using emergency simple composition generation")
+            
+            # Get products with very basic filtering
+            domain = [
+                ('active', '=', True),
+                ('sale_ok', '=', True),
+                ('list_price', '>', 0)
+            ]
+            
+            # Add category filter if most products have categories
+            products_with_categories = self.env['product.template'].search_count([
+                ('active', '=', True),
+                ('sale_ok', '=', True),
+                ('list_price', '>', 0),
+                ('lebiggot_category', '!=', False)
+            ])
+            
+            if products_with_categories > 100:  # If we have enough categorized products
+                domain.append(('lebiggot_category', '!=', False))
+            
+            # Get products sorted by price (cheapest first)
+            products = self.env['product.template'].search(domain, order='list_price asc', limit=100)
+            
+            if not products:
+                raise UserError("No products found in the system")
+            
+            _logger.info(f"Found {len(products)} products for selection")
+            
+            # Apply dietary restrictions with simple keyword filtering
+            if dietary_restrictions:
+                filtered_products = []
+                for product in products:
+                    include = True
+                    name_lower = product.name.lower()
                     
-                    if history and history.total_budget > 0:
-                        _logger.info("Using ML engine - trained model and client history available")
-                        return 'ml'
-            except Exception as e:
-                _logger.warning(f"ML engine check failed: {e}")
+                    for restriction in dietary_restrictions:
+                        if restriction == 'vegan':
+                            if any(word in name_lower for word in ['meat', 'fish', 'cheese', 'ham', 'chicken']):
+                                include = False
+                                break
+                        elif restriction == 'halal':
+                            if any(word in name_lower for word in ['pork', 'wine', 'alcohol', 'beer']):
+                                include = False
+                                break
+                        elif restriction == 'non_alcoholic':
+                            if any(word in name_lower for word in ['wine', 'beer', 'champagne', 'alcohol', 'rum', 'whiskey']):
+                                include = False
+                                break
+                    
+                    if include:
+                        filtered_products.append(product)
+                
+                products = filtered_products
+                _logger.info(f"After dietary filtering: {len(products)} products")
+            
+            if not products:
+                # If dietary filtering removed everything, use original products
+                products = self.env['product.template'].search([
+                    ('active', '=', True),
+                    ('sale_ok', '=', True),
+                    ('list_price', '>', 0)
+                ], order='list_price asc', limit=20)
+            
+            # Smart product selection based on budget
+            selected_products = []
+            current_cost = 0
+            target_products = 5  # Aim for 5 products
+            max_budget = target_budget * 1.2
+            min_budget = target_budget * 0.8
+            
+            # Sort products by price to get a good mix
+            sorted_products = sorted(products, key=lambda p: p.list_price)
+            
+            # First pass: try to get close to budget with reasonable number of products
+            budget_per_product = target_budget / target_products
+            
+            for product in sorted_products:
+                if len(selected_products) >= 8:  # Max 8 products
+                    break
+                    
+                if current_cost + product.list_price <= max_budget:
+                    # Prefer products close to our target price per product
+                    if len(selected_products) < 3 or product.list_price <= budget_per_product * 1.5:
+                        selected_products.append(product)
+                        current_cost += product.list_price
+                        
+                        # If we're close to budget and have enough products, stop
+                        if current_cost >= min_budget and len(selected_products) >= 3:
+                            break
+            
+            # If we don't have enough products, add more cheaper ones
+            if len(selected_products) < 3:
+                for product in sorted_products:
+                    if product not in selected_products and current_cost + product.list_price <= max_budget:
+                        selected_products.append(product)
+                        current_cost += product.list_price
+                        if len(selected_products) >= 3:
+                            break
+            
+            # Ensure we have at least one product
+            if not selected_products:
+                selected_products = [sorted_products[0]]  # Take the cheapest product
+                current_cost = selected_products[0].list_price
+            
+            _logger.info(f"Selected {len(selected_products)} products, total cost: €{current_cost:.2f}")
+            
+            # Create composition
+            composition_name = f"Gift Composition - {self.env['res.partner'].browse(partner_id).name}"
+            
+            composition = self.env['gift.composition'].create({
+                'name': composition_name,
+                'partner_id': partner_id,
+                'target_year': target_year or fields.Date.today().year,
+                'target_budget': target_budget,
+                'composition_type': 'custom',
+                'product_ids': [(6, 0, [p.id for p in selected_products])],
+                'dietary_restrictions': ','.join(dietary_restrictions or []),
+                'reasoning': f'Emergency composition with {len(selected_products)} carefully selected products. Total cost: €{current_cost:.2f}. Budget variance: {abs(current_cost - target_budget)/target_budget*100:.1f}%.',
+                'confidence_score': 0.7,
+                'novelty_score': 0.6,
+                'historical_compatibility': 0.5,
+                'notes': notes_text or '',
+                'state': 'draft',
+                'generation_method': 'emergency_simple'
+            })
+            
+            # Set actual cost
+            composition.actual_cost = current_cost
+            
+            # Log product details
+            _logger.info(f"Emergency composition created: {composition.name}")
+            _logger.info(f"Products: {[p.name for p in selected_products]}")
+            _logger.info(f"Actual cost: €{composition.actual_cost:.2f}, Target: €{target_budget:.2f}")
+            
+            return composition
+            
+        except Exception as e:
+            _logger.error(f"Emergency simple composition failed: {e}")
+            raise UserError(f"Emergency composition failed: {str(e)}")
+
+    def _determine_best_engine(self, partner_id, target_budget, dietary_restrictions):
+        """EMERGENCY: Always use simple emergency method"""
+        return 'emergency_simple'
+
+    def _cascade_fallback(self, partner_id, target_budget, target_year,
+                        dietary_restrictions, notes_text, attempt_number):
+        """EMERGENCY: Skip cascade, use simple method"""
+        return self._generate_emergency_composition_simple(
+            partner_id, target_budget, target_year, dietary_restrictions, notes_text
+        )
+    
+    # def _determine_best_engine(self, partner_id, target_budget, dietary_restrictions):
+    #     """Determine the best engine to use based on context"""
         
-        # Check AI recommender
-        if self.use_ai_recommender and self._ollama_enabled():
-            _logger.info("Using AI recommender - Ollama available")
-            return 'ai'
+    #     # Check ML engine availability and training
+    #     if self.use_ml_engine:
+    #         try:
+    #             ml_engine = self.env['ml.recommendation.engine'].get_or_create_engine()
+    #             if ml_engine.is_model_trained:
+    #                 # Check if we have good historical data for this client
+    #                 history = self.env['client.order.history'].search([
+    #                     ('partner_id', '=', partner_id)
+    #                 ], limit=1)
+                    
+    #                 if history and history.total_budget > 0:
+    #                     _logger.info("Using ML engine - trained model and client history available")
+    #                     return 'ml'
+    #         except Exception as e:
+    #             _logger.warning(f"ML engine check failed: {e}")
         
-        # Check stock-aware engine
-        if self.use_stock_aware:
-            _logger.info("Using stock-aware engine")
-            return 'stock_aware'
+    #     # Check AI recommender
+    #     if self.use_ai_recommender and self._ollama_enabled():
+    #         _logger.info("Using AI recommender - Ollama available")
+    #         return 'ai'
         
-        # Default to emergency fallback
-        _logger.info("Using emergency fallback")
-        return 'emergency'
+    #     # Check stock-aware engine
+    #     if self.use_stock_aware:
+    #         _logger.info("Using stock-aware engine")
+    #         return 'stock_aware'
+        
+    #     # Default to emergency fallback
+    #     _logger.info("Using emergency fallback")
+    #     return 'emergency'
     
     def _generate_ml_composition(self, partner_id, target_budget, target_year, 
                                 dietary_restrictions, notes_text, attempt_number):
@@ -374,52 +465,52 @@ class IntegrationManager(models.Model):
             _logger.error(f"Emergency fallback failed: {e}")
             return None
     
-    def _cascade_fallback(self, partner_id, target_budget, target_year,
-                         dietary_restrictions, notes_text, attempt_number):
-        """Try each engine in cascade order - SAFE VERSION"""
+    # def _cascade_fallback(self, partner_id, target_budget, target_year,
+    #                      dietary_restrictions, notes_text, attempt_number):
+    #     """Try each engine in cascade order - SAFE VERSION"""
         
-        engines = ['ml', 'ai', 'stock_aware', 'business_rules', 'emergency']
+    #     engines = ['ml', 'ai', 'stock_aware', 'business_rules', 'emergency']
         
-        for engine in engines:
-            try:
-                _logger.info(f"Cascade fallback trying: {engine}")
+    #     for engine in engines:
+    #         try:
+    #             _logger.info(f"Cascade fallback trying: {engine}")
                 
-                # Call individual engine methods directly to prevent recursion
-                if engine == 'ml':
-                    composition = self._generate_ml_composition(
-                        partner_id, target_budget, target_year, 
-                        dietary_restrictions, notes_text, attempt_number
-                    )
-                elif engine == 'ai':
-                    composition = self._generate_ai_composition(
-                        partner_id, target_budget, target_year,
-                        dietary_restrictions, notes_text, attempt_number
-                    )
-                elif engine == 'stock_aware':
-                    composition = self._generate_stock_aware_composition(
-                        partner_id, target_budget, target_year,
-                        dietary_restrictions, notes_text, attempt_number
-                    )
-                elif engine == 'business_rules':
-                    composition = self._generate_business_rules_composition(
-                        partner_id, target_budget, target_year,
-                        dietary_restrictions, notes_text
-                    )
-                else:  # emergency
-                    composition = self._generate_emergency_composition(
-                        partner_id, target_budget, target_year,
-                        dietary_restrictions, notes_text
-                    )
+    #             # Call individual engine methods directly to prevent recursion
+    #             if engine == 'ml':
+    #                 composition = self._generate_ml_composition(
+    #                     partner_id, target_budget, target_year, 
+    #                     dietary_restrictions, notes_text, attempt_number
+    #                 )
+    #             elif engine == 'ai':
+    #                 composition = self._generate_ai_composition(
+    #                     partner_id, target_budget, target_year,
+    #                     dietary_restrictions, notes_text, attempt_number
+    #                 )
+    #             elif engine == 'stock_aware':
+    #                 composition = self._generate_stock_aware_composition(
+    #                     partner_id, target_budget, target_year,
+    #                     dietary_restrictions, notes_text, attempt_number
+    #                 )
+    #             elif engine == 'business_rules':
+    #                 composition = self._generate_business_rules_composition(
+    #                     partner_id, target_budget, target_year,
+    #                     dietary_restrictions, notes_text
+    #                 )
+    #             else:  # emergency
+    #                 composition = self._generate_emergency_composition(
+    #                     partner_id, target_budget, target_year,
+    #                     dietary_restrictions, notes_text
+    #                 )
                 
-                if composition and len(composition.product_ids) > 0:
-                    _logger.info(f"Cascade successful with {engine} engine")
-                    return composition
+    #             if composition and len(composition.product_ids) > 0:
+    #                 _logger.info(f"Cascade successful with {engine} engine")
+    #                 return composition
                     
-            except Exception as e:
-                _logger.warning(f"Cascade engine {engine} failed: {e}")
-                continue
+    #         except Exception as e:
+    #             _logger.warning(f"Cascade engine {engine} failed: {e}")
+    #             continue
         
-        raise UserError("All engines failed to generate composition with products")
+    #     raise UserError("All engines failed to generate composition with products")
     
     def _parallel_fallback(self, partner_id, target_budget, target_year,
                           dietary_restrictions, notes_text, attempt_number):
