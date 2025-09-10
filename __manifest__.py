@@ -54,7 +54,7 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'views/batch_processing_views.xml',
         
         # Views - Engines
-        # 'views/ml_engine_views.xml',
+        'views/ml_engine_views.xml',
         'views/ai_product_recommender_views.xml',
         'views/integration_manager_views.xml',
         # 'views/stock_aware_composition_views.xml',
