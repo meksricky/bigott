@@ -254,7 +254,7 @@ class GiftComposition(models.Model):
     def _check_budget_compliance(self):
         """Validate budget compliance on state changes"""
         for composition in self:
-            if composition.state in ['proposed', approved'] and composition.target_budget > 0:
+            if composition.state in ['proposed', 'approved'] and composition.target_budget > 0:
                 if composition.actual_cost > 0:
                     variance_percent = abs(composition.actual_cost - composition.target_budget) / composition.target_budget * 100
                     if variance_percent > 15:  # Hard limit at 15%
