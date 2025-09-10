@@ -75,7 +75,7 @@ class IntegrationManager(models.Model):
 
     def _generate_emergency_composition_simple(self, partner_id, target_budget, target_year,
                                             dietary_restrictions, notes_text):
-        """EMERGENCY: Simple composition generation that always works"""
+        """EMERGENCY: Simple composition generation that always works - CORRECTED VERSION"""
         
         try:
             _logger.info("Using emergency simple composition generation")
@@ -184,10 +184,27 @@ class IntegrationManager(models.Model):
             
             _logger.info(f"Selected {len(selected_products)} products, total cost: €{current_cost:.2f}")
             
-            # Create composition
-            composition_name = f"Gift Composition - {self.env['res.partner'].browse(partner_id).name}"
+            # Create composition with only valid fields
+            partner_name = self.env['res.partner'].browse(partner_id).name
+            composition_name = f"Gift Composition - {partner_name}"
             
-            composition = self.env['gift.composition'].create({
+            # Build reasoning text (include notes_text here since we can't store it separately)
+            reasoning_parts = [
+                f'Emergency composition with {len(selected_products)} carefully selected products.',
+                f'Total cost: €{current_cost:.2f}.',
+                f'Budget variance: {abs(current_cost - target_budget)/target_budget*100:.1f}%.'
+            ]
+            
+            if notes_text:
+                reasoning_parts.append(f'Special notes: {notes_text}')
+            
+            if dietary_restrictions:
+                reasoning_parts.append(f'Dietary restrictions applied: {", ".join(dietary_restrictions)}')
+            
+            reasoning_text = ' '.join(reasoning_parts)
+            
+            # CORRECTED: Create composition with only fields that exist
+            composition_vals = {
                 'name': composition_name,
                 'partner_id': partner_id,
                 'target_year': target_year or fields.Date.today().year,
@@ -195,16 +212,17 @@ class IntegrationManager(models.Model):
                 'composition_type': 'custom',
                 'product_ids': [(6, 0, [p.id for p in selected_products])],
                 'dietary_restrictions': ','.join(dietary_restrictions or []),
-                'reasoning': f'Emergency composition with {len(selected_products)} carefully selected products. Total cost: €{current_cost:.2f}. Budget variance: {abs(current_cost - target_budget)/target_budget*100:.1f}%.',
+                'reasoning': reasoning_text,
                 'confidence_score': 0.7,
                 'novelty_score': 0.6,
                 'historical_compatibility': 0.5,
-                'notes': notes_text or '',
                 'state': 'draft',
                 'generation_method': 'emergency_simple'
-            })
+            }
             
-            # Set actual cost
+            composition = self.env['gift.composition'].create(composition_vals)
+            
+            # Set actual cost (this will trigger the compute method)
             composition.actual_cost = current_cost
             
             # Log product details
