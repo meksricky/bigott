@@ -12,6 +12,44 @@ class ProductTemplate(models.Model):
         ('charcuterie', 'Charcuterie'),
         ('sweets', 'Sweets')
     ], string='Le Biggot Category')
+
+    beverage_family = fields.Selection([
+        ('wine', 'Wine'),
+        ('cava', 'Cava'),
+        ('champagne', 'Champagne'),
+        ('vermouth', 'Vermouth'),
+        ('tokaj', 'Tokaj'),
+    ], string='Beverage Family')
+
+    wine_color = fields.Selection([
+        ('red', 'Red'),
+        ('white', 'White'),
+        ('rose', 'Rosé'),
+    ], string='Wine Color')
+
+    foie_variant = fields.Selection([
+        ('duck', 'Duck'),
+        ('goose', 'Goose'),
+    ], string='Foie Variant')
+
+    sweets_subtype = fields.Char('Sweets Subtype')
+    is_paletilla = fields.Boolean('Is Paletilla')
+    is_charcuterie_item = fields.Boolean('Is Charcuterie Item')
+    is_experience_only = fields.Boolean('Experience Only')
+    rule_locked = fields.Boolean('Rule Locked')
+    substitute_group = fields.Char('Substitute Group')
+    supplier_code = fields.Char('Supplier Code')
+    production_batch = fields.Char('Production Batch')
+
+    # And add the missing method
+    def action_view_business_rules(self):
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Business Rules',
+            'res_model': 'product.template',
+            'res_id': self.id,
+            'view_mode': 'form',
+        }
     
     # Detailed beverage categorization
     beverage_type = fields.Selection([
