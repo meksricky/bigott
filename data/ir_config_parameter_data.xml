@@ -9,7 +9,7 @@
             <field name="value">true</field>
         </record>
         
-        <record id="config_ollama_enabled" model="ir.config_parameter">
+        <!-- <record id="config_ollama_enabled" model="ir.config_parameter">
             <field name="key">lebigott_ai.ollama_enabled</field>
             <field name="value">true</field>
         </record>
@@ -22,7 +22,7 @@
         <record id="config_ollama_model" model="ir.config_parameter">
             <field name="key">lebigott_ai.ollama_model</field>
             <field name="value">llama3.2:3b</field>
-        </record>
+        </record> -->
         
         <record id="config_auto_training" model="ir.config_parameter">
             <field name="key">lebigott_ai.auto_training_enabled</field>
