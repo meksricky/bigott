@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- ML Engine Form View -->
+        <record id="view_ml_recommendation_engine_form" model="ir.ui.view">
+            <field name="name">ml.recommendation.engine.form</field>
+            <field name="model">ml.recommendation.engine</field>
+            <field name="arch" type="xml">
+                <form string="ML Recommendation Engine" create="false" delete="false">
+                    <header>
+                        <button name="%(action_ml_training_wizard)d" 
+                                string="🎯 Train Models" 
+                                type="action" 
+                                class="btn-primary"/>
+                        <field name="is_model_trained" widget="badge" 
+                               decoration-success="is_model_trained == True"
+                               decoration-danger="is_model_trained == False"/>
+                    </header>
+                    <sheet>
+                        <div class="oe_title">
+                            <h1>🧠 ML Recommendation Engine</h1>
+                            <h2>Status &amp; Performance Metrics</h2>
+                        </div>
+                        
+                        <group>
+                            <group name="model_info" string="Model Information">
+                                <field name="model_version" readonly="1"/>
+                                <field name="last_training_date" readonly="1"/>
+                                <field name="training_samples" readonly="1"/>
+                                <field name="model_accuracy" readonly="1" widget="percentage"/>
+                            </group>
+                            <group name="performance" string="Performance Metrics">
+                                <field name="is_model_trained" readonly="1"/>
+                                <!-- Add more performance fields as needed -->
+                            </group>
+                        </group>
+                        
+                        <!-- Model Performance Dashboard -->
+                        <div class="row" style="margin-top: 20px;">
+                            <div class="col-md-4">
+                                <div class="panel panel-info">
+                                    <div class="panel-heading">
+                                        <h4>📊 Training Data</h4>
+                                    </div>
+                                    <div class="panel-body">
+                                        <p><strong>Samples:</strong> <field name="training_samples" readonly="1" nolabel="1"/></p>
+                                        <p><strong>Last Updated:</strong> <field name="last_training_date" readonly="1" nolabel="1"/></p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="panel panel-success">
+                                    <div class="panel-heading">
+                                        <h4>🎯 Model Accuracy</h4>
+                                    </div>
+                                    <div class="panel-body">
+                                        <p><strong>Accuracy:</strong> <field name="model_accuracy" readonly="1" nolabel="1" widget="percentage"/></p>
+                                        <p><strong>Version:</strong> <field name="model_version" readonly="1" nolabel="1"/></p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-4">
+                                <div class="panel panel-warning">
+                                    <div class="panel-heading">
+                                        <h4>⚡ Status</h4>
+                                    </div>
+                                    <div class="panel-body">
+                                        <p><strong>Trained:</strong> <field name="is_model_trained" readonly="1" nolabel="1"/></p>
+                                        <p><strong>Ready:</strong> <span class="text-success">✓ Active</span></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                    </sheet>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ML Engine Action -->
+        <record id="action_ml_recommendation_engine" model="ir.actions.act_window">
+            <field name="name">🧠 ML Engine Status</field>
+            <field name="res_model">ml.recommendation.engine</field>
+            <field name="view_mode">form</field>
+            <field name="target">current</field>
+            <field name="limit">1</field>
+        </record>
+        
+    </data>
+</odoo>

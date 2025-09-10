@@ -133,7 +133,10 @@
     ],
     'external_dependencies': {
         'python': [
-            # 'requests',  # For Ollama integration (optional)
+            'requests',         # For Ollama API
+            'numpy',           # For numerical computations
+            'scikit-learn',    # For ML models
+            'joblib',          # For model persistence
         ],
     },
     'installable': True,

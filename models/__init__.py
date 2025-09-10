@@ -15,6 +15,8 @@ from . import composition_engine
 
 # 4. Advanced engines (depend on core engines)
 from . import stock_aware_composition_engine
+from . import ai_product_recommender
+from . import ml_recommendation_engine
 
 # 5. Document and processing models (depend on compositions)
 from . import gift_composition

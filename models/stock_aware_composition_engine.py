@@ -14,6 +14,9 @@ class StockAwareCompositionEngine(models.Model):
         """
         Generate composition that complies with business rules and stock availability
         """
+
+        import time
+        random_seed = int(time.time()) % 1000
         
         if not target_year:
             target_year = datetime.now().year
@@ -54,7 +57,48 @@ class StockAwareCompositionEngine(models.Model):
         )
         
         return composition
-    
+    def _add_randomization_factor(self, products, target_budget):
+        """Add slight randomization to product selection for different results"""
+        import random
+        
+        # Group products by category
+        by_category = {}
+        for product in products:
+            category = product.lebiggot_category or 'other'
+            if category not in by_category:
+                by_category[category] = []
+            by_category[category].append(product)
+        
+        # For each category with multiple options, randomly select alternatives
+        randomized_products = []
+        remaining_budget = target_budget * 1.05  # Max budget
+        
+        for category, category_products in by_category.items():
+            if len(category_products) > 1:
+                # Sort by price and pick from middle range for variation
+                sorted_products = sorted(category_products, key=lambda p: p.list_price)
+                mid_index = len(sorted_products) // 2
+                
+                # Select from middle ±1 for variation
+                start_idx = max(0, mid_index - 1) 
+                end_idx = min(len(sorted_products), mid_index + 2)
+                candidates = sorted_products[start_idx:end_idx]
+                
+                # Pick random candidate that fits budget
+                random.shuffle(candidates)
+                for candidate in candidates:
+                    if candidate.list_price <= remaining_budget:
+                        randomized_products.append(candidate)
+                        remaining_budget -= candidate.list_price
+                        break
+            else:
+                # Only one option, use it
+                if category_products and category_products[0].list_price <= remaining_budget:
+                    randomized_products.append(category_products[0])
+                    remaining_budget -= category_products[0].list_price
+        
+        return randomized_products
+
     def _apply_business_rules_composition(self, partner_id, target_year, last_products, 
                                         target_budget, dietary_restrictions, processed_notes):
         """Apply business rules to transform last year's composition"""

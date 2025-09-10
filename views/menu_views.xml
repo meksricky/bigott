@@ -53,6 +53,25 @@
                   parent="menu_master_data" 
                   action="product.product_template_action" 
                   sequence="30"/>
+
+
+        <!-- AI Configuration Menu -->
+        <menuitem id="menu_ai_configuration" 
+                name="🤖 AI Configuration" 
+                parent="menu_configuration" 
+                sequence="20"/>
+
+        <menuitem id="menu_ml_training" 
+                name="Train ML Models" 
+                parent="menu_ai_configuration" 
+                action="action_ml_training_wizard" 
+                sequence="10"/>
+
+        <menuitem id="menu_ml_status" 
+                name="ML Engine Status" 
+                parent="menu_ai_configuration" 
+                action="action_ml_recommendation_engine" 
+                sequence="20"/><!-- ML Training -->
         
     </data>
 </odoo>

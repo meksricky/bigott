@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        
+        <!-- ML Training Wizard Form -->
+        <record id="view_ml_training_wizard_form" model="ir.ui.view">
+            <field name="name">ml.training.wizard.form</field>
+            <field name="model">ml.training.wizard</field>
+            <field name="arch" type="xml">
+                <form string="🤖 ML Model Training">
+                    <sheet>
+                        <div class="oe_title">
+                            <h1 style="color: #875A7B;">🧠 Train ML Recommendation Models</h1>
+                            <p style="color: #666; font-size: 14px;">
+                                Train machine learning models from your historical sales data to improve gift recommendations
+                            </p>
+                        </div>
+                        
+                        <!-- Current Status -->
+                        <group name="current_status" string="📊 Current Model Status">
+                            <field name="current_model_status" readonly="1"/>
+                            <field name="last_training_date" readonly="1"/>
+                            <field name="training_samples_count" readonly="1"/>
+                            <field name="model_accuracy" readonly="1" widget="percentage"/>
+                        </group>
+                        
+                        <separator string="Training Configuration"/>
+                        
+                        <group>
+                            <group name="training_config" string="Training Options">
+                                <field name="training_type" widget="radio"/>
+                                <field name="min_training_samples"/>
+                                <field name="include_recent_data"/>
+                            </group>
+                            <group name="advanced_options" string="Advanced Options">
+                                <field name="test_after_training"/>
+                                <field name="backup_current_model"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Training Type Help -->
+                        <div class="alert alert-info" style="margin: 15px 0;">
+                            <h5>Training Type Guide:</h5>
+                            <ul style="margin-bottom: 0;">
+                                <li><strong>Full Retrain:</strong> Recommended for regular updates. Trains on all available data.</li>
+                                <li><strong>Incremental:</strong> Faster training using only new data since last training.</li>
+                                <li><strong>Force Retrain:</strong> Complete rebuild of models. Use when data structure changes.</li>
+                            </ul>
+                        </div>
+                        
+                        <!-- Training Data Info -->
+                        <div attrs="{'invisible': [('include_recent_data', '=', False)]}" 
+                             class="alert alert-warning">
+                            <strong>Recent Data Mode:</strong> Only using data from last 6 months. 
+                            This may reduce model accuracy but speeds up training.
+                        </div>
+                        
+                    </sheet>
+                    <footer>
+                        <button name="action_check_training_data" 
+                                string="🔍 Check Training Data" 
+                                type="object" 
+                                class="btn-secondary"/>
+                        <button name="action_start_training" 
+                                string="🚀 Start Training" 
+                                type="object" 
+                                class="btn-primary"
+                                confirm="This will start ML model training. Continue?"/>
+                        <button name="action_view_model_status" 
+                                string="📋 View Model Details" 
+                                type="object" 
+                                class="btn-secondary"/>
+                        <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- ML Training Wizard Action -->
+        <record id="action_ml_training_wizard" model="ir.actions.act_window">
+            <field name="name">🤖 Train ML Models</field>
+            <field name="res_model">ml.training.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="context">{}</field>
+        </record>
+        
+    </data>
+</odoo>

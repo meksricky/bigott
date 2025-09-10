@@ -1,0 +1,10 @@
+<record id="cron_ml_training" model="ir.cron">
+    <field name="name">ML Model Training</field>
+    <field name="model_id" ref="model_ml_recommendation_engine"/>
+    <field name="state">code</field>
+    <field name="code">model.run_weekly_ml_training()</field>
+    <field name="interval_number">1</field>
+    <field name="interval_type">weeks</field>
+    <field name="numbercall">-1</field>
+    <field name="active">True</field>
+</record>

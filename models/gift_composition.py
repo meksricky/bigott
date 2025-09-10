@@ -249,99 +249,105 @@ class GiftComposition(models.Model):
                 self.delivery_date = timestamp
         
         return result
-    
+
+    @api.constrains('product_ids', 'target_budget')
+    def _check_budget_compliance(self):
+        """Ensure ±5% budget compliance"""
+        for comp in self:
+            if comp.target_budget and comp.product_ids:
+                variance_percent = abs(comp.actual_cost - comp.target_budget) / comp.target_budget * 100
+                if variance_percent > 5 and comp.state in ['proposed', 'approved']:
+                    raise ValidationError(
+                        f"Budget variance of {variance_percent:.1f}% exceeds ±5% limit.\n"
+                        f"Actual: €{comp.actual_cost:.2f}, Target: €{comp.target_budget:.2f}"
+                    )
+                    
     # Advanced Action Methods
     
     def action_regenerate(self):
-        """Regenerate composition using the composition engine"""
+        """ML-powered regeneration"""
         self.ensure_one()
-        _logger.info(f"Regenerating Gift Composition: {self.name} (ID: {self.id})")
         
         try:
-            # Use the composition engine directly
-            composition_engine = self.env['composition.engine']
+            ml_engine = self.env['ml.recommendation.engine']
             
-            # Extract dietary restrictions from stored data
             dietary_list = []
             if self.dietary_restrictions:
                 dietary_list = [d.strip() for d in self.dietary_restrictions.split(',') if d.strip()]
             
-            # Generate new composition using the same parameters as original
-            new_composition = composition_engine.generate_composition(
+            # Get ML recommendations
+            ml_result = ml_engine.get_smart_recommendations(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget,
-                target_year=self.target_year,
                 dietary_restrictions=dietary_list,
-                force_type=self.composition_type if self.composition_type != 'auto' else None,
-                notes_text=None  # Could add a notes field to store original notes if needed
+                notes_text=self.notes
             )
             
-            if new_composition and new_composition.id != self.id:
-                # Extract the new data from the generated composition
-                new_data = {
-                    'product_ids': [(6, 0, new_composition.product_ids.ids)],
-                    'experience_id': new_composition.experience_id.id if new_composition.experience_id else False,
-                    'confidence_score': new_composition.confidence_score,
-                    'novelty_score': new_composition.novelty_score,
-                    'historical_compatibility': new_composition.historical_compatibility,
-                    'reasoning': new_composition.reasoning,
-                    'category_structure': new_composition.category_structure,
-                    'rule_applications': new_composition.rule_applications,
-                    'state': 'draft',  # Reset to draft after regeneration
-                    'generated_date': fields.Datetime.now(),
-                }
-                
-                # Update current composition with new data
-                self.write(new_data)
-                
-                # Clean up - delete the temporary composition
-                new_composition.unlink()
-                
-                # Force recalculation of computed fields
-                self.invalidate_cache()
-                
-                return {
-                    'type': 'ir.actions.client',
-                    'tag': 'display_notification',
-                    'params': {
-                        'title': 'Composition Regenerated Successfully',
-                        'message': f'New composition with {len(self.product_ids)} products. Total: €{self.actual_cost:.2f}',
-                        'type': 'success',
-                        'sticky': False,
-                    }
-                }
-            else:
-                raise UserError("Failed to generate new composition")
-                
-        except Exception as e:
-            _logger.error(f"Regeneration failed for composition {self.name}: {str(e)}")
+            # Update composition
+            self.write({
+                'product_ids': [(6, 0, [p.id for p in ml_result['products']])],
+                'confidence_score': ml_result['ml_confidence'],
+                'reasoning': ml_result['reasoning'],
+                'state': 'draft',
+                'generated_date': fields.Datetime.now(),
+            })
+            
+            variance = ml_result['budget_variance']
+            method = ml_result['method']
+            
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': 'Regeneration Failed',
-                    'message': f'Error: {str(e)}',
+                    'title': f'🤖 {method} Regeneration Complete',
+                    'message': f'{len(ml_result["products"])} products, €{ml_result["actual_cost"]:.2f} (±{variance:.1f}%)',
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'ML Regeneration Failed',
+                    'message': str(e),
+                    'type': 'danger',
+                    'sticky': True,
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'AI Regeneration Failed',
+                    'message': str(e),
                     'type': 'danger',
                     'sticky': True,
                 }
             }
 
     def action_propose(self):
-        """Propose composition to client"""
+        """Propose composition to client - SIMPLIFIED VERSION"""
         self.ensure_one()
         
         if self.actual_cost <= 0:
             raise UserError("Cannot propose composition with zero cost. Please add products first.")
         
-        # BRD Validation: Check ±5% budget guardrail
+        # Simple budget check without wizard
         if abs(self.budget_variance_percent) > 5:
             return {
-                'type': 'ir.actions.act_window',
-                'name': 'Budget Guardrail Warning',
-                'res_model': 'budget.guardrail.warning.wizard',  # Would need to create this
-                'view_mode': 'form',
-                'target': 'new',
-                'context': {'default_composition_id': self.id}
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Budget Variance Warning',
+                    'message': f'This composition is {self.budget_variance_percent:.1f}% over budget. Consider regenerating.',
+                    'type': 'warning',
+                    'sticky': True,
+                }
             }
         
         self.write({
@@ -356,7 +362,6 @@ class GiftComposition(models.Model):
                 'title': 'Composition Proposed',
                 'message': 'Gift composition has been proposed to the client.',
                 'type': 'success',
-                'sticky': False,
             }
         }
 

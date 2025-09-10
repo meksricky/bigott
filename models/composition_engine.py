@@ -43,6 +43,38 @@ class CompositionEngine(models.Model):
             _logger.warning('Ollama request failed: %s', e)
         return None
 
+    # Filter products that are in stock and have internal reference
+    def _get_available_products_with_stock(self, domain):
+        """Get products that are in stock and have internal reference"""
+        
+        # Base product search
+        products = self.env['product.template'].search(domain)
+        
+        available_products = []
+        
+        for product in products:
+            # Skip products without internal reference
+            if not product.default_code:
+                continue
+                
+            # Check stock for all variants
+            has_stock = False
+            for variant in product.product_variant_ids:
+                stock_quants = self.env['stock.quant'].search([
+                    ('product_id', '=', variant.id),
+                    ('location_id.usage', '=', 'internal')
+                ])
+                
+                available_qty = sum(stock_quants.mapped('available_quantity'))
+                if available_qty > 0:
+                    has_stock = True
+                    break
+            
+            if has_stock:
+                available_products.append(product)
+        
+        return available_products
+
     def generate_composition(self, partner_id, target_budget, target_year=None, dietary_restrictions=None, force_type=None, notes_text=None):
         """Main entry point for generating gift compositions"""
         
@@ -546,7 +578,7 @@ class CompositionEngine(models.Model):
             elif restriction == 'no_alcohol':
                 domain.append(('contains_alcohol', '=', False))
         
-        available_products = self.env['product.template'].search(domain)
+        available_products = self._get_available_products_with_stock(domain)
         
         # Filter out avoided products
         if client_analysis.get('avoided_products'):
