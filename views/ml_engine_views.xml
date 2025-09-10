@@ -319,12 +319,12 @@
         </field>
     </record>
     
-    <record id="action_ml_training_wizard" model="ir.actions.act_window">
+    <!-- <record id="action_ml_training_wizard" model="ir.actions.act_window">
         <field name="name">Train ML Model</field>
         <field name="res_model">ml.training.wizard</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>
-    </record>
+    </record> -->
     
     <!-- Menu Items -->
     
