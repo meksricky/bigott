@@ -43,13 +43,24 @@ class ProductTemplate(models.Model):
 
     # And add the missing method
     def action_view_business_rules(self):
+        self.ensure_one()
+        engine = self.env['business.rules.engine']
+        result = engine.apply_composition_rules(
+            partner_id=False,   # or actual partner
+            target_year=fields.Date.today().year,
+            last_composition_products=[self]
+        )
+        # For now just show product form again with a context
         return {
             'type': 'ir.actions.act_window',
             'name': 'Business Rules',
             'res_model': 'product.template',
-            'res_id': self.id,
             'view_mode': 'form',
+            'res_id': self.id,
+            'target': 'current',
+            'context': {'default_rule_report': result.get('rule_applications', [])},
         }
+
     
     # Detailed beverage categorization
     beverage_type = fields.Selection([
