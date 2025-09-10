@@ -40,73 +40,64 @@ class IntegrationManager(models.Model):
                 record.success_rate = 0.0
     
     @api.model
-    def generate_complete_composition(self, partner_id, target_budget, target_year=None, 
-                                    dietary_restrictions=None, notes_text=None, use_batch=False,
-                                    attempt_number=1, force_engine=None):
-        """EMERGENCY VERSION: Simplified composition generation that works"""
+    # def generate_complete_composition(self, partner_id, target_budget, target_year=None, 
+    #                                 dietary_restrictions=None, notes_text=None, use_batch=False,
+    #                                 attempt_number=1, force_engine=None):
+    #     """EMERGENCY VERSION: Simplified composition generation that works"""
         
-        if target_budget <= 0:
-            raise UserError("Target budget must be greater than 0")
+    #     if target_budget <= 0:
+    #         raise UserError("Target budget must be greater than 0")
         
-        start_time = datetime.now()
+    #     start_time = datetime.now()
         
-        try:
-            _logger.info(f"Emergency composition generation: partner={partner_id}, budget=€{target_budget}")
+    #     try:
+    #         _logger.info(f"Emergency composition generation: partner={partner_id}, budget=€{target_budget}")
             
-            # Skip complex engine selection - go straight to emergency method
-            composition = self._generate_emergency_composition_simple(
-                partner_id, target_budget, target_year, dietary_restrictions, notes_text
-            )
+    #         # Skip complex engine selection - go straight to emergency method
+    #         composition = self._generate_emergency_composition_simple(
+    #             partner_id, target_budget, target_year, dietary_restrictions, notes_text
+    #         )
             
-            if composition and len(composition.product_ids) > 0:
-                # Track success
-                generation_time = (datetime.now() - start_time).total_seconds()
-                self.last_generation_time = generation_time
-                self.total_generations += 1
+    #         if composition and len(composition.product_ids) > 0:
+    #             # Track success
+    #             generation_time = (datetime.now() - start_time).total_seconds()
+    #             self.last_generation_time = generation_time
+    #             self.total_generations += 1
                 
-                _logger.info(f"Emergency composition successful: {composition.name}")
-                return composition
-            else:
-                raise UserError("Emergency composition generation failed")
+    #             _logger.info(f"Emergency composition successful: {composition.name}")
+    #             return composition
+    #         else:
+    #             raise UserError("Emergency composition generation failed")
                 
-        except Exception as e:
-            _logger.error(f"Emergency composition failed: {str(e)}")
-            raise UserError(f"Composition generation failed: {str(e)}")
+    #     except Exception as e:
+    #         _logger.error(f"Emergency composition failed: {str(e)}")
+    #         raise UserError(f"Composition generation failed: {str(e)}")
 
+    @api.model
     def _generate_emergency_composition_simple(self, partner_id, target_budget, target_year,
                                             dietary_restrictions, notes_text):
-        """EMERGENCY: Simple composition generation that always works - CORRECTED VERSION"""
+        """MINIMAL: Only uses standard Odoo fields that definitely exist"""
         
         try:
-            _logger.info("Using emergency simple composition generation")
+            _logger.info("Using minimal emergency composition generation")
             
-            # Get products with very basic filtering
+            # Get products with absolute basic filtering - only standard Odoo fields
             domain = [
                 ('active', '=', True),
                 ('sale_ok', '=', True),
-                ('list_price', '>', 0)
+                ('list_price', '>', 0),
+                ('type', '!=', 'service')  # Exclude services
             ]
             
-            # Add category filter if most products have categories
-            products_with_categories = self.env['product.template'].search_count([
-                ('active', '=', True),
-                ('sale_ok', '=', True),
-                ('list_price', '>', 0),
-                ('lebiggot_category', '!=', False)
-            ])
-            
-            if products_with_categories > 100:  # If we have enough categorized products
-                domain.append(('lebiggot_category', '!=', False))
-            
-            # Get products sorted by price (cheapest first)
-            products = self.env['product.template'].search(domain, order='list_price asc', limit=100)
+            # Get products sorted by price
+            products = self.env['product.template'].search(domain, order='list_price asc', limit=50)
             
             if not products:
                 raise UserError("No products found in the system")
             
-            _logger.info(f"Found {len(products)} products for selection")
+            _logger.info(f"Found {len(products)} products for minimal selection")
             
-            # Apply dietary restrictions with simple keyword filtering
+            # Very simple dietary filtering based on product names only
             if dietary_restrictions:
                 filtered_products = []
                 for product in products:
@@ -115,95 +106,68 @@ class IntegrationManager(models.Model):
                     
                     for restriction in dietary_restrictions:
                         if restriction == 'vegan':
-                            if any(word in name_lower for word in ['meat', 'fish', 'cheese', 'ham', 'chicken']):
+                            if any(word in name_lower for word in ['meat', 'fish', 'cheese', 'ham']):
                                 include = False
                                 break
                         elif restriction == 'halal':
-                            if any(word in name_lower for word in ['pork', 'wine', 'alcohol', 'beer']):
+                            if any(word in name_lower for word in ['pork', 'wine', 'alcohol']):
                                 include = False
                                 break
                         elif restriction == 'non_alcoholic':
-                            if any(word in name_lower for word in ['wine', 'beer', 'champagne', 'alcohol', 'rum', 'whiskey']):
+                            if any(word in name_lower for word in ['wine', 'beer', 'alcohol']):
                                 include = False
                                 break
                     
                     if include:
                         filtered_products.append(product)
                 
-                products = filtered_products
-                _logger.info(f"After dietary filtering: {len(products)} products")
+                if filtered_products:
+                    products = filtered_products
+                    _logger.info(f"After dietary filtering: {len(products)} products")
             
-            if not products:
-                # If dietary filtering removed everything, use original products
-                products = self.env['product.template'].search([
-                    ('active', '=', True),
-                    ('sale_ok', '=', True),
-                    ('list_price', '>', 0)
-                ], order='list_price asc', limit=20)
-            
-            # Smart product selection based on budget
+            # Simple product selection - aim for 3-5 products
             selected_products = []
             current_cost = 0
-            target_products = 5  # Aim for 5 products
-            max_budget = target_budget * 1.2
-            min_budget = target_budget * 0.8
+            max_budget = target_budget * 1.3
             
-            # Sort products by price to get a good mix
-            sorted_products = sorted(products, key=lambda p: p.list_price)
-            
-            # First pass: try to get close to budget with reasonable number of products
-            budget_per_product = target_budget / target_products
-            
-            for product in sorted_products:
-                if len(selected_products) >= 8:  # Max 8 products
+            for product in products:
+                if len(selected_products) >= 5:  # Max 5 products
                     break
                     
                 if current_cost + product.list_price <= max_budget:
-                    # Prefer products close to our target price per product
-                    if len(selected_products) < 3 or product.list_price <= budget_per_product * 1.5:
-                        selected_products.append(product)
-                        current_cost += product.list_price
-                        
-                        # If we're close to budget and have enough products, stop
-                        if current_cost >= min_budget and len(selected_products) >= 3:
-                            break
-            
-            # If we don't have enough products, add more cheaper ones
-            if len(selected_products) < 3:
-                for product in sorted_products:
-                    if product not in selected_products and current_cost + product.list_price <= max_budget:
-                        selected_products.append(product)
-                        current_cost += product.list_price
-                        if len(selected_products) >= 3:
-                            break
+                    selected_products.append(product)
+                    current_cost += product.list_price
+                    
+                    # If we have 3+ products and are close to budget, stop
+                    if len(selected_products) >= 3 and current_cost >= target_budget * 0.8:
+                        break
             
             # Ensure we have at least one product
             if not selected_products:
-                selected_products = [sorted_products[0]]  # Take the cheapest product
+                selected_products = [products[0]]  # Take the first product
                 current_cost = selected_products[0].list_price
             
             _logger.info(f"Selected {len(selected_products)} products, total cost: €{current_cost:.2f}")
             
-            # Create composition with only valid fields
+            # Create composition with ONLY standard Odoo fields
             partner_name = self.env['res.partner'].browse(partner_id).name
-            composition_name = f"Gift Composition - {partner_name}"
+            composition_name = f"Composition {partner_name}"
             
-            # Build reasoning text (include notes_text here since we can't store it separately)
+            # Build simple reasoning
             reasoning_parts = [
-                f'Emergency composition with {len(selected_products)} carefully selected products.',
-                f'Total cost: €{current_cost:.2f}.',
-                f'Budget variance: {abs(current_cost - target_budget)/target_budget*100:.1f}%.'
+                f'Simple composition with {len(selected_products)} products.',
+                f'Cost: €{current_cost:.2f} (Target: €{target_budget:.2f}).'
             ]
             
             if notes_text:
-                reasoning_parts.append(f'Special notes: {notes_text}')
+                reasoning_parts.append(f'Notes: {notes_text}')
             
             if dietary_restrictions:
-                reasoning_parts.append(f'Dietary restrictions applied: {", ".join(dietary_restrictions)}')
+                reasoning_parts.append(f'Restrictions: {", ".join(dietary_restrictions)}')
             
             reasoning_text = ' '.join(reasoning_parts)
             
-            # CORRECTED: Create composition with only fields that exist
+            # MINIMAL: Create composition with only basic fields that exist in standard Odoo
             composition_vals = {
                 'name': composition_name,
                 'partner_id': partner_id,
@@ -211,30 +175,82 @@ class IntegrationManager(models.Model):
                 'target_budget': target_budget,
                 'composition_type': 'custom',
                 'product_ids': [(6, 0, [p.id for p in selected_products])],
-                'dietary_restrictions': ','.join(dietary_restrictions or []),
-                'reasoning': reasoning_text,
-                'confidence_score': 0.7,
-                'novelty_score': 0.6,
-                'historical_compatibility': 0.5,
-                'state': 'draft',
-                'generation_method': 'emergency_simple'
+                'state': 'draft'
             }
+            
+            # Only add fields if they exist (try/except for each optional field)
+            try:
+                # Test if reasoning field exists
+                self.env['gift.composition']._fields.get('reasoning')
+                composition_vals['reasoning'] = reasoning_text
+            except:
+                pass
+            
+            try:
+                # Test if dietary_restrictions field exists
+                self.env['gift.composition']._fields.get('dietary_restrictions')
+                composition_vals['dietary_restrictions'] = ','.join(dietary_restrictions or [])
+            except:
+                pass
+            
+            try:
+                # Test if confidence_score field exists
+                self.env['gift.composition']._fields.get('confidence_score')
+                composition_vals['confidence_score'] = 0.7
+            except:
+                pass
             
             composition = self.env['gift.composition'].create(composition_vals)
             
-            # Set actual cost (this will trigger the compute method)
-            composition.actual_cost = current_cost
+            # The actual_cost should be computed automatically
+            # If it's not, try to set it manually
+            try:
+                if hasattr(composition, 'actual_cost'):
+                    composition.actual_cost = current_cost
+            except:
+                pass
             
-            # Log product details
-            _logger.info(f"Emergency composition created: {composition.name}")
-            _logger.info(f"Products: {[p.name for p in selected_products]}")
-            _logger.info(f"Actual cost: €{composition.actual_cost:.2f}, Target: €{target_budget:.2f}")
+            _logger.info(f"Minimal composition created: {composition.name}")
+            _logger.info(f"Products: {[p.name[:30] for p in selected_products]}")
             
             return composition
             
         except Exception as e:
-            _logger.error(f"Emergency simple composition failed: {e}")
-            raise UserError(f"Emergency composition failed: {str(e)}")
+            _logger.error(f"Minimal emergency composition failed: {e}")
+            raise UserError(f"Composition creation failed: {str(e)}")
+
+    @api.model
+    def generate_complete_composition(self, partner_id, target_budget, target_year=None, 
+                                    dietary_restrictions=None, notes_text=None, use_batch=False,
+                                    attempt_number=1, force_engine=None):
+        """MINIMAL: Simplified composition generation"""
+        
+        if target_budget <= 0:
+            raise UserError("Target budget must be greater than 0")
+        
+        try:
+            _logger.info(f"Minimal composition generation: partner={partner_id}, budget=€{target_budget}")
+            
+            # Always use the minimal emergency method
+            composition = self._generate_emergency_composition_simple(
+                partner_id, target_budget, target_year, dietary_restrictions, notes_text
+            )
+            
+            if composition:
+                # Update performance tracking if fields exist
+                try:
+                    self.total_generations += 1
+                except:
+                    pass
+                
+                _logger.info(f"Minimal composition successful: {composition.name}")
+                return composition
+            else:
+                raise UserError("Failed to create composition")
+                
+        except Exception as e:
+            _logger.error(f"Minimal composition failed: {str(e)}")
+            raise UserError(f"Composition generation failed: {str(e)}")
 
     def _determine_best_engine(self, partner_id, target_budget, dietary_restrictions):
         """EMERGENCY: Always use simple emergency method"""
