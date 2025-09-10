@@ -2,12 +2,6 @@ from odoo import models, fields, api
 
 class ProductTemplate(models.Model):
     _inherit = 'product.template'
-
-    product_grade = fields.Selection([
-        ('standard', 'Standard'),
-        ('premium', 'Premium'),
-        ('luxury', 'Luxury'),
-    ], string="Product Grade", default='standard')
     
     # Le Biggot specific categorization
     lebiggot_category = fields.Selection([

@@ -5,7 +5,7 @@
     <data>
         
         <!-- Default Product Grades -->
-        <record id="product_grade_standard" model="ir.model.fields.selection">
+        <!-- <record id="product_grade_standard" model="ir.model.fields.selection">
             <field name="field_id" ref="field_product_template_product_grade"/>
             <field name="value">standard</field>
             <field name="name">Standard</field>
@@ -24,7 +24,7 @@
             <field name="value">luxury</field>
             <field name="name">Luxury</field>
             <field name="sequence">30</field>
-        </record>
+        </record> -->
         
     </data>
     
