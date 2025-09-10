@@ -27,5 +27,3 @@ access_gift_experience_user,gift.experience.user,model_gift_experience,base.grou
 access_gift_experience_manager,gift.experience.manager,model_gift_experience,sales_team.group_sale_manager,1,1,1,1
 access_batch_composition_processor_user,batch.composition.processor.user,model_batch_composition_processor,base.group_user,1,0,0,0
 access_batch_composition_processor_manager,batch.composition.processor.manager,model_batch_composition_processor,sales_team.group_sale_manager,1,1,1,1
-access_gift_experience_pool_user,gift.experience.pool.user,model_gift_experience_pool,base.group_user,1,0,0,0
-access_gift_experience_pool_manager,gift.experience.pool.manager,model_gift_experience_pool,sales_team.group_sale_manager,1,1,1,1
