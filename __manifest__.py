@@ -38,6 +38,41 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         
         # Data files
         'data/ir_config_parameter_data.xml',
+        'data/ir_cron_data.xml',
+        # 'data/cron_jobs.xml',
+        'data/default_data.xml',
+        'data/sequences.xml',
+        'data/system_config.xml',
+        'data/product_categories_data.xml',
+        
+        # Views - Core
+        'views/product_template_views.xml',
+        'views/res_partner_views.xml',
+        'views/gift_composition_views.xml',
+        'views/client_history_views.xml',
+        'views/experience_views.xml',
+        'views/batch_processing_views.xml',
+        
+        # Views - Engines
+        'views/ml_engine_views.xml',
+        'views/ai_product_recommender_views.xml',
+        'views/integration_manager_views.xml',
+        'views/stock_aware_composition_views.xml',
+        'views/business_rules_engine_views.xml',
+        'views/composition_engine_views.xml',
+        'views/document_generation_views.xml',
+        
+        # Views - Rebuilding history
+        'views/rebuild_history_wizard_views.xml',
+        
+        # Menu
+        'views/menu_views.xml',
+        
+        # Wizards
+        'wizard/ml_training_wizard_views.xml',
+        'wizard/batch_composition_wizard_views.xml',
+        'wizard/rebuild_history_wizard_views.xml',
+        'wizard/composition_wizard.py',
         
     ],
     'demo': [
