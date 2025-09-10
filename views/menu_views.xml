@@ -27,13 +27,6 @@
                   action="action_gift_composition" 
                   sequence="20"/>
         
-        <!-- Batch Processing -->
-        <menuitem id="menu_batch_processing" 
-                  name="📦 Batch Processing" 
-                  parent="menu_operations" 
-                  action="action_batch_composition_wizard" 
-                  sequence="30"/>
-        
         <!-- Master Data -->
         <menuitem id="menu_master_data" 
                   name="Master Data" 
@@ -71,110 +64,6 @@
         <menuitem id="menu_ai_configuration" 
                   name="🤖 AI Configuration" 
                   parent="menu_configuration" 
-                  sequence="20"/>
-        
-        <!-- ML/AI Systems Under AI Configuration -->
-        
-        <!-- ML Engine -->
-        <menuitem id="menu_ml_recommendation_engine"
-                  name="🧠 ML Engine"
-                  parent="menu_ai_configuration"
-                  action="action_ml_recommendation_engine"
-                  sequence="10"/>
-        
-        <!-- AI Recommender -->
-        <menuitem id="menu_ai_product_recommender"
-                  name="🎯 AI Recommender"
-                  parent="menu_ai_configuration"
-                  action="action_ai_product_recommender"
-                  sequence="20"/>
-        
-        <!-- Integration Manager -->
-        <menuitem id="menu_integration_manager"
-                  name="🔄 Integration Manager"
-                  parent="menu_ai_configuration"
-                  action="action_integration_manager"
-                  sequence="30"/>
-        
-        <!-- Training Wizard -->
-        <menuitem id="menu_ml_training"
-                  name="📊 Train Model"
-                  parent="menu_ai_configuration"
-                  action="action_ml_training_wizard"
-                  sequence="40"/>
-        
-        <!-- Engines Submenu -->
-        <menuitem id="menu_engines"
-                  name="⚙️ Engines"
-                  parent="menu_configuration"
-                  sequence="30"/>
-        
-        <!-- Stock-Aware Engine -->
-        <menuitem id="menu_stock_aware_engine"
-                  name="📦 Stock-Aware Engine"
-                  parent="menu_engines"
-                  action="action_stock_aware_composition_engine"
-                  sequence="10"/>
-        
-        <!-- Business Rules Engine -->
-        <menuitem id="menu_business_rules_engine"
-                  name="📋 Business Rules"
-                  parent="menu_engines"
-                  action="action_business_rules_engine"
-                  sequence="20"/>
-        
-        <!-- Composition Engine -->
-        <menuitem id="menu_composition_engine"
-                  name="🎨 Composition Engine"
-                  parent="menu_engines"
-                  action="action_composition_engine"
-                  sequence="30"/>
-        
-        <!-- Document Generation -->
-        <menuitem id="menu_document_generation"
-                  name="📄 Document Generation"
-                  parent="menu_engines"
-                  action="action_document_generation_system"
-                  sequence="40"/>
-        
-        <!-- Tools Submenu -->
-        <menuitem id="menu_tools"
-                  name="🔧 Tools"
-                  parent="menu_senor_bigott_main"
-                  sequence="40"/>
-        
-        <!-- Rebuild History Wizard -->
-        <menuitem id="menu_rebuild_history"
-                  name="🔄 Rebuild Client History"
-                  parent="menu_tools"
-                  action="action_rebuild_history_wizard"
-                  sequence="10"/>
-        
-        <!-- ML Dashboard -->
-        <menuitem id="menu_ml_dashboard"
-                  name="📈 ML Dashboard"
-                  parent="menu_tools"
-                  action="action_ml_dashboard"
-                  sequence="20"/>
-        
-        <!-- Reports Menu -->
-        <menuitem id="menu_reports"
-                  name="📊 Reports"
-                  parent="menu_senor_bigott_main"
-                  sequence="60"/>
-        
-        <!-- ML Performance Report -->
-        <menuitem id="menu_ml_performance_report"
-                  name="ML Performance"
-                  parent="menu_reports"
-                  action="action_ml_performance_report"
-                  sequence="10"/>
-        
-        <!-- Composition Analytics -->
-        <menuitem id="menu_composition_analytics"
-                  name="Composition Analytics"
-                  parent="menu_reports"
-                  action="action_composition_analytics"
                   sequence="20"/>
         
     </data>
