@@ -21,6 +21,7 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'mail',
         'contacts',
         'web',
+        'delivery',
     ],
     'external_dependencies': {
         'python': [
