@@ -74,6 +74,7 @@ class GiftComposition(models.Model):
     confidence_score = fields.Float(string='AI Confidence Score', help="AI's confidence level for this composition (0-1)", tracking=True)
     novelty_score = fields.Float(string='Novelty Score', help="How unique and novel the composition is (0-1)", tracking=True)
     historical_compatibility = fields.Float(string='Historical Compatibility', help="How well it aligns with past client preferences (0-1)", tracking=True)
+    generation_method = fields.Char(string='Generation Method', help="Origin engine/method that generated this composition")
     reasoning = fields.Html(string='AI Reasoning', help="Explanation from the AI for this composition")
     
     # Process Tracking - Advanced
