@@ -41,7 +41,7 @@ Features:
         # Security - MUST be loaded in this order
         'security/security_groups.xml',
         'security/ir.model.access.csv',
-        'security/ir.rule.xml',
+        # 'security/ir.rule.xml',
         
         # Data
         'data/sequences.xml',
