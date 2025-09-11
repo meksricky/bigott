@@ -11,8 +11,8 @@ class OllamaRecommendationWizard(models.TransientModel):
     _description = 'Ollama Gift Recommendation Wizard'
     
     # Client Selection
-    partner_id = fields.Many2one('res.partner', string="Client", required=False,
-                                domain=[('is_company', '=', False)])
+    partner_id = fields.Many2one('res.partner', string="Client", 
+                            domain=[('is_company', '=', False)])
     
     # Budget
     target_budget = fields.Float(string="Target Budget (€)", required=True, default=100.0)
