@@ -29,9 +29,10 @@
     <field name="view_id" ref="view_simplified_composition_wizard"/>
   </record>
 
+  <!-- Use a parent menu that actually exists on your DB -->
   <menuitem id="menu_generate_composition"
             name="Generate Composition"
-            parent="menu_operations"
+            parent="sale.menu_sale_root"
             action="action_simplified_composition_wizard"
-            sequence="5"/>
+            sequence="50"/>
 </odoo>

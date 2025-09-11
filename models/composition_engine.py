@@ -75,37 +75,57 @@ class CompositionEngine(models.Model):
         
         return available_products
 
-    def generate_composition(self, partner_id, target_budget, target_year=None, dietary_restrictions=None, force_type=None, notes_text=None):
-        """Main entry point for generating gift compositions"""
-        
+    def generate_composition(self, partner_id, target_budget, target_year=None,
+                            dietary_restrictions=None, force_type=None, notes_text=None):
         if not target_year:
             target_year = datetime.now().year
-        
-        # Analyze client history with enhanced logic
+
         client_analysis = self._enhanced_client_analysis(partner_id)
-        
-        # Process and weight the notes
         processed_notes = self._process_client_notes(notes_text, client_analysis)
-        
-        # Determine composition approach
+
         if force_type:
             composition_type = force_type
         elif client_analysis['has_history']:
             composition_type = client_analysis['box_type_preference']
         else:
-            # New client - prefer experience-based approach
             composition_type = 'experience'
-        
+
         if composition_type == 'experience':
-            return self._generate_experience_composition(
-                partner_id, target_budget, target_year, 
-                dietary_restrictions, client_analysis, processed_notes
-            )
-        else:
-            return self._generate_custom_composition(
+            draft = self._generate_experience_composition(
                 partner_id, target_budget, target_year,
                 dietary_restrictions, client_analysis, processed_notes
             )
+        else:
+            draft = self._generate_custom_composition(
+                partner_id, target_budget, target_year,
+                dietary_restrictions, client_analysis, processed_notes
+            )
+
+        # At this point `draft` is a gift.composition record
+        draft_products = draft.product_ids
+
+        # === Apply deterministic rules ===
+        Rules = self.env.get('business.rules.engine')
+        rule_notes = []
+        if Rules and hasattr(Rules, 'apply_composition_rules'):
+            final_products, picked_experience, rule_notes = Rules.apply_composition_rules(
+                partner_id=partner_id,
+                target_year=target_year,
+                draft_products=draft_products,
+                picked_experience=getattr(draft, 'experience_id', None)
+            )
+            draft.write({
+                'product_ids': [(6, 0, final_products.ids)],
+                'experience_id': picked_experience.id if picked_experience else False,
+                'rationale_json': json.dumps(rule_notes, ensure_ascii=False),
+            })
+
+        return {
+            'composition_id': draft.id,
+            'products': draft.product_ids,
+            'experience': getattr(draft, 'experience_id', False),
+            'rule_notes': rule_notes,
+        }
     
     def _enhanced_client_analysis(self, partner_id):
         """Enhanced client analysis that extracts deeper insights"""

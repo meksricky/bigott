@@ -1,57 +1,59 @@
-from odoo import models, fields, api
+# -*- coding: utf-8 -*-
+from odoo import api, fields, models, _
 from odoo.exceptions import UserError
 
 class SimplifiedCompositionWizard(models.TransientModel):
-    _name = 'simplified.composition.wizard'
-    _description = 'Simplified Gift Composition Wizard'
-    
-    partner_id = fields.Many2one('res.partner', 'Client', required=True)
-    target_year = fields.Integer('Target Year', required=True, default=lambda self: fields.Date.context_today(self).year)
-    target_budget = fields.Float('Target Budget (€)', required=True, default=200.0)
-    
+    _name = "simplified.composition.wizard"
+    _description = "Generate Gift Composition (Simplified)"
+
+    partner_id = fields.Many2one('res.partner', string='Customer', required=True)
+    target_year = fields.Integer(
+        string='Target Year',
+        default=lambda self: fields.Date.today().year
+    )
+    target_budget = fields.Float(string='Target Budget')
     dietary_restrictions = fields.Selection([
         ('none', 'None'),
-        ('vegan', 'Vegan'),
-        ('halal', 'Halal'), 
-        ('non_alcoholic', 'Non-Alcoholic'),
+        ('halal', 'Halal'),
+        ('no_alcohol', 'No Alcohol'),
+        ('vegetarian', 'Vegetarian'),
     ], string='Dietary Restrictions', default='none')
-    
-    additional_notes = fields.Text('Additional Notes')
-    
+    additional_notes = fields.Text(string='Additional Notes')
+
     def action_generate_composition(self):
-        """Generate composition using simplified engine"""
-        
-        if self.target_budget <= 0:
-            raise UserError("Target budget must be greater than 0")
-        
-        engine = self.env['simplified.composition.engine']
-        
-        result = engine.generate_composition(
+        self.ensure_one()
+        # Try either engine name (adapt to your codebase)
+        Engine = self.env.get('composition.engine') or self.env.get('simplified.composition.engine')
+        if not Engine:
+            raise UserError(_("Composition engine model not found."))
+
+        # Adapt parameter names to your engine’s signature if needed
+        result = Engine.generate_composition(
             partner_id=self.partner_id.id,
-            target_budget=self.target_budget,
+            target_budget=self.target_budget or 0.0,
             target_year=self.target_year,
             dietary_restrictions=self.dietary_restrictions,
-            notes_text=self.additional_notes
+            force_type=None,
+            notes_text=(self.additional_notes or '')
         )
-        
-        # Create gift composition record using EXISTING fields only
-        composition = self.env['gift.composition'].create({
-            'partner_id': self.partner_id.id,
-            'target_year': self.target_year,
-            'target_budget': self.target_budget,
-            'actual_cost': result['total_cost'],
-            'product_ids': [(6, 0, [p.id for p in result['products']])],
-            'dietary_restrictions': self.additional_notes,
-            'reasoning': result['reasoning'],  # Use this instead of generation_method
-            'composition_type': 'custom',
-            'state': 'draft'
-        })
-        
+
+        comp_id = (result or {}).get('composition_id')
+        if not comp_id:
+            # Fallback: last composition for this partner
+            comp = self.env['gift.composition'].search(
+                [('partner_id', '=', self.partner_id.id)],
+                order='id desc', limit=1
+            )
+            comp_id = comp.id if comp else False
+
+        if not comp_id:
+            raise UserError(_("The engine returned no composition. Check rules/stock/budget logs."))
+
         return {
             'type': 'ir.actions.act_window',
-            'name': 'Generated Composition',
+            'name': _('Generated Composition'),
             'res_model': 'gift.composition',
-            'res_id': composition.id,
             'view_mode': 'form',
-            'target': 'current'
+            'target': 'current',
+            'res_id': comp_id,
         }
