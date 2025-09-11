@@ -35,59 +35,27 @@ class IntegrationManager(models.Model):
 
     @api.model
     def generate_complete_composition(self, partner_id, target_budget, target_year=None, 
-                                    dietary_restrictions=None, notes_text=None, use_batch=False,
-                                    attempt_number=1, force_engine=None):
-        """Advanced composition generation with schema-aware field usage"""
+                                    dietary_restrictions=None, notes_text=None, **kwargs):
+        """Updated method using simplified approach"""
         
-        if target_budget <= 0:
-            raise UserError("Target budget must be greater than 0")
+        # Use simplified engine for all generations
+        engine = self.env['simplified.composition.engine']
         
-        start_time = datetime.now()
+        result = engine.generate_composition(
+            partner_id=partner_id,
+            target_budget=target_budget,
+            target_year=target_year,
+            dietary_restrictions=dietary_restrictions,
+            notes_text=notes_text
+        )
         
-        try:
-            _logger.info(f"Advanced composition generation: partner={partner_id}, budget=€{target_budget}")
-            
-            # Try advanced engines first, fall back gracefully
-            composition = None
-            
-            if not force_engine or force_engine == 'ml':
-                composition = self._generate_ml_composition_safe(
-                    partner_id, target_budget, target_year, dietary_restrictions, notes_text
-                )
-                
-            if not composition and (not force_engine or force_engine == 'ai'):
-                composition = self._generate_ai_composition_safe(
-                    partner_id, target_budget, target_year, dietary_restrictions, notes_text
-                )
-            
-            if not composition and (not force_engine or force_engine == 'smart'):
-                composition = self._generate_smart_composition(
-                    partner_id, target_budget, target_year, dietary_restrictions, notes_text
-                )
-            
-            if not composition:
-                # Final fallback with sophisticated logic
-                composition = self._generate_sophisticated_fallback(
-                    partner_id, target_budget, target_year, dietary_restrictions, notes_text
-                )
-            
-            if composition:
-                # Track performance and enhance
-                generation_time = (datetime.now() - start_time).total_seconds()
-                self.last_generation_time = generation_time
-                self.total_generations += 1
-                
-                # Add sophisticated metadata using existing fields
-                self._enhance_composition_metadata(composition, notes_text, dietary_restrictions)
-                
-                _logger.info(f"Advanced composition successful: {composition.name}")
-                return composition
-            else:
-                raise UserError("All advanced engines failed to generate composition")
-                
-        except Exception as e:
-            _logger.error(f"Advanced composition generation failed: {str(e)}")
-            raise UserError(f"Advanced composition generation failed: {str(e)}")
+        return {
+            'success': True,
+            'products': result['products'],
+            'total_cost': result['total_cost'],
+            'product_count': result['product_count'],
+            'method_used': result['method_used']
+        }
     
     def _generate_ml_composition_safe(self, partner_id, target_budget, target_year, dietary_restrictions, notes_text):
         """ML composition generation with safe field handling"""
