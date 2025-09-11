@@ -8,26 +8,27 @@ class GiftComposition(models.Model):
     _description = 'Gift Composition'
     _order = 'create_date desc'
     _rec_name = 'display_name'
+    _inherit = ['mail.thread', 'mail.activity.mixin']  # Add this line
     
     # Basic Information
     name = fields.Char(string="Name", compute='_compute_name', store=True)
     display_name = fields.Char(string="Display Name", compute='_compute_display_name')
-    partner_id = fields.Many2one('res.partner', string="Client", required=True)
+    partner_id = fields.Many2one('res.partner', string="Client", required=True, tracking=True)
     
     # Composition Details
     composition_type = fields.Selection([
         ('custom', 'Custom Composition'),
         ('experience', 'Experience Based'),
         ('ai_generated', 'AI Generated')
-    ], string="Composition Type", default='ai_generated')
+    ], string="Composition Type", default='ai_generated', tracking=True)
     
     # Budget Information
-    target_budget = fields.Float(string="Target Budget", required=True)
+    target_budget = fields.Float(string="Target Budget", required=True, tracking=True)
     actual_cost = fields.Float(string="Actual Cost", compute='_compute_actual_cost', store=True)
     budget_variance = fields.Float(string="Budget Variance %", compute='_compute_budget_variance', store=True)
     
     # Products
-    product_ids = fields.Many2many('product.template', string="Products")
+    product_ids = fields.Many2many('product.template', string="Products", tracking=True)
     product_count = fields.Integer(string="Product Count", compute='_compute_product_count', store=True)
     
     # Composition Metadata
@@ -47,7 +48,7 @@ class GiftComposition(models.Model):
         ('approved', 'Approved'),
         ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled')
-    ], string="Status", default='draft')
+    ], string="Status", default='draft', tracking=True)  # Add tracking=True
     
     # Timestamps
     confirmation_date = fields.Datetime(string="Confirmation Date")
@@ -89,22 +90,27 @@ class GiftComposition(models.Model):
         """Confirm the composition"""
         self.state = 'confirmed'
         self.confirmation_date = fields.Datetime.now()
+        self.message_post(body="Gift composition confirmed.")
     
     def action_approve(self):
         """Approve the composition"""
         self.state = 'approved'
+        self.message_post(body="Gift composition approved.")
     
     def action_deliver(self):
         """Mark as delivered"""
         self.state = 'delivered'
         self.delivery_date = fields.Datetime.now()
+        self.message_post(body="Gift composition delivered.")
     
     def action_cancel(self):
         """Cancel the composition"""
         self.state = 'cancelled'
+        self.message_post(body="Gift composition cancelled.")
     
     def action_reset_to_draft(self):
         """Reset to draft"""
         self.state = 'draft'
         self.confirmation_date = False
         self.delivery_date = False
+        self.message_post(body="Gift composition reset to draft.")
