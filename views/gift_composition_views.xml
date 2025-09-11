@@ -1,769 +1,152 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <data>
-        
-        <!-- Gift Composition Tree View -->
-        <record id="view_gift_composition_tree" model="ir.ui.view">
-            <field name="name">gift.composition.tree</field>
-            <field name="model">gift.composition</field>
-            <field name="arch" type="xml">
-                <tree string="Gift Compositions" 
-                      decoration-success="state=='approved'" 
-                      decoration-info="state=='proposed'" 
-                      decoration-muted="state=='draft'"
-                      decoration-danger="state=='cancelled'"
-                      sample="1">
-                    <field name="partner_id"/>
-                    <field name="target_year"/>
-                    <field name="composition_type"/>
-                    <field name="target_budget" widget="monetary"/>
-                    <field name="actual_cost" widget="monetary"/>
-                    <field name="budget_status" 
-                           decoration-success="budget_status=='on_target'"
-                           decoration-warning="budget_status=='under'"
-                           decoration-danger="budget_status=='over'"/>
-                    <field name="confidence_score" widget="percentage"/>
-                    <field name="state" 
-                           decoration-success="state=='approved'"
-                           decoration-info="state=='proposed'"/>
-                    <field name="generated_date"/>
-                    
-                    <!-- Hidden fields needed for decorations -->
-                    <field name="is_budget_variance_low" invisible="1"/>
-                    <field name="is_budget_variance_medium" invisible="1"/>
-                    <field name="is_budget_variance_high" invisible="1"/>
-                </tree>
-            </field>
-        </record>
-        
-        <!-- Gift Composition Form View -->
-        <record id="view_gift_composition_form" model="ir.ui.view">
-            <field name="name">gift.composition.form</field>
-            <field name="model">gift.composition</field>
-            <field name="arch" type="xml">
-                <form string="Gift Composition">
-                    <header>
-                        <button name="action_regenerate" 
-                                string="🔄 Regenerate" 
-                                type="object" 
-                                class="btn-secondary"
-                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
-                        <button name="action_propose" 
-                                string="Propose to Client" 
-                                type="object" 
-                                class="btn-primary"
-                                attrs="{'invisible': [('state', '!=', 'draft')]}"/>
-                        <button name="action_approve" 
-                                string="Approve" 
-                                type="object" 
-                                class="btn-success"
-                                attrs="{'invisible': [('state', '!=', 'proposed')]}"/>
-                        <!-- <button name="action_create_order" 
-                                string="Create Sale Order" 
-                                type="object" 
-                                class="btn-success"
-                                attrs="{'invisible': [('state', '!=', 'approved')]}"/> -->
-                        <!-- <button name="action_deliver" 
-                                string="Mark as Delivered" 
-                                type="object" 
-                                class="btn-info"
-                                attrs="{'invisible': [('state', '!=', 'approved')]}"/>
-                        <button name="action_cancel" 
-                                string="Cancel" 
-                                type="object" 
-                                class="btn-secondary"
-                                attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/> -->
-                        <field name="state" widget="statusbar"/>
-                    </header>
-                    <sheet>
-                        <!-- <div class="oe_button_box" name="button_box">
-                            <button name="action_view_order_history" 
-                                    type="object" 
-                                    class="oe_stat_button" 
-                                    icon="fa-history"
-                                    title="View Client History">
-                                <div class="o_field_widget o_stat_info">
-                                    <span class="o_stat_text">Client</span>
-                                    <span class="o_stat_text">History</span>
-                                </div>
-                            </button>
-                        </div> -->
-                        
-                        <div class="oe_title">
-                            <h1>
-                                <field name="name" readonly="1"/>
-                            </h1>
-                            <div class="alert alert-success" role="alert" style="margin-top: 15px;">
-                                <div class="row text-center">
-                                    <div class="col-md-4">
-                                        <h5><i class="fa fa-brain text-info" title="AI Confidence"/> AI Confidence</h5>
-                                        <h3 class="text-info"><field name="confidence_score" widget="percentage"/></h3>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <h5><i class="fa fa-star text-warning" title="Novelty Score"/> Novelty Score</h5>
-                                        <h3 class="text-warning"><field name="novelty_score" widget="percentage"/></h3>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <h5><i class="fa fa-chart-line text-success" title="Compatibility"/> Compatibility</h5>
-                                        <h3 class="text-success"><field name="historical_compatibility" widget="percentage"/></h3>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <group>
-                            <group name="client_info" string="Client Information">
-                                <field name="partner_id" readonly="1" 
-                                       options="{'no_open': True}"/>
-                                <field name="target_year"/>
-                                <field name="composition_type" widget="radio"/>
-                                <field name="dietary_restrictions"/>
-                            </group>
-                            <group name="budget_info" string="Budget Analysis">
-                                <field name="target_budget" widget="monetary"/>
-                                <field name="actual_cost" widget="monetary"/>
-                                <field name="budget_variance" widget="monetary"
-                                       decoration-success="budget_variance &lt;= 0"
-                                       decoration-danger="budget_variance &gt; 0"/>
-                                
-                                <field name="budget_variance_percent" widget="percentage"
-                                       decoration-success="is_budget_variance_low"
-                                       decoration-warning="is_budget_variance_medium"
-                                       decoration-danger="is_budget_variance_high"/>
-                                <field name="budget_status" widget="badge"/>
-
-                                <field name="is_budget_variance_low" invisible="1"/>
-                                <field name="is_budget_variance_medium" invisible="1"/>
-                                <field name="is_budget_variance_high" invisible="1"/>
-                            </group>
-                        </group>
-                        
-                        <notebook>
-                            <page string="🎁 Composition Details" name="composition_details">
     
-                                <!-- Experience Section - Enhanced -->
-                                <div attrs="{'invisible': [('composition_type', '!=', 'experience')]}" style="margin-bottom: 20px;">
-                                    <div class="alert alert-info" role="alert" style="border-left: 4px solid #17a2b8;">
-                                        <div class="row">
-                                            <div class="col-md-8">
-                                                <h5 style="margin-bottom: 10px; color: #0c5460;">
-                                                    <i class="fa fa-star" title="Experience-Based Composition"/> Experience-Based Composition
-                                                </h5>
-                                                <field name="experience_id" readonly="1" nolabel="1" style="font-size: 16px; font-weight: bold;"/>
-                                            </div>
-                                            <div class="col-md-4 text-right">
-                                                <h6 style="margin-bottom: 5px; color: #6c757d;">Products Included</h6>
-                                                <span class="badge badge-info badge-pill" style="font-size: 14px; padding: 8px 12px;">
-                                                    <field name="product_count"/> items
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Custom Composition Section - Enhanced -->
-                                <div attrs="{'invisible': [('composition_type', '!=', 'custom')]}" style="margin-bottom: 20px;">
-                                    <div class="alert alert-success" role="alert" style="border-left: 4px solid #28a745;">
-                                        <div class="row">
-                                            <div class="col-md-8">
-                                                <h5 style="margin-bottom: 10px; color: #155724;">
-                                                    <i class="fa fa-cogs" title="Custom Composition"/> Custom Composition
-                                                </h5>
-                                                <field name="product_ids" readonly="1" 
-                                                    widget="many2many_tags"
-                                                    options="{'color_field': 'lebiggot_category'}"
-                                                    nolabel="1"/>
-                                            </div>
-                                            <div class="col-md-4 text-right">
-                                                <h6 style="margin-bottom: 5px; color: #6c757d;">Total Products</h6>
-                                                <span class="badge badge-success badge-pill" style="font-size: 14px; padding: 8px 12px;">
-                                                    <field name="product_count"/> items
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Product Details Section - Enhanced -->
-                                <div style="margin-bottom: 30px;">
-                                    <div class="card">
-                                        <div class="card-header" style="background-color: #f8f9fa; border-bottom: 1px solid #dee2e6;">
-                                            <h5 class="mb-0" style="color: #495057;">
-                                                <i class="fa fa-list" title="Product Details"/> Product Details
-                                            </h5>
-                                        </div>
-                                        <div class="card-body" style="padding: 0;">
-                                            <!-- Custom Products Table -->
-                                            <div attrs="{'invisible': [('composition_type', '!=', 'custom')]}">
-                                                <field name="product_ids" nolabel="1" readonly="1">
-                                                    <tree decoration-info="product_grade == 'premium'" 
-                                                        decoration-muted="product_grade == 'standard'"
-                                                        decoration-success="is_vegan == True"
-                                                        decoration-warning="is_halal == True">
-                                                        <field name="name" string="Product Name"/>
-                                                        <field name="lebiggot_category" string="Category"/>
-                                                        <field name="product_grade" string="Grade"/>
-                                                        <field name="list_price" widget="monetary" string="Price"/>
-                                                        <field name="brand" string="Brand"/>
-                                                        <!-- <field name="volume_ml" string="Volume (ml)" optional="hide"/> -->
-                                                        <field name="is_vegan" string="🌱"/>
-                                                        <field name="is_halal" string="🥩"/>
-                                                        <!-- <field name="alcohol_content" string="Alcohol %" optional="hide"/> -->
-                                                    </tree>
-                                                </field>
-                                            </div>
-                                            
-                                            <!-- Experience Products Table -->
-                                            <div attrs="{'invisible': [('composition_type', '!=', 'experience')]}">
-                                                <field name="experience_product_ids" nolabel="1" readonly="1">
-                                                    <tree decoration-info="product_grade == 'premium'" 
-                                                        decoration-muted="product_grade == 'standard'"
-                                                        decoration-success="is_vegan == True"
-                                                        decoration-warning="is_halal == True">
-                                                        <field name="name" string="Product Name"/>
-                                                        <field name="lebiggot_category" string="Category"/>
-                                                        <field name="product_grade" string="Grade"/>
-                                                        <field name="list_price" widget="monetary" string="Price"/>
-                                                        <field name="brand" string="Brand"/>
-                                                        <!-- <field name="volume_ml" string="Volume (ml)" optional="hide"/> -->
-                                                        <field name="is_vegan" string="🌱"/>
-                                                        <field name="is_halal" string="🥩"/>
-                                                        <!-- <field name="alcohol_content" string="Alcohol %" optional="hide"/> -->
-                                                    </tree>
-                                                </field>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Category Analysis - Visual Dashboard -->
-                                <div attrs="{'invisible': [('composition_type', '!=', 'custom')]}" style="margin-bottom: 20px;">
-                                    <div class="card">
-                                        <div class="card-header" style="background-color: #f8f9fa; border-bottom: 1px solid #dee2e6;">
-                                            <h5 class="mb-0" style="color: #495057;">
-                                                <i class="fa fa-chart-pie" title="Category Analysis"/> Category Analysis
-                                            </h5>
-                                        </div>
-                                        <div class="card-body">
-                                            <div class="row">
-                                                <div class="col-md-6">
-                                                    <h6 style="color: #6c757d; margin-bottom: 15px;">Budget Distribution</h6>
-                                                    <div class="progress-group">
-                                                        <div class="progress-group-prepend">
-                                                            <span class="progress-group-text">Main Beverages</span>
-                                                        </div>
-                                                        <div class="progress-group-bars">
-                                                            <div class="progress progress-xs">
-                                                                <div class="progress-bar bg-info" style="width: 60%"></div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="progress-group-append">
-                                                            <span class="progress-group-text">60%</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="progress-group">
-                                                        <div class="progress-group-prepend">
-                                                            <span class="progress-group-text">Aperitifs</span>
-                                                        </div>
-                                                        <div class="progress-group-bars">
-                                                            <div class="progress progress-xs">
-                                                                <div class="progress-bar bg-success" style="width: 25%"></div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="progress-group-append">
-                                                            <span class="progress-group-text">25%</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="progress-group">
-                                                        <div class="progress-group-prepend">
-                                                            <span class="progress-group-text">Gourmet Food</span>
-                                                        </div>
-                                                        <div class="progress-group-bars">
-                                                            <div class="progress progress-xs">
-                                                                <div class="progress-bar bg-warning" style="width: 15%"></div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="progress-group-append">
-                                                            <span class="progress-group-text">15%</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div class="col-md-6">
-                                                    <h6 style="color: #6c757d; margin-bottom: 15px;">Quality Metrics</h6>
-                                                    <div class="row text-center">
-                                                        <div class="col-md-4">
-                                                            <div class="card bg-light">
-                                                                <div class="card-body">
-                                                                    <h5 class="card-title text-info">2</h5>
-                                                                    <p class="card-text small">Premium</p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <div class="card bg-light">
-                                                                <div class="card-body">
-                                                                    <h5 class="card-title text-success">1</h5>
-                                                                    <p class="card-text small">Standard</p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-md-4">
-                                                            <div class="card bg-light">
-                                                                <div class="card-body">
-                                                                    <h5 class="card-title text-warning">0</h5>
-                                                                    <p class="card-text small">Discovery</p>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <!-- Raw JSON data (hidden by default) - FIXED ACCESSIBILITY ISSUE -->
-                                            <div style="margin-top: 20px;">
-                                                <a href="#" class="btn btn-sm btn-outline-secondary" 
-                                                   role="button"
-                                                   data-toggle="collapse" data-target="#rawData">
-                                                    <i class="fa fa-code" title="Show Raw Data"/> Show Raw Data
-                                                </a>
-                                                <div class="collapse" id="rawData" style="margin-top: 10px;">
-                                                    <field name="category_structure"/>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Composition Summary Stats -->
-                                <div class="row" style="margin-bottom: 20px;">
-                                    <div class="col-md-3">
-                                        <div class="card text-center">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-primary">
-                                                    <field name="product_count"/>
-                                                </h5>
-                                                <p class="card-text">Total Products</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-center">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-success">
-                                                    <field name="actual_cost" widget="monetary"/>
-                                                </h5>
-                                                <p class="card-text">Total Value</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-center">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-info">
-                                                    <field name="budget_variance" widget="monetary"/>
-                                                </h5>
-                                                <p class="card-text">Budget Variance</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="card text-center">
-                                            <div class="card-body">
-                                                <h5 class="card-title text-warning">
-                                                    <field name="budget_variance_percent" widget="percentage"/>
-                                                </h5>
-                                                <p class="card-text">Variance %</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                            </page>
-                            
-                            <page string="🧠 AI Reasoning" name="ai_reasoning">
+    <!-- Gift Composition Tree View -->
+    <record id="view_gift_composition_tree" model="ir.ui.view">
+        <field name="name">gift.composition.tree</field>
+        <field name="model">gift.composition</field>
+        <field name="arch" type="xml">
+            <tree string="Gift Compositions" decoration-success="state == 'delivered'" decoration-info="state == 'approved'" decoration-warning="state == 'confirmed'">
+                <field name="name"/>
+                <field name="partner_id"/>
+                <field name="composition_type"/>
+                <field name="product_count"/>
+                <field name="target_budget" widget="monetary"/>
+                <field name="actual_cost" widget="monetary"/>
+                <field name="budget_variance" widget="percentage"/>
+                <field name="confidence_score" widget="progressbar"/>
+                <field name="state" widget="badge" decoration-success="state == 'delivered'" decoration-info="state == 'approved'" decoration-warning="state == 'confirmed'"/>
+                <field name="create_date"/>
+            </tree>
+        </field>
+    </record>
     
-                                <!-- AI Analysis Header -->
-                                <div class="alert alert-primary" role="alert" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; margin-bottom: 30px;">
-                                    <div class="row align-items-center">
-                                        <div class="col-md-8">
-                                            <h3 style="margin-bottom: 10px; color: white;">
-                                                <i class="fa fa-robot" title="Señor Bigott AI"/> Señor Bigott's AI Analysis
-                                            </h3>
-                                            <p style="margin-bottom: 0; opacity: 0.9;">
-                                                Advanced machine learning analysis of client preferences and market trends
-                                            </p>
-                                        </div>
-                                        <div class="col-md-4 text-right">
-                                            <div style="background: rgba(255,255,255,0.2); border-radius: 50px; padding: 15px; display: inline-block;">
-                                                <!-- FIXED ACCESSIBILITY ISSUE - Line 311 -->
-                                                <i class="fa fa-brain" title="Señor Bigott AI" style="font-size: 32px; color: white;"/>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- AI Performance Metrics Dashboard -->
-                                <div class="row" style="margin-bottom: 30px;">
-                                    
-                                    <!-- Confidence Score Card -->
-                                    <div class="col-md-4">
-                                        <div class="card border-info">
-                                            <div class="card-header bg-info text-white text-center">
-                                                <h6 class="mb-0">
-                                                    <i class="fa fa-bullseye" title="AI Confidence"/> AI Confidence
-                                                </h6>
-                                            </div>
-                                            <div class="card-body text-center">
-                                                <div style="position: relative; display: inline-block;">
-                                                    <canvas width="120" height="120" style="transform: rotate(-90deg);"></canvas>
-                                                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
-                                                        <h2 class="text-info mb-0">
-                                                            <field name="confidence_score" widget="percentage"/>
-                                                        </h2>
-                                                    </div>
-                                                </div>
-                                                <div class="mt-3">
-                                                    <div class="progress" style="height: 8px;">
-                                                        <div class="progress-bar bg-info" 
-                                                            style="width: calc(var(--confidence-score, 66.8) * 1%)"></div>
-                                                    </div>
-                                                    <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('confidence_score', '&lt;', 0.8)]}">Excellent Confidence</span>
-                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.8), ('confidence_score', '&lt;', 0.6)]}">Good Confidence</span>
-                                                        <span attrs="{'invisible': ['|', ('confidence_score', '>=', 0.6), ('confidence_score', '&lt;', 0.4)]}">Medium Confidence</span>
-                                                        <span attrs="{'invisible': [('confidence_score', '>=', 0.4)]}">Requires Review</span>
-                                                    </small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Novelty Score Card -->
-                                    <div class="col-md-4">
-                                        <div class="card border-warning">
-                                            <div class="card-header bg-warning text-white text-center">
-                                                <h6 class="mb-0">
-                                                    <i class="fa fa-star" title="Novelty Factor"/> Novelty Factor
-                                                </h6>
-                                            </div>
-                                            <div class="card-body text-center">
-                                                <div style="position: relative; display: inline-block;">
-                                                    <h2 class="text-warning mb-0">
-                                                        <field name="novelty_score" widget="percentage"/>
-                                                    </h2>
-                                                    <p class="text-muted small">Discovery Level</p>
-                                                </div>
-                                                <div class="mt-3">
-                                                    <div class="progress" style="height: 8px;">
-                                                        <div class="progress-bar bg-warning" 
-                                                            style="width: calc(var(--novelty-score, 70) * 1%)"></div>
-                                                    </div>
-                                                    <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('novelty_score', '&lt;', 0.8)]}">High Discovery</span>
-                                                        <span attrs="{'invisible': ['|', ('novelty_score', '>=', 0.8), ('novelty_score', '&lt;', 0.4)]}">Balanced Mix</span>
-                                                        <span attrs="{'invisible': [('novelty_score', '>=', 0.4)]}">Conservative Selection</span>
-                                                    </small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Historical Compatibility Card -->
-                                    <div class="col-md-4">
-                                        <div class="card border-success">
-                                            <div class="card-header bg-success text-white text-center">
-                                                <h6 class="mb-0">
-                                                    <i class="fa fa-chart-line" title="History Match"/> History Match
-                                                </h6>
-                                            </div>
-                                            <div class="card-body text-center">
-                                                <div style="position: relative; display: inline-block;">
-                                                    <h2 class="text-success mb-0">
-                                                        <field name="historical_compatibility" widget="percentage"/>
-                                                    </h2>
-                                                    <p class="text-muted small">Pattern Alignment</p>
-                                                </div>
-                                                <div class="mt-3">
-                                                    <div class="progress" style="height: 8px;">
-                                                        <div class="progress-bar bg-success" 
-                                                            style="width: calc(var(--compatibility-score, 0) * 1%)"></div>
-                                                    </div>
-                                                    <small class="text-muted mt-2 d-block">
-                                                        <span attrs="{'invisible': [('historical_compatibility', '&lt;', 0.8)]}">Perfect Match</span>
-                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.8), ('historical_compatibility', '&lt;', 0.6)]}">Good Alignment</span>
-                                                        <span attrs="{'invisible': ['|', ('historical_compatibility', '>=', 0.6), ('historical_compatibility', '&lt;', 0.3)]}">Some Patterns</span>
-                                                        <span attrs="{'invisible': [('historical_compatibility', '>=', 0.3)]}">New Territory</span>
-                                                    </small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- AI Reasoning Analysis -->
-                                <div class="card" style="margin-bottom: 30px;">
-                                    <div class="card-header" style="background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%); border-bottom: 2px solid #dee2e6;">
-                                        <div class="row align-items-center">
-                                            <div class="col-md-8">
-                                                <h5 class="mb-0" style="color: #495057;">
-                                                    <i class="fa fa-lightbulb text-warning" title="Detailed AI Analysis"/> Detailed AI Analysis
-                                                </h5>
-                                                <small class="text-muted">
-                                                    Machine learning insights and recommendation reasoning
-                                                </small>
-                                            </div>
-                                            <div class="col-md-4 text-right">
-                                                <span class="badge badge-info">
-                                                    Generated: <field name="generated_date" widget="datetime"/>
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="card-body" style="background: #fafbfc;">
-                                        <div style="background: white; border-radius: 8px; padding: 20px; border-left: 4px solid #007bff;">
-                                            <field name="reasoning" nolabel="1" readonly="1"/>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- AI Insights Summary -->
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="card h-100">
-                                            <div class="card-header bg-light">
-                                                <h6 class="mb-0">
-                                                    <i class="fa fa-check-circle text-success" title="Strengths"/> Strengths
-                                                </h6>
-                                            </div>
-                                            <div class="card-body">
-                                                <ul class="list-unstyled">
-                                                    <li attrs="{'invisible': [('confidence_score', '&lt;', 0.7)]}">
-                                                        <i class="fa fa-check text-success" title="Success"/> High confidence in recommendations
-                                                    </li>
-                                                    <li attrs="{'invisible': ['|', ('novelty_score', '&lt;', 0.6), ('novelty_score', '>', 0.8)]}">
-                                                        <i class="fa fa-check text-success" title="Success"/> Balanced novelty approach
-                                                    </li>
-                                                    <li attrs="{'invisible': [('historical_compatibility', '&lt;', 0.5)]}">
-                                                        <i class="fa fa-check text-success" title="Success"/> Strong historical alignment
-                                                    </li>
-                                                    <li attrs="{'invisible': [('budget_variance_percent', '>', 15)]}">
-                                                        <i class="fa fa-check text-success" title="Success"/> Within budget parameters
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="col-md-6">
-                                        <div class="card h-100">
-                                            <div class="card-header bg-light">
-                                                <h6 class="mb-0">
-                                                    <i class="fa fa-exclamation-triangle text-warning" title="Considerations"/> Considerations
-                                                </h6>
-                                            </div>
-                                            <div class="card-body">
-                                                <ul class="list-unstyled">
-                                                    <li attrs="{'invisible': [('confidence_score', '>=', 0.7)]}">
-                                                        <i class="fa fa-exclamation text-warning" title="Warning"/> Lower confidence - limited data
-                                                    </li>
-                                                    <li attrs="{'invisible': ['&amp;', ('novelty_score', '&lt;=', 0.8), ('novelty_score', '>=', 0.6)]}">
-                                                        <i class="fa fa-exclamation text-warning" title="Warning"/> High novelty - client reaction uncertain
-                                                    </li>
-                                                    <li attrs="{'invisible': [('historical_compatibility', '>=', 0.5)]}">
-                                                        <i class="fa fa-exclamation text-warning" title="Warning"/> Limited historical patterns
-                                                    </li>
-                                                    <li attrs="{'invisible': [('budget_variance_percent', '&lt;=', 15)]}">
-                                                        <i class="fa fa-exclamation text-warning" title="Warning"/> Budget variance detected
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Performance Benchmarks -->
-                                <div class="card mt-4">
-                                    <div class="card-header bg-secondary text-white">
-                                        <h6 class="mb-0">
-                                            <i class="fa fa-chart-bar" title="Performance Benchmarks"/> Performance Benchmarks
-                                        </h6>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row text-center">
-                                            <div class="col-md-3">
-                                                <div class="border-right">
-                                                    <h5 class="text-primary">
-                                                        <field name="generated_by" readonly="1"/>
-                                                    </h5>
-                                                    <small class="text-muted">Generated By</small>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <div class="border-right">
-                                                    <h5 class="text-info">
-                                                        <field name="target_year"/>
-                                                    </h5>
-                                                    <small class="text-muted">Target Year</small>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <div class="border-right">
-                                                    <h5 class="text-success">
-                                                        <field name="state" widget="badge"/>
-                                                    </h5>
-                                                    <small class="text-muted">Current Status</small>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <h5 class="text-warning">v2.0</h5>
-                                                <small class="text-muted">AI Engine</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                            </page>
-                            
-                            <page string="Client Feedback" name="client_feedback"
-                                  attrs="{'invisible': [('state', 'not in', ['delivered'])]}">
-                                <group>
-                                    <field name="client_rating"/>
-                                    <field name="client_feedback"/>
-                                </group>
-                            </page>
-                            
-                            <page string="Metadata" name="metadata">
-                                <group name="generation_info" string="Generation Details">
-                                    <field name="generated_date"/>
-                                    <field name="generated_by"/>
-                                    <field name="proposed_date" readonly="1"/>
-                                    <field name="approved_date" readonly="1"/>
-                                </group>
-                            </page>
-                        </notebook>
-                    </sheet>
-                    <div class="oe_chatter">
-                        <field name="message_follower_ids"/>
-                        <field name="activity_ids"/>
-                        <field name="message_ids"/>
+    <!-- Gift Composition Form View -->
+    <record id="view_gift_composition_form" model="ir.ui.view">
+        <field name="name">gift.composition.form</field>
+        <field name="model">gift.composition</field>
+        <field name="arch" type="xml">
+            <form string="Gift Composition">
+                <header>
+                    <button name="action_confirm" string="Confirm" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                    <button name="action_approve" string="Approve" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'confirmed')]}"/>
+                    <button name="action_deliver" string="Mark as Delivered" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'approved')]}"/>
+                    <button name="action_cancel" string="Cancel" type="object" attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/>
+                    <button name="action_reset_to_draft" string="Reset to Draft" type="object" attrs="{'invisible': [('state', '!=', 'cancelled')]}"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,approved,delivered"/>
+                </header>
+                
+                <sheet>
+                    <div class="oe_title">
+                        <h1>
+                            <field name="display_name" readonly="1"/>
+                        </h1>
                     </div>
-                </form>
-            </field>
-        </record>
-        
-        <!-- Gift Composition Kanban View -->
-        <record id="view_gift_composition_kanban" model="ir.ui.view">
-            <field name="name">gift.composition.kanban</field>
-            <field name="model">gift.composition</field>
-            <field name="arch" type="xml">
-                <kanban default_group_by="state" quick_create="false">
-                    <field name="partner_id"/>
-                    <field name="target_budget"/>
-                    <field name="actual_cost"/>
-                    <field name="composition_type"/>
-                    <field name="confidence_score"/>
-                    <field name="state"/>
-                    <templates>
-                        <t t-name="kanban-box">
-                            <div class="oe_kanban_card oe_kanban_global_click">
-                                <div class="oe_kanban_content">
-                                    <div class="oe_kanban_card_header">
-                                        <div class="oe_kanban_card_header_title">
-                                            <div class="o_dropdown_kanban dropdown">
-                                                <a class="dropdown-toggle o-no-caret btn" data-toggle="dropdown" href="#" role="button" aria-label="Dropdown menu" title="Dropdown menu">
-                                                    <span class="fa fa-ellipsis-v" title="More options"/>
-                                                </a>
-                                                <div class="dropdown-menu" role="menu">
-                                                    <t t-if="record.state.raw_value == 'draft'">
-                                                        <a type="object" name="action_propose" class="dropdown-item">Propose</a>
-                                                    </t>
-                                                    <t t-if="record.state.raw_value == 'proposed'">
-                                                        <a type="object" name="action_approve" class="dropdown-item">Approve</a>
-                                                    </t>
-                                                    <a type="delete" class="dropdown-item">Delete</a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="oe_kanban_card_content">
-                                        <div><strong><field name="partner_id"/></strong></div>
-                                        <div><field name="composition_type" widget="badge"/></div>
-                                        <div>Budget: <field name="target_budget" widget="monetary"/></div>
-                                        <div>Cost: <field name="actual_cost" widget="monetary"/></div>
-                                        <div class="oe_kanban_bottom_right">
-                                            <field name="confidence_score" widget="percentage"/>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </t>
-                    </templates>
-                </kanban>
-            </field>
-        </record>
-        
-        <!-- Gift Composition Search View -->
-        <record id="view_gift_composition_search" model="ir.ui.view">
-            <field name="name">gift.composition.search</field>
-            <field name="model">gift.composition</field>
-            <field name="arch" type="xml">
-                <search>
-                    <field name="partner_id"/>
-                    <field name="target_year"/>
-                    <field name="composition_type"/>
-                    <field name="state"/>
-                    <field name="experience_id"/>
                     
-                    <filter name="current_year" string="Current Year" 
-                            domain="[('target_year', '=', context_today().year)]"/>
-                    <filter name="next_year" string="Next Year" 
-                            domain="[('target_year', '=', context_today().year + 1)]"/>
-                    <separator/>
-                    <filter name="experience_based" string="Experience-Based" 
-                            domain="[('composition_type', '=', 'experience')]"/>
-                    <filter name="custom_compositions" string="Custom Compositions" 
-                            domain="[('composition_type', '=', 'custom')]"/>
-                    <separator/>
-                    <filter name="high_confidence" string="High Confidence (&gt;80%)" 
-                            domain="[('confidence_score', '&gt;', 0.8)]"/>
-                    <filter name="on_budget" string="On Budget" 
-                            domain="[('budget_status', '=', 'on_target')]"/>
-                    <separator/>
-                    <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
-                    <filter name="proposed" string="Proposed" domain="[('state', '=', 'proposed')]"/>
-                    <filter name="approved" string="Approved" domain="[('state', '=', 'approved')]"/>
-                    
-                    <group expand="0" string="Group By">
-                        <filter name="group_by_client" string="Client" context="{'group_by': 'partner_id'}"/>
-                        <filter name="group_by_year" string="Year" context="{'group_by': 'target_year'}"/>
-                        <filter name="group_by_type" string="Type" context="{'group_by': 'composition_type'}"/>
-                        <filter name="group_by_state" string="State" context="{'group_by': 'state'}"/>
-                        <filter name="group_by_generated_by" string="Generated By" context="{'group_by': 'generated_by'}"/>
+                    <group>
+                        <group string="Client Information">
+                            <field name="partner_id" options="{'no_create': True}"/>
+                            <field name="target_year"/>
+                            <field name="composition_type"/>
+                        </group>
+                        <group string="Budget Analysis">
+                            <field name="target_budget" widget="monetary"/>
+                            <field name="actual_cost" widget="monetary"/>
+                            <field name="budget_variance" widget="percentage"/>
+                            <field name="product_count"/>
+                        </group>
                     </group>
-                </search>
-            </field>
-        </record>
-        
-        <!-- Gift Composition Action -->
-        <record id="action_gift_composition" model="ir.actions.act_window">
-            <field name="name">Gift Compositions</field>
-            <field name="res_model">gift.composition</field>
-            <field name="view_mode">kanban,tree,form</field>
-            <field name="context">{'search_default_current_year': 1}</field>
-            <field name="help" type="html">
-                <p class="o_view_nocontent_smiling_face">
-                    🎁 Create your first gift composition!
-                </p>
-                <p>
-                    Use Señor Bigott AI to generate personalized gift compositions based on client history and preferences.
-                </p>
-                <p>
-                    <a type="action" name="%(action_composition_wizard)d" class="btn btn-primary">
-                        🧠 Generate New Composition
-                    </a>
-                </p>
-            </field>
-        </record>
-        
-    </data>
+                    
+                    <group string="AI Analysis" attrs="{'invisible': [('composition_type', '!=', 'ai_generated')]}">
+                        <group>
+                            <field name="confidence_score" widget="progressbar"/>
+                            <field name="novelty_score" widget="progressbar"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Products" name="products">
+                            <field name="product_ids">
+                                <tree>
+                                    <field name="default_code"/>
+                                    <field name="name"/>
+                                    <field name="lebiggot_category"/>
+                                    <field name="product_grade"/>
+                                    <field name="brand"/>
+                                    <field name="list_price" widget="monetary"/>
+                                </tree>
+                            </field>
+                        </page>
+                        
+                        <page string="Client Notes &amp; Restrictions" name="notes">
+                            <group>
+                                <field name="dietary_restrictions" colspan="2"/>
+                                <field name="client_notes" colspan="2"/>
+                            </group>
+                        </page>
+                        
+                        <page string="AI Reasoning" name="reasoning" attrs="{'invisible': [('reasoning', '=', False)]}">
+                            <field name="reasoning" widget="html"/>
+                        </page>
+                        
+                        <page string="Timeline" name="timeline">
+                            <group>
+                                <group string="Dates">
+                                    <field name="create_date" readonly="1"/>
+                                    <field name="confirmation_date" readonly="1"/>
+                                    <field name="delivery_date" readonly="1"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+                
+                <div class="oe_chatter">
+                    <field name="message_follower_ids" widget="mail_followers"/>
+                    <field name="message_ids" widget="mail_thread"/>
+                </div>
+            </form>
+        </field>
+    </record>
+    
+    <!-- Gift Composition Search View -->
+    <record id="view_gift_composition_search" model="ir.ui.view">
+        <field name="name">gift.composition.search</field>
+        <field name="model">gift.composition</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="partner_id"/>
+                <field name="composition_type"/>
+                
+                <filter name="this_year" string="This Year" domain="[('target_year', '=', context_today().year)]"/>
+                <filter name="ai_generated" string="AI Generated" domain="[('composition_type', '=', 'ai_generated')]"/>
+                <filter name="draft" string="Draft" domain="[('state', '=', 'draft')]"/>
+                <filter name="confirmed" string="Confirmed" domain="[('state', '=', 'confirmed')]"/>
+                <filter name="approved" string="Approved" domain="[('state', '=', 'approved')]"/>
+                <filter name="delivered" string="Delivered" domain="[('state', '=', 'delivered')]"/>
+                
+                <group expand="0" string="Group By">
+                    <filter name="group_by_partner" string="Client" context="{'group_by': 'partner_id'}"/>
+                    <filter name="group_by_type" string="Composition Type" context="{'group_by': 'composition_type'}"/>
+                    <filter name="group_by_state" string="Status" context="{'group_by': 'state'}"/>
+                    <filter name="group_by_year" string="Year" context="{'group_by': 'target_year'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    
+    <!-- Window Action -->
+    <record id="action_gift_composition" model="ir.actions.act_window">
+        <field name="name">Gift Compositions</field>
+        <field name="res_model">gift.composition</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">🎁 No gift compositions yet!</p>
+            <p>
+                Gift compositions will appear here. You can create them manually or use the AI recommendation system.
+            </p>
+        </field>
+    </record>
+
 </odoo>

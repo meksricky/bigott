@@ -1,863 +1,110 @@
-# -*- coding: utf-8 -*-
 # models/gift_composition.py
-from odoo import models, fields, api, _
-from odoo.exceptions import UserError, ValidationError
-import json
-import logging
 
-_logger = logging.getLogger(__name__)
+from odoo import models, fields, api
+from datetime import datetime
 
 class GiftComposition(models.Model):
     _name = 'gift.composition'
-    _description = 'AI Gift Composition - Advanced BRD Implementation'
-    _inherit = ['mail.thread', 'mail.activity.mixin']
-    _order = 'generated_date desc'
-    _rec_name = 'name'
-
+    _description = 'Gift Composition'
+    _order = 'create_date desc'
+    _rec_name = 'display_name'
+    
     # Basic Information
-    name = fields.Char(string='Composition Name', default='New Gift Composition', required=True, copy=False, readonly=True)
-    partner_id = fields.Many2one('res.partner', string='Client', required=True, tracking=True)
-    target_year = fields.Integer(string='Target Year', required=True, default=lambda self: fields.Date.today().year)
+    name = fields.Char(string="Name", compute='_compute_name', store=True)
+    display_name = fields.Char(string="Display Name", compute='_compute_display_name')
+    partner_id = fields.Many2one('res.partner', string="Client", required=True)
+    
+    # Composition Details
     composition_type = fields.Selection([
         ('custom', 'Custom Composition'),
-        ('experience', 'Experience-Based'),
-    ], string='Composition Type', default='custom', required=True, tracking=True)
+        ('experience', 'Experience Based'),
+        ('ai_generated', 'AI Generated')
+    ], string="Composition Type", default='ai_generated')
     
-    # Product Management - Advanced
-    product_ids = fields.Many2many('product.template', string='Products', domain="[('sale_ok', '=', True)]")
-    experience_id = fields.Many2one('gift.experience', string='Experience Product')
+    # Budget Information
+    target_budget = fields.Float(string="Target Budget", required=True)
+    actual_cost = fields.Float(string="Actual Cost", compute='_compute_actual_cost', store=True)
+    budget_variance = fields.Float(string="Budget Variance %", compute='_compute_budget_variance', store=True)
     
-    # Computed field to get experience products for the view
-    experience_product_ids = fields.Many2many(
-        'product.template', 
-        string='Experience Products', 
-        compute='_compute_experience_products',
-        store=False
-    )
+    # Products
+    product_ids = fields.Many2many('product.template', string="Products")
+    product_count = fields.Integer(string="Product Count", compute='_compute_product_count', store=True)
     
-    product_count = fields.Integer(string='Product Count', compute='_compute_product_count', store=True)
+    # Composition Metadata
+    target_year = fields.Integer(string="Target Year", default=lambda self: datetime.now().year)
+    dietary_restrictions = fields.Text(string="Dietary Restrictions")
+    client_notes = fields.Text(string="Client Notes")
     
-    # Budget Management - Advanced with Multiple Flags
-    target_budget = fields.Monetary(string='Target Budget', currency_field='currency_id', tracking=True)
-    actual_cost = fields.Monetary(string='Actual Cost', currency_field='currency_id', compute='_compute_actual_cost', store=True)
-    currency_id = fields.Many2one('res.currency', string='Currency', default=lambda self: self.env.company.currency_id.id, required=True)
-    budget_variance = fields.Monetary(string='Budget Variance', compute='_compute_budget_variance', store=True, currency_field='currency_id')
-    budget_variance_percent = fields.Float(string='Budget Variance (%)', compute='_compute_budget_variance_percent', store=True, group_operator="avg")
+    # AI/Recommendation Data
+    reasoning = fields.Html(string="Recommendation Reasoning")
+    confidence_score = fields.Float(string="Confidence Score", default=0.0)
+    novelty_score = fields.Float(string="Novelty Score", default=0.0)
     
-    # Advanced Budget Variance Flags for UI Decoration
-    is_budget_variance_low = fields.Boolean(
-        string='Is Budget Variance Low',
-        compute='_compute_budget_variance_flags',
-        store=True,
-        help="True if budget variance percentage is within a low range (e.g., <= 5%)"
-    )
-    is_budget_variance_medium = fields.Boolean(
-        string='Is Budget Variance Medium',
-        compute='_compute_budget_variance_flags',
-        store=True,
-        help="True if budget variance percentage is within a medium range (e.g., > 5% and <= 15%)"
-    )
-    is_budget_variance_high = fields.Boolean(
-        string='Is Budget Variance High',
-        compute='_compute_budget_variance_flags',
-        store=True,
-        help="True if budget variance percentage is within a high range (e.g., > 15%)"
-    )
-    
-    budget_status = fields.Selection([
-        ('on_target', 'On Target'),
-        ('under', 'Under Budget'),
-        ('over', 'Over Budget'),
-    ], string='Budget Status', compute='_compute_budget_status', store=True)
-    
-    # Budget Compliance Display - Enhanced
-    budget_compliance_display = fields.Html(
-        string='Budget Status Display', 
-        compute='_compute_budget_compliance_display'
-    )
-    
-    # AI & Analytics - Advanced
-    confidence_score = fields.Float(string='AI Confidence Score', help="AI's confidence level for this composition (0-1)", tracking=True)
-    novelty_score = fields.Float(string='Novelty Score', help="How unique and novel the composition is (0-1)", tracking=True)
-    historical_compatibility = fields.Float(string='Historical Compatibility', help="How well it aligns with past client preferences (0-1)", tracking=True)
-    generation_method = fields.Char(string='Generation Method', help="Origin engine/method that generated this composition")
-    reasoning = fields.Html(string='AI Reasoning', help="Explanation from the AI for this composition")
-    
-    # Process Tracking - Advanced
-    generated_date = fields.Datetime(string='Generated Date', default=fields.Datetime.now, readonly=True)
-    generated_by = fields.Many2one('res.users', string='Generated By', default=lambda self: self.env.user, readonly=True)
-    batch_processor_id = fields.Many2one('batch.composition.processor', 'Batch Processor', readonly=True)
-    
-    # Workflow Status - Advanced with Timestamps
+    # Status
     state = fields.Selection([
         ('draft', 'Draft'),
-        ('proposed', 'Proposed to Client'),
-        ('approved', 'Approved by Client'),
+        ('confirmed', 'Confirmed'),
+        ('approved', 'Approved'),
         ('delivered', 'Delivered'),
-        ('cancelled', 'Cancelled'),
-    ], default='draft', string='Status', tracking=True)
+        ('cancelled', 'Cancelled')
+    ], string="Status", default='draft')
     
-    proposed_date = fields.Datetime(string='Proposed Date', readonly=True)
-    approved_date = fields.Datetime(string='Approved Date', readonly=True)
-    delivery_date = fields.Datetime(string='Delivery Date', readonly=True)
+    # Timestamps
+    confirmation_date = fields.Datetime(string="Confirmation Date")
+    delivery_date = fields.Datetime(string="Delivery Date")
     
-    # Client Feedback - Advanced
-    client_rating = fields.Selection([
-        ('1', '1 Star'),
-        ('2', '2 Stars'),
-        ('3', '3 Stars'),
-        ('4', '4 Stars'),
-        ('5', '5 Stars'),
-    ], string='Client Rating')
-    client_feedback = fields.Text(string='Client Feedback')
-    
-    # BRD Requirements - Advanced
-    dietary_restrictions = fields.Text(string='Dietary Restrictions', help="Any specific dietary needs or restrictions for the client (e.g., Vegan, Halal)")
-    rule_applications = fields.Text('Business Rules Applied', help="JSON of applied business rules")
-    category_structure = fields.Text(string='Category Structure', help="JSON representation of product categories distribution")
-    
-    # Document Generation - Advanced Status Tracking
-    document_generation_status = fields.Selection([
-        ('pending', 'Pending'),
-        ('generating', 'Generating'), 
-        ('completed', 'Completed'),
-        ('failed', 'Failed')
-    ], string='Document Status', default='pending')
-    
-    # Document Relationships - Advanced Integration
-    document_ids = fields.One2many('gift.composition.document', 'composition_id', 'Generated Documents')
-    assembly_sheet_ids = fields.One2many('gift.assembly.sheet', 'composition_id', 'Assembly Sheets')
-    delivery_note_ids = fields.One2many('gift.delivery.note', 'composition_id', 'Delivery Notes')
-    
-    # Document Status Tracking - Advanced
-    documents_generated = fields.Boolean('Documents Generated', compute='_compute_document_status', store=True)
-    assembly_completed = fields.Boolean('Assembly Completed', compute='_compute_assembly_status', store=True)
-    delivery_completed = fields.Boolean('Delivery Completed', compute='_compute_delivery_status', store=True)
-    
-    # Advanced Computed Methods
-    
-    @api.depends('experience_id', 'experience_id.product_ids')
-    def _compute_experience_products(self):
-        """Compute experience products for the view"""
-        for rec in self:
-            if rec.experience_id and rec.experience_id.product_ids:
-                rec.experience_product_ids = rec.experience_id.product_ids
+    @api.depends('partner_id', 'target_year', 'composition_type')
+    def _compute_name(self):
+        for record in self:
+            if record.partner_id:
+                record.name = f"{record.partner_id.name} - {record.target_year} - {record.composition_type.title()}"
             else:
-                rec.experience_product_ids = False
-
-    @api.depends('product_ids', 'experience_id', 'composition_type')
+                record.name = f"Gift Composition - {record.target_year}"
+    
+    @api.depends('name')
+    def _compute_display_name(self):
+        for record in self:
+            record.display_name = record.name or f"Gift Composition #{record.id}"
+    
+    @api.depends('product_ids')
     def _compute_product_count(self):
-        for rec in self:
-            if rec.composition_type == 'custom':
-                rec.product_count = len(rec.product_ids)
-            elif rec.composition_type == 'experience' and rec.experience_id:
-                rec.product_count = len(rec.experience_id.product_ids) if rec.experience_id.product_ids else 1
-            else:
-                rec.product_count = 0
-
-    @api.depends('product_ids.list_price', 'experience_id.base_cost', 'composition_type')
-    def _compute_actual_cost(self):
-        for rec in self:
-            cost = 0.0
-            if rec.composition_type == 'custom':
-                cost = sum(product.list_price for product in rec.product_ids)
-            elif rec.composition_type == 'experience' and rec.experience_id:
-                cost = rec.experience_id.base_cost
-            rec.actual_cost = cost
-
-    @api.depends('target_budget', 'actual_cost')
-    def _compute_budget_variance(self):
-        for rec in self:
-            rec.budget_variance = rec.actual_cost - rec.target_budget
-
-    @api.depends('target_budget', 'budget_variance')
-    def _compute_budget_variance_percent(self):
-        for rec in self:
-            if rec.target_budget and rec.target_budget != 0:
-                rec.budget_variance_percent = (rec.budget_variance / rec.target_budget) * 100
-            else:
-                rec.budget_variance_percent = 0.0
+        for record in self:
+            record.product_count = len(record.product_ids)
     
-    @api.depends('budget_variance_percent')
-    def _compute_budget_variance_flags(self):
-        """Advanced budget variance classification for UI decoration"""
-        for rec in self:
-            abs_variance_percent = abs(rec.budget_variance_percent)
-            rec.is_budget_variance_low = (abs_variance_percent <= 5)  # BRD: ±5% guardrail
-            rec.is_budget_variance_medium = (abs_variance_percent > 5) and (abs_variance_percent <= 15)
-            rec.is_budget_variance_high = (abs_variance_percent > 15)
-
-    @api.depends('budget_variance_percent')
-    def _compute_budget_status(self):
-        for rec in self:
-            variance_percent = rec.budget_variance_percent
-            if abs(variance_percent) <= 5:  # BRD: ±5% guardrail
-                rec.budget_status = 'on_target'
-            elif variance_percent > 5:
-                rec.budget_status = 'over'
-            else:
-                rec.budget_status = 'under'
+    @api.depends('product_ids.list_price')
+    def _compute_actual_cost(self):
+        for record in self:
+            record.actual_cost = sum(record.product_ids.mapped('list_price'))
     
     @api.depends('actual_cost', 'target_budget')
-    def _compute_budget_compliance_display(self):
-        """Compute user-friendly budget compliance display"""
-        for composition in self:
-            if composition.target_budget > 0:
-                variance = composition.actual_cost - composition.target_budget
-                variance_percent = (variance / composition.target_budget) * 100
-                
-                if abs(variance_percent) <= 5:
-                    status = "Within Budget"
-                    color = "success"
-                    icon = "✅"
-                elif variance_percent > 5:
-                    status = f"Over Budget (+{variance_percent:.1f}%)"
-                    color = "warning"
-                    icon = "⚠️"
-                else:
-                    status = f"Under Budget ({variance_percent:.1f}%)"
-                    color = "info"
-                    icon = "💰"
-                
-                composition.budget_compliance_display = f"""
-                    <span class="badge badge-{color}">
-                        {icon} {status} - €{composition.actual_cost:.2f} / €{composition.target_budget:.2f}
-                    </span>
-                """
+    def _compute_budget_variance(self):
+        for record in self:
+            if record.target_budget > 0:
+                variance = ((record.actual_cost - record.target_budget) / record.target_budget) * 100
+                record.budget_variance = variance
             else:
-                composition.budget_compliance_display = "<span class='text-muted'>No Target Set</span>"
+                record.budget_variance = 0.0
     
-    # Document Status Tracking - Advanced
+    def action_confirm(self):
+        """Confirm the composition"""
+        self.state = 'confirmed'
+        self.confirmation_date = fields.Datetime.now()
     
-    @api.depends('document_ids')
-    def _compute_document_status(self):
-        for comp in self:
-            required_docs = ['quotation', 'assembly_sheet', 'delivery_note']
-            generated_types = comp.document_ids.mapped('document_type')
-            comp.documents_generated = all(doc_type in generated_types for doc_type in required_docs)
-    
-    @api.depends('assembly_sheet_ids.state')
-    def _compute_assembly_status(self):
-        for comp in self:
-            comp.assembly_completed = any(sheet.state == 'completed' for sheet in comp.assembly_sheet_ids)
-    
-    @api.depends('delivery_note_ids.state')
-    def _compute_delivery_status(self):
-        for comp in self:
-            comp.delivery_completed = any(note.state == 'delivered' for note in comp.delivery_note_ids)
-    
-    # Advanced Utility Methods
-    
-    def set_category_breakdown(self, categories):
-        """Set category structure from dictionary"""
-        try:
-            self.category_structure = json.dumps(categories or {})
-        except Exception:
-            self.category_structure = '{}'
-    
-    def get_category_breakdown(self):
-        """Get category structure as dictionary"""
-        try:
-            return json.loads(self.category_structure or '{}')
-        except:
-            return {}
-    
-    # Model Lifecycle Methods
-    
-    @api.model
-    def create(self, vals):
-        if vals.get('name', 'New Gift Composition') == 'New Gift Composition':
-            vals['name'] = self.env['ir.sequence'].next_by_code('gift.composition.sequence') or 'New Gift Composition'
-        return super().create(vals)
-
-    def write(self, vals):
-        """Override write to track state changes with timestamps"""
-        result = super().write(vals)
-        
-        # Track state transitions with timestamps
-        if 'state' in vals:
-            timestamp = fields.Datetime.now()
-            if vals['state'] == 'proposed' and not self.proposed_date:
-                self.proposed_date = timestamp
-            elif vals['state'] == 'approved' and not self.approved_date:
-                self.approved_date = timestamp
-            elif vals['state'] == 'delivered' and not self.delivery_date:
-                self.delivery_date = timestamp
-        
-        return result
-
-    @api.constrains('product_ids', 'target_budget')
-    def _check_budget_compliance(self):
-        """Validate budget compliance on state changes"""
-        for composition in self:
-            if composition.state in ['proposed', 'approved'] and composition.target_budget > 0:
-                if composition.actual_cost > 0:
-                    variance_percent = abs(composition.actual_cost - composition.target_budget) / composition.target_budget * 100
-                    if variance_percent > 15:  # Hard limit at 15%
-                        raise ValidationError(
-                            f"Budget compliance violation: {variance_percent:.1f}% variance exceeds 15% limit.\n"
-                            f"Target: €{composition.target_budget:.2f}, Actual: €{composition.actual_cost:.2f}\n"
-                            f"Please regenerate or adjust the composition."
-                        )
-
-    # Enhanced Action Methods with Budget Compliance
-    
-    def action_regenerate(self):
-        """Enhanced regeneration with strict budget compliance (+/- 5%)"""
-        self.ensure_one()
-        _logger.info(f"Regenerating Gift Composition: {self.name} (ID: {self.id})")
-        
-        if self.state == 'approved':
-            raise UserError("Cannot regenerate approved compositions. Create a new draft version.")
-        
-        if self.target_budget <= 0:
-            raise UserError("Cannot regenerate without a valid target budget.")
-        
-        max_attempts = 3
-        
-        for attempt in range(1, max_attempts + 1):
-            try:
-                _logger.info(f"Regeneration attempt {attempt}/{max_attempts}")
-                
-                # Parse dietary restrictions
-                dietary_list = []
-                if self.dietary_restrictions:
-                    dietary_list = [d.strip() for d in self.dietary_restrictions.split(',') if d.strip()]
-                
-                # Try simplified engine first, then fallback to main engine
-                result = None
-                
-                if self.env['simplified.composition.engine'].search([]):
-                    engine = self.env['simplified.composition.engine']
-                    try:
-                        result = engine.generate_composition(
-                            partner_id=self.partner_id.id,
-                            target_budget=self.target_budget,
-                            target_year=self.target_year,
-                            dietary_restrictions=dietary_list,
-                            notes_text=getattr(self, 'additional_notes', '') or ''
-                        )
-                    except Exception as e:
-                        _logger.warning(f"Simplified engine failed: {e}")
-                
-                # Fallback to composition engine
-                if not result and self.env['composition.engine'].search([]):
-                    engine = self.env['composition.engine']
-                    try:
-                        result = engine.generate_composition(
-                            partner_id=self.partner_id.id,
-                            target_budget=self.target_budget,
-                            target_year=self.target_year,
-                            dietary_restrictions=dietary_list,
-                            force_type=None,
-                            notes_text=getattr(self, 'additional_notes', '') or ''
-                        )
-                    except Exception as e:
-                        _logger.warning(f"Main engine failed: {e}")
-                
-                # Fallback to integration manager
-                if not result and self.env['integration.manager'].search([]):
-                    integration_manager = self.env['integration.manager']
-                    try:
-                        result = integration_manager.generate_complete_composition(
-                            partner_id=self.partner_id.id,
-                            target_budget=self.target_budget,
-                            target_year=self.target_year,
-                            dietary_restrictions=dietary_list,
-                            notes_text=getattr(self, 'additional_notes', '') or '',
-                            attempt_number=attempt
-                        )
-                    except Exception as e:
-                        _logger.warning(f"Integration manager failed: {e}")
-                
-                if result:
-                    # Handle different result formats
-                    if hasattr(result, 'id'):
-                        # Result is a composition record
-                        new_composition = result
-                        new_products = new_composition.product_ids
-                        new_cost = new_composition.actual_cost
-                    elif isinstance(result, dict):
-                        # Result is a dictionary
-                        if 'composition_id' in result:
-                            new_composition = self.env['gift.composition'].browse(result['composition_id'])
-                            new_products = new_composition.product_ids
-                            new_cost = new_composition.actual_cost
-                        elif 'products' in result:
-                            new_products = result['products']
-                            new_cost = result.get('total_cost', sum(p.list_price for p in new_products))
-                            new_composition = None
-                        else:
-                            continue
-                    else:
-                        continue
-                    
-                    # Check budget compliance (+/- 5%)
-                    variance_percent = abs(new_cost - self.target_budget) / self.target_budget * 100
-                    
-                    if variance_percent <= 5.0:
-                        # Perfect compliance - update immediately
-                        update_vals = {
-                            'product_ids': [(6, 0, [p.id for p in new_products])],
-                            'reasoning': self._enhanced_reasoning_with_regeneration(
-                                result.get('reasoning', '') if isinstance(result, dict) else getattr(new_composition, 'reasoning', ''), 
-                                attempt, 
-                                variance_percent, 
-                                'compliant'
-                            ),
-                            'confidence_score': 0.90,
-                            'state': 'draft',
-                            'generated_date': fields.Datetime.now(),
-                        }
-                        
-                        # Add additional fields if available
-                        if isinstance(result, dict):
-                            if 'experience_id' in result:
-                                update_vals['experience_id'] = result['experience_id']
-                        elif new_composition:
-                            if new_composition.experience_id:
-                                update_vals['experience_id'] = new_composition.experience_id.id
-                            if new_composition.confidence_score:
-                                update_vals['confidence_score'] = new_composition.confidence_score
-                        
-                        self.write(update_vals)
-                        
-                        # Clean up temporary composition if created
-                        if new_composition and new_composition.id != self.id:
-                            new_composition.unlink()
-                        
-                        return {
-                            'type': 'ir.actions.client',
-                            'tag': 'display_notification',
-                            'params': {
-                                'title': 'Regeneration Successful',
-                                'message': f'New composition: {len(new_products)} products, €{new_cost:.2f} ({variance_percent:.1f}% variance)',
-                                'type': 'success',
-                                'sticky': False,
-                            }
-                        }
-                    elif attempt < max_attempts:
-                        # Try again for better compliance
-                        if new_composition and new_composition.id != self.id:
-                            new_composition.unlink()
-                        continue
-                    else:
-                        # Last attempt - accept if within 10%
-                        if variance_percent <= 10.0:
-                            self.write({
-                                'product_ids': [(6, 0, [p.id for p in new_products])],
-                                'reasoning': self._enhanced_reasoning_with_regeneration(
-                                    result.get('reasoning', '') if isinstance(result, dict) else getattr(new_composition, 'reasoning', ''), 
-                                    attempt, 
-                                    variance_percent, 
-                                    'acceptable'
-                                ),
-                                'confidence_score': 0.75,
-                                'state': 'draft',
-                                'generated_date': fields.Datetime.now(),
-                            })
-                            
-                            if new_composition and new_composition.id != self.id:
-                                new_composition.unlink()
-                            
-                            return {
-                                'type': 'ir.actions.client',
-                                'tag': 'display_notification',
-                                'params': {
-                                    'title': 'Regeneration Completed',
-                                    'message': f'Budget variance: {variance_percent:.1f}% (€{new_cost:.2f} vs €{self.target_budget:.2f})',
-                                    'type': 'warning',
-                                    'sticky': True,
-                                }
-                            }
-                        else:
-                            if new_composition and new_composition.id != self.id:
-                                new_composition.unlink()
-                            continue
-                else:
-                    _logger.warning(f"Attempt {attempt}: No result from any engine")
-                    continue
-                    
-            except Exception as e:
-                _logger.error(f"Attempt {attempt} failed: {str(e)}")
-                if attempt == max_attempts:
-                    return {
-                        'type': 'ir.actions.client',
-                        'tag': 'display_notification',
-                        'params': {
-                            'title': 'Regeneration Failed',
-                            'message': f'Error after {max_attempts} attempts: {str(e)}',
-                            'type': 'danger',
-                            'sticky': True,
-                        }
-                    }
-                continue
-        
-        # All attempts failed
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Regeneration Failed',
-                'message': f'Could not generate budget-compliant composition after {max_attempts} attempts',
-                'type': 'danger',
-                'sticky': True,
-            }
-        }
-
-    def _enhanced_reasoning_with_regeneration(self, original_reasoning, attempt, variance_percent, status):
-        """Enhanced reasoning with regeneration details"""
-        
-        status_icons = {
-            'compliant': '✅',
-            'acceptable': '⚠️',
-            'over_budget': '❌'
-        }
-        
-        regeneration_note = f"""
-        <div class="alert alert-info">
-            <h5>{status_icons.get(status, '🔄')} Regeneration Report - {fields.Datetime.now().strftime('%Y-%m-%d %H:%M')}</h5>
-            <ul>
-                <li><strong>Attempt:</strong> {attempt}/3</li>
-                <li><strong>Budget Variance:</strong> {variance_percent:.1f}%</li>
-                <li><strong>Status:</strong> {status.replace('_', ' ').title()}</li>
-                <li><strong>Products:</strong> {len(self.product_ids)} items</li>
-                <li><strong>Total Cost:</strong> €{self.actual_cost:.2f}</li>
-                <li><strong>Target Budget:</strong> €{self.target_budget:.2f}</li>
-            </ul>
-        </div>
-        """
-        
-        return regeneration_note + (original_reasoning or "")
-
-    def action_propose(self):
-        """Enhanced propose with budget validation"""
-        self.ensure_one()
-        
-        if self.actual_cost <= 0:
-            raise UserError("Cannot propose composition with zero cost.")
-        
-        if self.target_budget <= 0:
-            raise UserError("Cannot propose composition without a target budget.")
-        
-        # Check budget compliance
-        variance_percent = abs(self.actual_cost - self.target_budget) / self.target_budget * 100
-        
-        # Strict budget compliance check
-        if variance_percent > 15:
-            raise UserError(
-                f"Cannot propose composition with {variance_percent:.1f}% budget variance.\n"
-                f"Maximum allowed: 15%. Please regenerate for better compliance."
-            )
-        elif variance_percent > 5:
-            # Show warning but allow proposal
-            return {
-                'type': 'ir.actions.act_window',
-                'name': 'Budget Variance Warning',
-                'res_model': 'budget.warning.wizard',
-                'view_mode': 'form',
-                'target': 'new',
-                'context': {
-                    'default_composition_id': self.id,
-                    'default_variance_percent': variance_percent,
-                    'default_message': f'Budget variance is {variance_percent:.1f}% (target ±5%). Proceed with proposal?'
-                }
-            }
-        
-        # Normal proposal
-        self.write({
-            'state': 'proposed',
-            'proposed_date': fields.Datetime.now()
-        })
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Composition Proposed',
-                'message': f'Budget compliant composition ({variance_percent:.1f}% variance) proposed successfully.',
-                'type': 'success',
-                'sticky': False,
-            }
-        }
-
     def action_approve(self):
-        """Approve composition"""
-        self.ensure_one()
-        
-        if self.state != 'proposed':
-            raise UserError("Only proposed compositions can be approved.")
-        
-        self.write({
-            'state': 'approved',
-            'approved_date': fields.Datetime.now()
-        })
-        
-        # Auto-generate documents after approval
-        if not self.documents_generated:
-            try:
-                self.action_generate_documents()
-            except Exception as e:
-                _logger.warning(f"Document generation failed: {e}")
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Composition Approved',
-                'message': 'Gift composition approved successfully.',
-                'type': 'success',
-                'sticky': False,
-            }
-        }
-
+        """Approve the composition"""
+        self.state = 'approved'
+    
     def action_deliver(self):
-        """Mark composition as delivered"""
-        self.ensure_one()
-        
-        if self.state != 'approved':
-            raise UserError("Only approved compositions can be marked as delivered.")
-        
-        self.write({
-            'state': 'delivered',
-            'delivery_date': fields.Datetime.now()
-        })
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Composition Delivered',
-                'message': 'Gift composition has been marked as delivered.',
-                'type': 'success',
-                'sticky': False,
-            }
-        }
-
+        """Mark as delivered"""
+        self.state = 'delivered'
+        self.delivery_date = fields.Datetime.now()
+    
     def action_cancel(self):
         """Cancel the composition"""
-        self.ensure_one()
-        
-        if self.state in ['delivered']:
-            raise UserError("Cannot cancel delivered compositions.")
-        
-        self.write({'state': 'cancelled'})
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Composition Cancelled',
-                'message': 'Gift composition has been cancelled.',
-                'type': 'warning',
-                'sticky': False,
-            }
-        }
-
-    def action_view_order_history(self):
-        """View client order history"""
-        self.ensure_one()
-        
-        if not self.partner_id:
-            raise UserError("No client selected for this composition.")
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': f'Order History - {self.partner_id.name}',
-            'res_model': 'client.order.history',
-            'view_mode': 'tree,form',
-            'domain': [('partner_id', '=', self.partner_id.id)],
-            'context': {
-                'default_partner_id': self.partner_id.id,
-                'search_default_partner_id': self.partner_id.id
-            }
-        }
-
-    def action_generate_documents(self):
-        """Generate all required documents for this composition"""
-        self.ensure_one()
-        
-        if self.state not in ['approved', 'delivered']:
-            raise UserError("Documents can only be generated for approved compositions.")
-        
-        # Check if document generation system exists
-        if not self.env['document.generation.system'].search([]):
-            _logger.warning("Document generation system not available")
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Document Generation',
-                    'message': 'Document generation system is not configured.',
-                    'type': 'warning',
-                    'sticky': False,
-                }
-            }
-        
-        doc_generator = self.env['document.generation.system']
-        
-        try:
-            self.write({'document_generation_status': 'generating'})
-            
-            documents = doc_generator.generate_all_documents(self.id)
-            
-            self.write({'document_generation_status': 'completed'})
-            
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Documents Generated',
-                    'message': f'All documents generated successfully: {", ".join(documents.get("documents", {}).keys())}',
-                    'type': 'success',
-                    'sticky': True,
-                }
-            }
-            
-        except Exception as e:
-            self.write({'document_generation_status': 'failed'})
-            _logger.error(f"Document generation failed for composition {self.name}: {str(e)}")
-            raise UserError(f"Document generation failed: {str(e)}")
-
-    def action_view_documents(self):
-        """View all generated documents"""
-        self.ensure_one()
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': f'Documents - {self.name}',
-            'res_model': 'gift.composition.document',
-            'view_mode': 'tree,form',
-            'domain': [('composition_id', '=', self.id)],
-            'context': {'default_composition_id': self.id},
-        }
+        self.state = 'cancelled'
     
-    def action_view_assembly_sheets(self):
-        """View assembly sheets"""
-        self.ensure_one()
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': f'Assembly Sheets - {self.name}',
-            'res_model': 'gift.assembly.sheet',
-            'view_mode': 'tree,form',
-            'domain': [('composition_id', '=', self.id)],
-            'context': {'default_composition_id': self.id, 'default_partner_id': self.partner_id.id},
-        }
-    
-    def action_view_delivery_notes(self):
-        """View delivery notes"""
-        self.ensure_one()
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': f'Delivery Notes - {self.name}',
-            'res_model': 'gift.delivery.note',
-            'view_mode': 'tree,form',
-            'domain': [('composition_id', '=', self.id)],
-            'context': {'default_composition_id': self.id, 'default_partner_id': self.partner_id.id},
-        }
-    
-    # Advanced Analytics Methods
-    
-    def get_composition_analytics(self):
-        """Get advanced analytics for this composition"""
-        self.ensure_one()
-        
-        category_breakdown = self.get_category_breakdown()
-        
-        analytics = {
-            'composition_id': self.id,
-            'composition_name': self.name,
-            'client_name': self.partner_id.name,
-            'performance_metrics': {
-                'confidence_score': self.confidence_score,
-                'novelty_score': self.novelty_score,
-                'historical_compatibility': self.historical_compatibility,
-            },
-            'budget_analysis': {
-                'target_budget': self.target_budget,
-                'actual_cost': self.actual_cost,
-                'variance_amount': self.budget_variance,
-                'variance_percent': self.budget_variance_percent,
-                'status': self.budget_status,
-                'brd_compliant': abs(self.budget_variance_percent) <= 5  # BRD: ±5% guardrail
-            },
-            'category_breakdown': category_breakdown,
-            'product_details': [
-                {
-                    'name': p.name,
-                    'category': getattr(p, 'lebiggot_category', 'other'),
-                    'price': p.list_price,
-                    'grade': getattr(p, 'product_grade', 'standard')
-                } for p in self.product_ids
-            ],
-            'workflow_status': {
-                'current_state': self.state,
-                'proposed_date': self.proposed_date,
-                'approved_date': self.approved_date,
-                'delivery_date': self.delivery_date,
-                'documents_generated': self.documents_generated,
-                'assembly_completed': self.assembly_completed,
-                'delivery_completed': self.delivery_completed
-            }
-        }
-        
-        return analytics
-
-    def get_rule_applications_parsed(self):
-        """Get parsed business rules applications"""
-        try:
-            return json.loads(self.rule_applications or '[]')
-        except:
-            return []
-
-    # Performance and Quality Metrics
-    
-    @api.model
-    def get_performance_dashboard_data(self, domain=None):
-        """Get performance dashboard data for compositions"""
-        
-        if domain is None:
-            domain = []
-        
-        compositions = self.search(domain)
-        
-        if not compositions:
-            return {'error': 'No compositions found for the specified criteria'}
-        
-        # BRD Performance Metrics
-        total_count = len(compositions)
-        brd_compliant_count = len(compositions.filtered(lambda c: abs(c.budget_variance_percent) <= 5))
-        high_confidence_count = len(compositions.filtered(lambda c: c.confidence_score >= 0.8))
-        
-        # State Distribution
-        state_counts = {}
-        for state in ['draft', 'proposed', 'approved', 'delivered', 'cancelled']:
-            state_counts[state] = len(compositions.filtered(lambda c: c.state == state))
-        
-        # Budget Analysis
-        avg_variance = sum(compositions.mapped('budget_variance_percent')) / total_count if total_count > 0 else 0
-        
-        dashboard_data = {
-            'summary': {
-                'total_compositions': total_count,
-                'brd_compliant_rate': (brd_compliant_count / total_count) * 100 if total_count > 0 else 0,
-                'high_confidence_rate': (high_confidence_count / total_count) * 100 if total_count > 0 else 0,
-                'average_variance_percent': avg_variance,
-                'performance_status': 'excellent' if brd_compliant_count / total_count > 0.95 else 'good' if brd_compliant_count / total_count > 0.85 else 'needs_improvement'
-            },
-            'state_distribution': state_counts,
-            'budget_compliance': {
-                'compliant': brd_compliant_count,
-                'non_compliant': total_count - brd_compliant_count,
-                'compliance_rate': (brd_compliant_count / total_count) * 100 if total_count > 0 else 0
-            },
-            'confidence_metrics': {
-                'average_confidence': sum(compositions.mapped('confidence_score')) / total_count if total_count > 0 else 0,
-                'average_novelty': sum(compositions.mapped('novelty_score')) / total_count if total_count > 0 else 0,
-                'average_compatibility': sum(compositions.mapped('historical_compatibility')) / total_count if total_count > 0 else 0
-            }
-        }
-        
-        return dashboard_data
+    def action_reset_to_draft(self):
+        """Reset to draft"""
+        self.state = 'draft'
+        self.confirmation_date = False
+        self.delivery_date = False
