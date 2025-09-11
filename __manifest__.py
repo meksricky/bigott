@@ -48,11 +48,11 @@ Features:
         'data/ollama_config_data.xml',
         
         # Views
+        'views/ollama_recommendation_wizard_views.xml',
         'views/product_template_views.xml',
         'views/gift_composition_views.xml',
-        'views/ollama_gift_recommender_views.xml',
-        'views/ollama_recommendation_wizard_views.xml',
-        'views/menu_views_bkp.xml',
+        'views/ollama_gift_recommender_views.xml',  
+        'views/menu_views.xml',
     ],
     'demo': [],
     'installable': True,
