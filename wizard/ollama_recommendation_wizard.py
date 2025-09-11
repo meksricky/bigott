@@ -100,6 +100,13 @@ class OllamaRecommendationWizard(models.TransientModel):
         """Generate recommendation using Ollama"""
         self.ensure_one()
         
+        # Force save the wizard to ensure all values are persisted
+        if not self._context.get('wizard_saved'):
+            # Save the current state
+            self.with_context(wizard_saved=True).write({})
+            # Re-read the record to get fresh data
+            self = self.browse(self.id)
+
         if not self.partner_id:
             raise UserError("Please select a client.")
         

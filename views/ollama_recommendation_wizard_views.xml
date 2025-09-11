@@ -7,30 +7,6 @@
         <field name="arch" type="xml">
             <form string="Generate Gift Recommendation">
                 <header>
-                    <button name="action_generate_recommendation" 
-                            string="🎁 Generate Recommendation" 
-                            type="object" 
-                            class="oe_highlight"
-                            attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
-                    
-                    <button name="action_test_recommender_connection" 
-                            string="🔗 Test Connection" 
-                            type="object" 
-                            class="btn-secondary"
-                            attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
-                    
-                    <button name="action_view_composition" 
-                            string="📋 View Composition" 
-                            type="object" 
-                            class="oe_highlight"
-                            attrs="{'invisible': [('state', '!=', 'done')]}"/>
-                    
-                    <button name="action_generate_another" 
-                            string="🔄 Generate Another" 
-                            type="object" 
-                            class="btn-secondary"
-                            attrs="{'invisible': [('state', '!=', 'done')]}"/>
-                    
                     <field name="state" widget="statusbar" statusbar_visible="draft,generating,done"/>
                 </header>
                 
@@ -44,7 +20,7 @@
 
                         <group>
                             <group string="Client Information">
-                                <field name="partner_id" options="{'no_create': True}"/>
+                                <field name="partner_id" required="1" options="{'no_create': True}"/>
                                 <field name="target_budget" widget="monetary"/>
                             </group>
                             <group string="AI Configuration">
@@ -118,6 +94,35 @@
                         <p>Please wait while Ollama analyzes the client data and generates recommendations.</p>
                     </div>
                 </sheet>
+                
+                <footer>
+                    <button name="action_generate_recommendation" 
+                            string="🎁 Generate Recommendation" 
+                            type="object" 
+                            class="oe_highlight"
+                            attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
+                    
+                    <button name="action_test_recommender_connection" 
+                            string="🔗 Test Connection" 
+                            type="object" 
+                            class="btn-secondary"
+                            attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
+                    
+                    <button name="action_view_composition" 
+                            string="📋 View Composition" 
+                            type="object" 
+                            class="oe_highlight"
+                            attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                    
+                    <button name="action_generate_another" 
+                            string="🔄 Generate Another" 
+                            type="object" 
+                            class="btn-secondary"
+                            attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                    
+                    <button string="Cancel" class="btn-secondary" special="cancel"
+                            attrs="{'invisible': [('state', 'in', ['done'])]}"/>
+                </footer>
             </form>
         </field>
     </record>
