@@ -12,6 +12,7 @@ from . import client_order_history
 # 3. Engine models (depend on base models)
 from . import business_rules_engine
 from . import composition_engine
+from . import simplified_composition_engine
 
 # 4. Advanced engines (depend on core engines)
 from . import stock_aware_composition_engine

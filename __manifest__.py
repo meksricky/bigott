@@ -52,6 +52,8 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'views/client_history_views.xml',
         'views/experience_views.xml',
         'views/batch_processing_views.xml',
+
+        'views/simplified_composition_wizard_views.xml',
         
         # Views - Engines
         'views/ml_engine_views.xml',
@@ -80,9 +82,9 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
     ],
     'assets': {
         'web.assets_backend': [
-            'lebigott_ai/static/src/css/gift_composition.css',
-            'lebigott_ai/static/src/js/gift_composition_widget.js',
-            'lebigott_ai/static/src/js/ml_dashboard.js',
+            'bigott/static/src/css/gift_composition.css',
+            'bigott/static/src/js/gift_composition_widget.js',
+            'bigott/static/src/js/ml_dashboard.js',
         ],
     },
     'installable': True,
