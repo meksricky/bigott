@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="view_ollama_gift_recommender_tree" model="ir.ui.view">
+        <field name="name">ollama.gift.recommender.tree</field>
+        <field name="model">ollama.gift.recommender</field>
+        <field name="arch" type="xml">
+            <tree string="Ollama Gift Recommenders">
+                <field name="name"/>
+                <field name="ollama_enabled" widget="boolean_toggle"/>
+                <field name="ollama_model"/>
+                <field name="total_recommendations"/>
+                <field name="success_rate" widget="progressbar"/>
+                <field name="last_recommendation_date"/>
+                <field name="active" widget="boolean_toggle"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_ollama_gift_recommender_form" model="ir.ui.view">
+        <field name="name">ollama.gift.recommender.form</field>
+        <field name="model">ollama.gift.recommender</field>
+        <field name="arch" type="xml">
+            <form string="Ollama Gift Recommender">
+                <header>
+                    <button name="test_ollama_connection" 
+                            string="🔗 Test Connection" 
+                            type="object" 
+                            class="btn-primary"
+                            attrs="{'invisible': [('ollama_enabled', '=', False)]}"/>
+                    <button name="%(action_ollama_recommendation_wizard)d" 
+                            string="🎁 Generate Recommendation" 
+                            type="action" 
+                            class="oe_highlight"/>
+                </header>
+                
+                <sheet>
+                    <div class="oe_button_box" name="button_box">
+                        <button class="oe_stat_button" type="object" name="action_view_recommendations">
+                            <field name="total_recommendations" widget="statinfo" string="Total Recommendations"/>
+                        </button>
+                        <button class="oe_stat_button" type="object" name="action_view_successful_recommendations">
+                            <field name="successful_recommendations" widget="statinfo" string="Successful"/>
+                        </button>
+                    </div>
+
+                    <widget name="web_ribbon" title="Inactive" bg_color="bg-danger" 
+                            attrs="{'invisible': [('active', '=', True)]}"/>
+
+                    <div class="oe_title">
+                        <h1>
+                            <field name="name" placeholder="Recommender Name"/>
+                        </h1>
+                    </div>
+
+                    <group>
+                        <group name="basic_config" string="Basic Configuration">
+                            <field name="active"/>
+                            <field name="ollama_enabled"/>
+                        </group>
+                        <group name="performance" string="Performance">
+                            <field name="success_rate" widget="progressbar"/>
+                            <field name="avg_response_time" widget="float_time"/>
+                            <field name="last_recommendation_date"/>
+                        </group>
+                    </group>
+
+                    <notebook>
+                        <page string="🔧 Ollama Configuration" name="ollama_config">
+                            <group string="Connection Settings" attrs="{'invisible': [('ollama_enabled', '=', False)]}">
+                                <field name="ollama_base_url" placeholder="http://localhost:11434"/>
+                                <field name="ollama_model" placeholder="llama3.2:3b"/>
+                                <field name="ollama_timeout"/>
+                            </group>
+                            
+                            <div class="alert alert-info" role="alert" attrs="{'invisible': [('ollama_enabled', '=', True)]}">
+                                <strong>Ollama Disabled:</strong> Enable Ollama to use AI-powered recommendations.
+                                The system will fall back to rule-based recommendations.
+                            </div>
+                        </page>
+
+                        <page string="⚙️ Recommendation Settings" name="recommendation_settings">
+                            <group>
+                                <group string="Product Selection">
+                                    <field name="max_products"/>
+                                    <field name="budget_flexibility"/>
+                                </group>
+                                <group string="Quality Control">
+                                    <field name="min_confidence_score"/>
+                                </group>
+                            </group>
+                        </page>
+
+                        <page string="📊 Statistics" name="statistics">
+                            <group>
+                                <group string="Usage Statistics">
+                                    <field name="total_recommendations" readonly="1"/>
+                                    <field name="successful_recommendations" readonly="1"/>
+                                    <field name="success_rate" readonly="1" widget="progressbar"/>
+                                </group>
+                                <group string="Performance Metrics">
+                                    <field name="avg_response_time" readonly="1" widget="float_time"/>
+                                    <field name="last_recommendation_date" readonly="1"/>
+                                </group>
+                            </group>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Search View -->
+    <record id="view_ollama_gift_recommender_search" model="ir.ui.view">
+        <field name="name">ollama.gift.recommender.search</field>
+        <field name="model">ollama.gift.recommender</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name"/>
+                <field name="ollama_model"/>
+                
+                <filter name="active_only" string="Active Only" domain="[('active', '=', True)]" default="1"/>
+                <filter name="ollama_enabled" string="Ollama Enabled" domain="[('ollama_enabled', '=', True)]"/>
+                <filter name="high_success_rate" string="High Success Rate (&gt;80%)" domain="[('success_rate', '&gt;', 80)]"/>
+                
+                <group expand="0" string="Group By">
+                    <filter name="group_by_ollama_model" string="Ollama Model" context="{'group_by': 'ollama_model'}"/>
+                    <filter name="group_by_success_rate" string="Success Rate" context="{'group_by': 'success_rate'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <!-- Window Action -->
+    <record id="action_ollama_gift_recommender" model="ir.actions.act_window">
+        <field name="name">Ollama Gift Recommenders</field>
+        <field name="res_model">ollama.gift.recommender</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">🤖 No Ollama Gift Recommenders configured yet!</p>
+            <p>
+                Create your first Ollama-powered gift recommendation engine to leverage AI for intelligent gift suggestions.
+                The system will analyze client history, budget, and preferences to generate personalized recommendations.
+            </p>
+        </field>
+    </record>
+
+</odoo>

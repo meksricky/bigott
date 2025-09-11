@@ -1,14 +1,24 @@
 # -*- coding: utf-8 -*-
 {
-    'name': 'Señor Bigott AI/ML Gift Recommendation System',
-    'version': '3.0.0',
+    'name': 'Ollama Gift Recommender',
+    'version': '1.0.0',
     'category': 'Sales/Sales',
-    'summary': 'Advanced AI/ML-powered luxury gift recommendation and composition system',
+    'summary': 'AI-powered gift recommendations using Ollama',
     'description': """
-Señor Bigott AI/ML Gift Recommendation System
-==============================================
+Ollama Gift Recommender
+=======================
 
-Complete AI/ML-powered system for luxury gourmet gift recommendations.
+AI-powered gift recommendation system using Ollama for intelligent product suggestions.
+
+Features:
+- Ollama AI integration for intelligent recommendations
+- Client history analysis
+- Budget-aware product selection
+- Dietary restrictions support
+- Stock availability checking
+- Internal reference validation
+- Fallback recommendation system
+- Performance analytics and monitoring
     """,
     'author': 'Your Company',
     'website': 'https://www.yourcompany.com',
@@ -21,74 +31,30 @@ Complete AI/ML-powered system for luxury gourmet gift recommendations.
         'mail',
         'contacts',
         'web',
-        'delivery',
+        'lebigott_ai',  # Depends on your existing module
     ],
     'external_dependencies': {
         'python': [
-            'numpy',
-            'scikit-learn',
-            'joblib',
             'requests',
         ],
     },
     'data': [
-        # Security
+        # Security - MUST be loaded in this order
         'security/security_groups.xml',
         'security/ir.model.access.csv',
+        'security/ir.rule.xml',
         
-        # Data files
-        'data/ir_config_parameter_data.xml',
-        'data/ir_cron_data.xml',
-        # 'data/cron_jobs.xml',
-        'data/default_data.xml',
-        'data/sequences.xml',
-        # 'data/system_config.xml',
-        'data/product_categories_data.xml',
+        # Data
+        'data/ollama_config_data.xml',
         
-        # Views - Core
-        'views/product_template_views.xml',
-        'views/res_partner_views.xml',
-        'views/gift_composition_views.xml',
-        'views/client_history_views.xml',
-        'views/experience_views.xml',
-        'views/batch_processing_views.xml',
-
-        'views/simplified_composition_wizard_views.xml',
-        
-        # Views - Engines
-        'views/ml_engine_views.xml',
-        'views/ai_product_recommender_views.xml',
-        'views/integration_manager_views.xml',
-        # 'views/stock_aware_composition_views.xml',
-        # 'views/business_rules_engine_views.xml',
-        # 'views/composition_engine_views.xml',
-        # 'views/document_generation_views.xml',
-        
-        # Views - Rebuilding history
-        # 'views/rebuild_history_wizard_views.xml',
-        
-        # Menu
-        'views/menu_views.xml',
-        
-        # Wizards
-        # 'wizard/ml_training_wizard_views.xml',
-        # 'wizard/batch_composition_wizard_views.xml',
-        # 'wizard/rebuild_history_wizard_views.xml',
-        # 'wizard/composition_wizard.py',
-        
+        # Views
+        'views/ollama_gift_recommender_views.xml',
+        'views/ollama_recommendation_wizard_views.xml',
+        'views/menu_views_bkp.xml',
     ],
-    'demo': [
-        # 'demo/additional_demo_data.xml',
-    ],
-    'assets': {
-        'web.assets_backend': [
-            'bigott/static/src/css/gift_composition.css',
-            'bigott/static/src/js/gift_composition_widget.js',
-            'bigott/static/src/js/ml_dashboard.js',
-        ],
-    },
+    'demo': [],
     'installable': True,
-    'application': True,
+    'application': False,
     'auto_install': False,
     'license': 'LGPL-3',
 }
