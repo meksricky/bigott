@@ -1,38 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
 <odoo>
-  <record id="view_simplified_composition_wizard" model="ir.ui.view">
-    <field name="name">simplified.composition.wizard.form</field>
-    <field name="model">simplified.composition.wizard</field>
-    <field name="arch" type="xml">
-      <form string="Generate Composition">
-        <group>
-          <field name="partner_id" required="1"/>
-          <field name="target_year"/>
-          <field name="target_budget"/>
-          <field name="dietary_restrictions"/>
-          <field name="additional_notes"/>
-        </group>
-        <footer>
-          <button string="Generate"
-                  name="action_generate_composition"
-                  type="object" class="btn-primary"/>
-          <button string="Cancel" special="cancel" class="btn-secondary"/>
-        </footer>
-      </form>
-    </field>
-  </record>
+    <!-- Simplified Composition Wizard Form View -->
+    <record id="view_simplified_composition_wizard" model="ir.ui.view">
+        <field name="name">simplified.composition.wizard.form</field>
+        <field name="model">simplified.composition.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Generate Gift Composition">
+                <div class="oe_title">
+                    <h1>Generate Gift Composition</h1>
+                </div>
+                
+                <group>
+                    <group>
+                        <field name="partner_id" required="1" options="{'no_create': True}"/>
+                        <field name="target_year"/>
+                        <field name="target_budget" widget="monetary"/>
+                    </group>
+                    <group>
+                        <field name="dietary_restrictions"/>
+                        <field name="additional_notes" placeholder="Special requirements, preferences, etc."/>
+                    </group>
+                </group>
+                
+                <group string="Client Information" attrs="{'invisible': [('partner_id', '=', False)]}">
+                    <field name="client_info" widget="html" nolabel="1"/>
+                </group>
+                
+                <footer>
+                    <button string="Generate Composition" name="action_generate_composition" 
+                            type="object" class="btn-primary"/>
+                    <button string="Preview Products" name="action_preview_products" 
+                            type="object" class="btn-secondary"
+                            attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                    <button string="Cancel" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
 
-  <record id="action_simplified_composition_wizard" model="ir.actions.act_window">
-    <field name="name">Generate Composition</field>
-    <field name="res_model">simplified.composition.wizard</field>
-    <field name="view_mode">form</field>
-    <field name="target">new</field>
-    <field name="view_id" ref="view_simplified_composition_wizard"/>
-  </record>
+    <!-- Wizard Action -->
+    <record id="action_simplified_composition_wizard" model="ir.actions.act_window">
+        <field name="name">Generate Gift Composition</field>
+        <field name="res_model">simplified.composition.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="view_id" ref="view_simplified_composition_wizard"/>
+    </record>
 
-  <!-- Use a parent menu that actually exists on your DB -->
-  <menuitem id="menu_generate_composition"
-            name="Generate Composition"
-            parent="sale.menu_sale_root"
-            action="action_simplified_composition_wizard"
-            sequence="50"/>
+    <!-- Menu Item -->
+    <menuitem id="menu_simplified_composition_wizard"
+              name="Generate Composition"
+              parent="menu_gift_composition_root"
+              action="action_simplified_composition_wizard"
+              sequence="10"/>
 </odoo>
