@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
+import json
 
 class SimplifiedCompositionWizard(models.TransientModel):
     _name = "simplified.composition.wizard"
@@ -45,12 +46,15 @@ class SimplifiedCompositionWizard(models.TransientModel):
                 info_html += "</ul>"
                 
                 # Show preferred categories
-                latest_categories = json.loads(history[0].category_breakdown or '{}')
-                if latest_categories:
-                    info_html += "<h5>Recent Preferences:</h5><ul>"
-                    for category, count in sorted(latest_categories.items(), key=lambda x: x[1], reverse=True)[:3]:
-                        info_html += f"<li>{category}: {count} items</li>"
-                    info_html += "</ul>"
+                try:
+                    latest_categories = json.loads(history[0].category_breakdown or '{}')
+                    if latest_categories:
+                        info_html += "<h5>Recent Preferences:</h5><ul>"
+                        for category, count in sorted(latest_categories.items(), key=lambda x: x[1], reverse=True)[:3]:
+                            info_html += f"<li>{category}: {count} items</li>"
+                        info_html += "</ul>"
+                except:
+                    pass
             else:
                 info_html += "<p><em>New client - no purchase history</em></p>"
             
@@ -70,26 +74,38 @@ class SimplifiedCompositionWizard(models.TransientModel):
         
         try:
             # Try simplified engine first
+            result = None
+            
             if self.env['simplified.composition.engine'].search([]):
                 engine = self.env['simplified.composition.engine']
-                result = engine.generate_composition(
-                    partner_id=self.partner_id.id,
-                    target_budget=self.target_budget,
-                    target_year=self.target_year,
-                    dietary_restrictions=dietary_list,
-                    notes_text=self.additional_notes or ''
-                )
-            else:
-                # Fallback to main composition engine
+                try:
+                    result = engine.generate_composition(
+                        partner_id=self.partner_id.id,
+                        target_budget=self.target_budget,
+                        target_year=self.target_year,
+                        dietary_restrictions=dietary_list,
+                        notes_text=self.additional_notes or ''
+                    )
+                except Exception as e:
+                    raise UserError(_("Simplified engine failed: %s") % str(e))
+            
+            # Fallback to main composition engine
+            if not result and self.env['composition.engine'].search([]):
                 engine = self.env['composition.engine']
-                result = engine.generate_composition(
-                    partner_id=self.partner_id.id,
-                    target_budget=self.target_budget,
-                    target_year=self.target_year,
-                    dietary_restrictions=dietary_list,
-                    force_type=None,
-                    notes_text=self.additional_notes or ''
-                )
+                try:
+                    result = engine.generate_composition(
+                        partner_id=self.partner_id.id,
+                        target_budget=self.target_budget,
+                        target_year=self.target_year,
+                        dietary_restrictions=dietary_list,
+                        force_type=None,
+                        notes_text=self.additional_notes or ''
+                    )
+                except Exception as e:
+                    raise UserError(_("Main engine failed: %s") % str(e))
+            
+            if not result:
+                raise UserError(_("No composition engine available"))
             
             comp_id = result.get('composition_id')
             if not comp_id:
@@ -130,6 +146,9 @@ class SimplifiedCompositionWizard(models.TransientModel):
         """Preview available products for this configuration"""
         
         try:
+            if not self.env['simplified.composition.engine'].search([]):
+                raise UserError("Simplified composition engine not available")
+                
             engine = self.env['simplified.composition.engine']
             dietary_list = [self.dietary_restrictions] if self.dietary_restrictions != 'none' else []
             available_products = engine._get_available_products(dietary_list)
@@ -153,12 +172,12 @@ class SimplifiedCompositionWizard(models.TransientModel):
     @api.onchange('partner_id')
     def _onchange_partner_id(self):
         """Auto-suggest budget based on client history"""
-        if self.partner_id:
+        if self.partner_id and not self.target_budget:
             history = self.env['client.order.history'].search([
                 ('partner_id', '=', self.partner_id.id)
             ], order='order_year desc', limit=1)
             
-            if history and not self.target_budget:
+            if history:
                 # Suggest similar budget with slight increase
                 suggested_budget = history.total_budget * 1.05
                 self.target_budget = suggested_budget

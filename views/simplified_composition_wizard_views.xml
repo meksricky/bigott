@@ -14,7 +14,7 @@
                     <group>
                         <field name="partner_id" required="1" options="{'no_create': True}"/>
                         <field name="target_year"/>
-                        <field name="target_budget" widget="monetary"/>
+                        <field name="target_budget"/>
                     </group>
                     <group>
                         <field name="dietary_restrictions"/>
@@ -47,10 +47,10 @@
         <field name="view_id" ref="view_simplified_composition_wizard"/>
     </record>
 
-    <!-- Menu Item -->
+    <!-- Menu Item (only if menu_gift_composition_root exists) -->
     <menuitem id="menu_simplified_composition_wizard"
               name="Generate Composition"
-              parent="menu_gift_composition_root"
+              parent="base.menu_administration"
               action="action_simplified_composition_wizard"
               sequence="10"/>
 </odoo>
