@@ -3,6 +3,15 @@
     
     <!-- ========== OLLAMA GIFT RECOMMENDER MENU STRUCTURE ========== -->
     
+    <!-- Create the missing parent menus first -->
+    <menuitem id="menu_ai_configuration" 
+              name="AI Configuration" 
+              sequence="60"/>
+              
+    <menuitem id="menu_gift_management" 
+              name="Gift Management" 
+              sequence="50"/>
+    
     <!-- Main Menu Item under AI Configuration -->
     <menuitem id="menu_ollama_main" 
               name="🤖 Ollama AI" 
@@ -46,7 +55,6 @@
         <field name="res_model">ollama.gift.recommender</field>
         <field name="view_mode">tree,form</field>
         <field name="domain">[]</field>
-        <field name="context">{'search_default_high_success_rate': 1}</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">📈 Analyze AI recommendation performance!</p>
             <p>
@@ -65,12 +73,8 @@
     <record id="action_ollama_generated_compositions" model="ir.actions.act_window">
         <field name="name">AI Generated Compositions</field>
         <field name="res_model">gift.composition</field>
-        <field name="view_mode">tree,form,graph,pivot</field>
+        <field name="view_mode">tree,form</field>
         <field name="domain">[('reasoning', 'ilike', 'Ollama AI Recommendation')]</field>
-        <field name="context">{
-            'search_default_this_year': 1,
-            'search_default_group_by_partner': 1
-        }</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">🤖 No AI recommendations yet!</p>
             <p>
@@ -93,59 +97,5 @@
               name="⚙️ Configuration" 
               parent="menu_ollama_main" 
               sequence="40"/>
-    
-    <!-- Ollama Settings -->
-    <record id="action_ollama_settings" model="ir.actions.act_window">
-        <field name="name">Ollama Settings</field>
-        <field name="res_model">res.config.settings</field>
-        <field name="view_mode">form</field>
-        <field name="target">inline</field>
-        <field name="context">{'module': 'ollama_gift_recommender'}</field>
-    </record>
-    
-    <menuitem id="menu_ollama_settings" 
-              name="Ollama Settings" 
-              parent="menu_ollama_configuration" 
-              action="action_ollama_settings" 
-              sequence="10"/>
-    
-    <!-- Test Connection -->
-    <record id="action_test_ollama_connection" model="ir.actions.server">
-        <field name="name">Test Ollama Connection</field>
-        <field name="model_id" ref="model_ollama_gift_recommender"/>
-        <field name="state">code</field>
-        <field name="code">
-recommender = env['ollama.gift.recommender'].get_or_create_recommender()
-result = recommender.test_ollama_connection()
-if result['success']:
-    action = {
-        'type': 'ir.actions.client',
-        'tag': 'display_notification',
-        'params': {
-            'title': 'Connection Test Successful',
-            'message': result['message'],
-            'type': 'success',
-            'sticky': False
-        }
-    }
-else:
-    action = {
-        'type': 'ir.actions.client',
-        'tag': 'display_notification',
-        'params': {
-            'title': 'Connection Test Failed',
-            'message': result['message'],
-            'type': 'danger',
-            'sticky': True
-        }
-    }
-        </field>
-    </record>
-    
-    <menuitem id="menu_test_ollama_connection" 
-              name="🔗 Test Connection" 
-              parent="menu_ollama_configuration" 
-              action="action_test_ollama_connection" 
-              sequence="20"/>
 
 </odoo>
