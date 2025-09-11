@@ -101,10 +101,9 @@
                     </notebook>
                 </sheet>
                 
-                <div class="oe_chatter">
-                    <field name="message_follower_ids" widget="mail_followers"/>
-                    <field name="message_ids" widget="mail_thread"/>
-                </div>
+                <!-- REMOVED MAIL CHATTER TEMPORARILY -->
+                <!-- Will add back after module is installed -->
+                
             </form>
         </field>
     </record>
