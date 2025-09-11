@@ -120,13 +120,13 @@
                 <field name="name"/>
                 <field name="ollama_model"/>
                 
-                <filter name="active_only" string="Active Only" domain="[('active', '=', True)]" default="1"/>
+                <filter name="active_only" string="Active Only" domain="[('active', '=', True)]"/>
                 <filter name="ollama_enabled" string="Ollama Enabled" domain="[('ollama_enabled', '=', True)]"/>
-                <filter name="high_success_rate" string="High Success Rate (&gt;80%)" domain="[('success_rate', '&gt;', 80)]"/>
+                <filter name="has_recommendations" string="Has Recommendations" domain="[('total_recommendations', '>', 0)]"/>
                 
                 <group expand="0" string="Group By">
                     <filter name="group_by_ollama_model" string="Ollama Model" context="{'group_by': 'ollama_model'}"/>
-                    <filter name="group_by_success_rate" string="Success Rate" context="{'group_by': 'success_rate'}"/>
+                    <filter name="group_by_active" string="Active Status" context="{'group_by': 'active'}"/>
                 </group>
             </search>
         </field>
