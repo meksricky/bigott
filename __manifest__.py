@@ -52,7 +52,7 @@ Features:
         'views/product_template_views.xml',
         'views/gift_composition_views.xml',
         'views/ollama_gift_recommender_views.xml',  
-        'views/menu_views.xml',
+        'views/menu_views_bkp.xml',
     ],
     'demo': [],
     'installable': True,
