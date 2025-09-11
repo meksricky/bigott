@@ -750,3 +750,54 @@ class IntegrationManager(models.Model):
         
         # Use the sophisticated selection algorithm
         return self._sophisticated_selection_algorithm(products, target_budget, client_profile, dietary_restrictions)
+
+    def _emergency_simple_composition(self, partner_id, target_budget, **kwargs):
+        """Ultra-simple emergency composition"""
+        try:
+            # Get any available products with stock
+            products = self.env['product.template'].search([
+                ('active', '=', True),
+                ('sale_ok', '=', True),
+                ('list_price', '>', 0),
+                ('default_code', '!=', False)  # Must have internal reference
+            ], limit=20)
+            
+            if not products:
+                raise UserError("No products available in system")
+            
+            # Simple budget-based selection
+            selected_products = []
+            current_cost = 0
+            
+            for product in products:
+                if current_cost + product.list_price <= target_budget:
+                    selected_products.append(product)
+                    current_cost += product.list_price
+            
+            if not selected_products:
+                # Take the cheapest product at least
+                cheapest = min(products, key=lambda p: p.list_price)
+                selected_products = [cheapest]
+                current_cost = cheapest.list_price
+            
+            # Create composition using EXISTING fields
+            composition = self.env['gift.composition'].create({
+                'partner_id': partner_id,
+                'target_budget': target_budget,
+                'actual_cost': current_cost,
+                'product_ids': [(6, 0, [p.id for p in selected_products])],
+                'reasoning': 'Emergency simple composition',  # Instead of generation_method
+                'composition_type': 'custom',
+                'state': 'draft'
+            })
+            
+            return {
+                'success': True,
+                'composition_id': composition.id,
+                'products': selected_products,
+                'total_cost': current_cost
+            }
+            
+        except Exception as e:
+            _logger.error(f"Emergency simple composition failed: {str(e)}")
+            raise

@@ -34,7 +34,7 @@ class SimplifiedCompositionWizard(models.TransientModel):
             notes_text=self.additional_notes
         )
         
-        # Create gift composition record
+        # Create gift composition record using EXISTING fields only
         composition = self.env['gift.composition'].create({
             'partner_id': self.partner_id.id,
             'target_year': self.target_year,
@@ -42,7 +42,8 @@ class SimplifiedCompositionWizard(models.TransientModel):
             'actual_cost': result['total_cost'],
             'product_ids': [(6, 0, [p.id for p in result['products']])],
             'dietary_restrictions': self.additional_notes,
-            'generation_method': result['method_used'],
+            'reasoning': result['reasoning'],  # Use this instead of generation_method
+            'composition_type': 'custom',
             'state': 'draft'
         })
         

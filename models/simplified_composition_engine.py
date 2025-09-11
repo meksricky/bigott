@@ -47,7 +47,8 @@ class SimplifiedCompositionEngine(models.Model):
             'products': final_composition,
             'total_cost': sum(p.list_price for p in final_composition),
             'product_count': len(final_composition),
-            'method_used': 'history_based' if client_history else 'pattern_based'
+            'method_used': 'history_based' if client_history else 'pattern_based',
+            'reasoning': f"Generated using {('history_based' if client_history else 'pattern_based')} method with {len(final_composition)} products"
         }
     
     def _get_available_products(self, dietary_restrictions=None):
