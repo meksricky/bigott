@@ -13,6 +13,7 @@ from . import client_order_history
 from . import business_rules_engine
 from . import composition_engine
 from . import simplified_composition_engine
+from . import simplified_composition_wizard
 
 # 4. Advanced engines (depend on core engines)
 from . import stock_aware_composition_engine
