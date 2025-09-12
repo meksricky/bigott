@@ -19,13 +19,16 @@ class OllamaRecommendationWizard(models.TransientModel):
         required=True
     )
 
-    # Client
+    # Client - with onchange to immediately save
     partner_id = fields.Many2one(
         'res.partner',
         string="Client",
         required=True,
         domain="[('is_company', '=', False)]"
     )
+    
+    # Hidden field to store partner ID
+    stored_partner_id = fields.Integer(string="Stored Partner ID")
 
     # Budget
     target_budget = fields.Monetary(
@@ -69,6 +72,13 @@ class OllamaRecommendationWizard(models.TransientModel):
     total_cost = fields.Monetary(readonly=True, currency_field='currency_id')
     confidence_score = fields.Float(readonly=True)
 
+    @api.onchange('partner_id')
+    def _onchange_partner_id(self):
+        """Store partner ID immediately when selected"""
+        if self.partner_id:
+            self.stored_partner_id = self.partner_id.id
+            _logger.info(f"Partner selected and stored: {self.partner_id.name} (ID: {self.stored_partner_id})")
+
     @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
     def _onchange_dietary_checkboxes(self):
         toggles = []
@@ -88,16 +98,29 @@ class OllamaRecommendationWizard(models.TransientModel):
             self.dietary_restrictions = ', '.join(sorted(set(existing + toggles)))
 
     def action_generate_recommendation(self):
-        """Generate recommendation using the same pattern as working wizard"""
+        """Generate recommendation using stored partner ID"""
+        self.ensure_one()
         
-        if not self.partner_id:
-            raise UserError("Please select a client first")
+        # Use the stored partner ID
+        partner_id = self.stored_partner_id or (self.partner_id.id if self.partner_id else False)
+        
+        if not partner_id:
+            # Try to get from context as last resort
+            partner_id = self._context.get('default_partner_id') or self._context.get('active_id')
+            
+        if not partner_id:
+            raise UserError("Please select a client. If you've selected one, please re-select to ensure it's registered.")
+            
+        # Get the partner record
+        partner = self.env['res.partner'].browse(partner_id).exists()
+        if not partner:
+            raise UserError("Invalid client selected. Please select a valid client.")
             
         if self.target_budget <= 0:
             raise UserError("Target budget must be greater than 0")
         
         try:
-            _logger.info(f"Generating recommendation for {self.partner_id.name}")
+            _logger.info(f"Generating recommendation for {partner.name} (ID: {partner.id})")
             
             # Get or create recommender
             if not self.recommender_id:
@@ -114,12 +137,26 @@ class OllamaRecommendationWizard(models.TransientModel):
             if self.dietary_restrictions:
                 dietary_list = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
             
+            # For now, just show success to test if partner is working
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Debug Success',
+                    'message': f'Partner: {partner.name}, Budget: €{self.target_budget}',
+                    'type': 'success',
+                    'sticky': True
+                }
+            }
+            
+            # Uncomment below when partner issue is fixed
+            """
             # Update state
             self.write({'state': 'generating'})
             
             # Generate recommendation
             result = self.recommender_id.generate_gift_recommendations(
-                partner_id=self.partner_id.id,
+                partner_id=partner.id,
                 target_budget=self.target_budget,
                 client_notes=self.client_notes or '',
                 dietary_restrictions=dietary_list
@@ -152,6 +189,7 @@ class OllamaRecommendationWizard(models.TransientModel):
                     'error_message': result.get('error', 'Unknown error occurred')
                 })
                 raise UserError(f"Recommendation failed: {result.get('message', 'Unknown error')}")
+            """
                 
         except Exception as e:
             self.write({
@@ -161,13 +199,27 @@ class OllamaRecommendationWizard(models.TransientModel):
             _logger.error(f"Recommendation generation failed: {str(e)}")
             raise
 
+    def action_test_recommender_connection(self):
+        """Test connection - simplified"""
+        self.ensure_one()
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test',
+                'message': 'Button works!',
+                'type': 'info',
+            }
+        }
+
     def action_view_composition(self):
         self.ensure_one()
         if not self.composition_id:
             raise UserError("No composition generated yet.")
         return {
             'type': 'ir.actions.act_window',
-            'name': f'Gift Composition - {self.partner_id.name}',
+            'name': f'Gift Composition',
             'res_model': 'gift.composition',
             'res_id': self.composition_id.id,
             'view_mode': 'form',
@@ -176,48 +228,10 @@ class OllamaRecommendationWizard(models.TransientModel):
 
     def action_generate_another(self):
         """Reset wizard for another generation"""
-        self.ensure_one()
-        
-        # Create new wizard with same base data
-        new_wizard = self.create({
-            'partner_id': self.partner_id.id,
-            'target_budget': self.target_budget,
-            'dietary_restrictions': self.dietary_restrictions,
-            'is_vegan': self.is_vegan,
-            'is_halal': self.is_halal,
-            'is_gluten_free': self.is_gluten_free,
-            'is_non_alcoholic': self.is_non_alcoholic,
-            'recommender_id': self.recommender_id.id,
-            'client_notes': self.client_notes,
-        })
-        
         return {
             'type': 'ir.actions.act_window',
-            'name': 'Generate Another Recommendation',
+            'name': 'Generate New Recommendation',
             'res_model': 'ollama.recommendation.wizard',
-            'res_id': new_wizard.id,
             'view_mode': 'form',
             'target': 'new',
-        }
-
-    def action_test_recommender_connection(self):
-        self.ensure_one()
-        if not self.recommender_id:
-            # Try to get default
-            self.recommender_id = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
-            
-        if not self.recommender_id:
-            raise UserError("Please configure a recommender first.")
-            
-        result = self.recommender_id.test_ollama_connection()
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Connection Test Successful' if result.get('success') else 'Connection Test Failed',
-                'message': result.get('message', 'Test completed'),
-                'type': 'success' if result.get('success') else 'danger',
-                'sticky': not result.get('success'),
-            }
         }
