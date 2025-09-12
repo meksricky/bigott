@@ -117,9 +117,21 @@ class OllamaRecommendationWizard(models.TransientModel):
         _logger.info(f"All wizard fields: {self.read()}")
         _logger.info(f"===================")
         
+        # Determine partner_id robustly (record or context)
+        ctx = self._context or {}
+        context_partner_id = ctx.get('default_partner_id')
+        if not context_partner_id and ctx.get('active_model') == 'res.partner':
+            context_partner_id = ctx.get('active_id')
 
-        if not self.partner_id:
+        partner_id_val = self.partner_id.id or context_partner_id
+        if not partner_id_val:
             raise UserError("Please select a client.")
+        # Ensure the field is set for downstream code and for display
+        if not self.partner_id and partner_id_val:
+            try:
+                self.partner_id = partner_id_val
+            except Exception as e:
+                _logger.warning(f"Unable to set partner_id on wizard: {e}")
         
         if not self.recommender_id:
             raise UserError("No recommender available. Please configure an Ollama recommender first.")
@@ -135,7 +147,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             
             # Generate recommendation
             result = self.recommender_id.generate_gift_recommendations(
-                partner_id=self.partner_id.id,
+                partner_id=partner_id_val,
                 target_budget=self.target_budget,
                 client_notes=self.client_notes,
                 dietary_restrictions=dietary_restrictions
