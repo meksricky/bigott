@@ -1,30 +1,33 @@
+# -*- coding: utf-8 -*-
 # wizard/ollama_recommendation_wizard.py
+
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 import logging
 
 _logger = logging.getLogger(__name__)
 
+
 class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
 
-    # ---- Currency (for Monetary fields). ----
+    # --- Currency for Monetary fields ---
     currency_id = fields.Many2one(
         'res.currency',
         default=lambda self: self.env.company.currency_id,
         required=True
     )
 
-    # ---- Client ----
+    # --- Client ---
     partner_id = fields.Many2one(
         'res.partner',
         string="Client",
         required=True,
-        default=lambda self: self._context.get('default_partner_id'),
+        default=lambda self: self._context.get('default_partner_id')
     )
 
-    # ---- Budget (Monetary) ----
+    # --- Budget (Monetary, not Float) ---
     target_budget = fields.Monetary(
         string="Target Budget",
         required=True,
@@ -32,7 +35,7 @@ class OllamaRecommendationWizard(models.TransientModel):
         currency_field='currency_id'
     )
 
-    # ---- Notes & Dietary ----
+    # --- Notes & Dietary ---
     client_notes = fields.Text(string="Client Notes")
     dietary_restrictions = fields.Text(
         string="Dietary Restrictions",
@@ -43,14 +46,14 @@ class OllamaRecommendationWizard(models.TransientModel):
     is_gluten_free = fields.Boolean(string="Gluten Free")
     is_non_alcoholic = fields.Boolean(string="Non-Alcoholic")
 
-    # ---- Engine ----
+    # --- Engine ---
     recommender_id = fields.Many2one(
         'ollama.gift.recommender',
         string="Recommender",
         default=lambda self: self._default_recommender()
     )
 
-    # ---- State & results ----
+    # --- State & Results ---
     state = fields.Selection([
         ('draft', 'Draft'),
         ('generating', 'Generating...'),
@@ -78,10 +81,14 @@ class OllamaRecommendationWizard(models.TransientModel):
     @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
     def _onchange_dietary_checkboxes(self):
         toggles = []
-        if self.is_vegan: toggles.append('vegan')
-        if self.is_halal: toggles.append('halal')
-        if self.is_gluten_free: toggles.append('gluten_free')
-        if self.is_non_alcoholic: toggles.append('non_alcoholic')
+        if self.is_vegan:
+            toggles.append('vegan')
+        if self.is_halal:
+            toggles.append('halal')
+        if self.is_gluten_free:
+            toggles.append('gluten_free')
+        if self.is_non_alcoholic:
+            toggles.append('non_alcoholic')
 
         if toggles:
             existing = []
@@ -97,27 +104,26 @@ class OllamaRecommendationWizard(models.TransientModel):
             if rec.target_budget > 1_000_000:
                 raise ValidationError("Target budget seems unusually high. Please confirm.")
 
-    # ----------------- Core Actions -----------------
+    # ----------------- Internals -----------------
 
     def _resolve_partner(self):
         """Resolve partner from (1) form field, (2) read() cache, (3) context/active_id."""
         self.ensure_one()
 
-        # (1) Trust the in-memory value first
+        # 1) Trust the in-memory value first
         if self.partner_id and self.partner_id.exists():
             return self.partner_id
 
-        # (2) Read raw value (may be (id, name) tuple depending on context)
+        # 2) read() may return int or (id, display_name)
         vals = self.read(['partner_id'])[0]
         raw = vals.get('partner_id')
         pid = None
         if isinstance(raw, (list, tuple)) and raw:
-            # Many2one read returns [id, display_name] in some views
             pid = raw[0]
         elif isinstance(raw, int):
             pid = raw
 
-        # (3) Context fallbacks
+        # 3) Context fallbacks
         ctx = dict(self._context or {})
         if not pid:
             pid = ctx.get('default_partner_id')
@@ -130,21 +136,23 @@ class OllamaRecommendationWizard(models.TransientModel):
         partner = self.env['res.partner'].browse(pid)
         return partner if partner.exists() else self.env['res.partner']
 
+    # ----------------- Actions -----------------
+
     def action_generate_recommendation(self):
         self.ensure_one()
 
-        # Resolve partner robustly
+        # Robust partner resolve
         partner = self._resolve_partner()
         if not partner:
             raise UserError("Please select a client.")
         if not self.partner_id:
-            # keep the field set for UI continuity
-            self.partner_id = partner.id
+            self.partner_id = partner.id  # keep it set for UI continuity
 
         if not self.recommender_id:
             raise UserError("No recommender available. Please configure an Ollama recommender first.")
 
         _logger.info("Wizard %s generating for partner %s budget=%s", self.id, partner.id, self.target_budget)
+
         try:
             self.state = 'generating'
 
@@ -195,7 +203,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             raise UserError("No composition generated yet.")
         return {
             'type': 'ir.actions.act_window',
-            'name': f'Gift Composition for {self.partner_id.name}',
+            'name': 'Gift Composition for %s' % (self.partner_id.name or ''),
             'res_model': 'gift.composition',
             'res_id': self.composition_id.id,
             'view_mode': 'form',
@@ -235,5 +243,10 @@ class OllamaRecommendationWizard(models.TransientModel):
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
-            'params': {'title': title, 'message': result.get('message'), 'type': level, 'sticky': not result.get('success')},
+            'params': {
+                'title': title,
+                'message': result.get('message'),
+                'type': level,
+                'sticky': not result.get('success'),
+            }
         }

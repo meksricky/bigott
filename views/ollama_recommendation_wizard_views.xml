@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Wizard Form View -->
     <record id="view_ollama_recommendation_wizard_form" model="ir.ui.view">
         <field name="name">ollama.recommendation.wizard.form</field>
         <field name="model">ollama.recommendation.wizard</field>
@@ -10,7 +11,7 @@
                 </header>
 
                 <sheet>
-                    <!-- Input -->
+                    <!-- Input Section -->
                     <div attrs="{'invisible': [('state', 'in', ['done','error','generating'])]}">
                         <div class="oe_title">
                             <h1>🤖 AI-Powered Gift Recommendation</h1>
@@ -20,7 +21,7 @@
                         <group>
                             <group string="Client Information">
                                 <field name="partner_id" required="1" options="{'no_create': True}"/>
-                                <!-- Monetary field (no widget needed) -->
+                                <!-- Monetary fields render using currency_id automatically -->
                                 <field name="target_budget"/>
                             </group>
                             <group string="AI Configuration">
@@ -47,14 +48,14 @@
                         </group>
                     </div>
 
-                    <!-- Generating -->
+                    <!-- Generating State (add title/text to satisfy FA accessibility rule) -->
                     <div class="text-center" attrs="{'invisible': [('state', '!=', 'generating')]}">
-                        <div class="fa fa-3x fa-spin fa-spinner text-muted"/>
+                        <div class="fa fa-3x fa-spin fa-spinner text-muted" title="Loading…">Loading…</div>
                         <h3>Generating AI Recommendation...</h3>
                         <p>Please wait while Ollama analyzes the client data and generates recommendations.</p>
                     </div>
 
-                    <!-- Results -->
+                    <!-- Results Section -->
                     <div attrs="{'invisible': [('state', '!=', 'done')]}">
                         <div class="oe_title">
                             <h1>✅ Recommendation Generated Successfully</h1>
@@ -91,7 +92,7 @@
                         </group>
                     </div>
 
-                    <!-- Error -->
+                    <!-- Error Section -->
                     <div class="alert alert-danger" role="alert" attrs="{'invisible': [('state', '!=', 'error')]}">
                         <strong>Error:</strong> <field name="error_message" readonly="1"/>
                     </div>
@@ -129,7 +130,7 @@
         </field>
     </record>
 
-    <!-- Action -->
+    <!-- Wizard Action (used by the button on the recommender form) -->
     <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
         <field name="name">Generate Gift Recommendation</field>
         <field name="res_model">ollama.recommendation.wizard</field>
