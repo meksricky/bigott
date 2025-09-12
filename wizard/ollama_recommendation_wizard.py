@@ -168,6 +168,17 @@ class OllamaRecommendationWizard(models.TransientModel):
             }
         }
 
+    def test_method(self):
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Code Updated',
+                'message': 'This confirms your code changes are being loaded',
+                'type': 'info'
+            }
+        }
+
     def action_view_composition(self):
         self.ensure_one()
         if not self.composition_id:

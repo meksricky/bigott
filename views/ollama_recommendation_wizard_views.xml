@@ -125,6 +125,8 @@
 
                     <button string="Cancel" class="btn-secondary" special="cancel"
                             attrs="{'invisible': [('state', 'in', ['done'])]}"/>
+
+                    <button name="test_method" string="Test Code" type="object"/>
                 </footer>
             </form>
         </field>
