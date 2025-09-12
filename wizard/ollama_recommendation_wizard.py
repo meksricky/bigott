@@ -1,5 +1,4 @@
 # wizard/ollama_recommendation_wizard.py
-
 from odoo import models, fields, api
 from odoo.exceptions import UserError, ValidationError
 import logging
@@ -10,22 +9,22 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
 
-    # --- Currency (for Monetary fields) ---
+    # ---- Currency (for Monetary fields) ----
     currency_id = fields.Many2one(
         'res.currency',
         default=lambda self: self.env.company.currency_id,
         required=True
     )
 
-    # --- Client Selection ---
+    # ---- Client ----
     partner_id = fields.Many2one(
         'res.partner',
         string="Client",
         required=True,
-        default=lambda self: self._context.get('default_partner_id')
+        default=lambda self: self._context.get('default_partner_id'),
     )
 
-    # --- Budget (Monetary, not Float) ---
+    # ---- Budget (Monetary) ----
     target_budget = fields.Monetary(
         string="Target Budget",
         required=True,
@@ -33,48 +32,44 @@ class OllamaRecommendationWizard(models.TransientModel):
         currency_field='currency_id'
     )
 
-    # --- Client Notes & Dietary ---
-    client_notes = fields.Text(
-        string="Client Notes",
-        help="Special requests, preferences, occasion details, etc."
-    )
+    # ---- Notes & Dietary ----
+    client_notes = fields.Text(string="Client Notes")
     dietary_restrictions = fields.Text(
         string="Dietary Restrictions",
-        help="Enter restrictions separated by commas (e.g., vegan, halal, gluten_free, non_alcoholic)"
+        help="Comma-separated: vegan, halal, gluten_free, non_alcoholic"
     )
     is_vegan = fields.Boolean(string="Vegan")
     is_halal = fields.Boolean(string="Halal")
     is_gluten_free = fields.Boolean(string="Gluten Free")
     is_non_alcoholic = fields.Boolean(string="Non-Alcoholic")
 
-    # --- Recommender Selection ---
+    # ---- Engine ----
     recommender_id = fields.Many2one(
         'ollama.gift.recommender',
         string="Recommender",
         default=lambda self: self._default_recommender()
     )
 
-    # --- Results & State ---
+    # ---- State & results ----
     state = fields.Selection([
         ('draft', 'Draft'),
         ('generating', 'Generating...'),
         ('done', 'Complete'),
         ('error', 'Error'),
-    ], default='draft', string="State")
+    ], default='draft')
 
-    result_message = fields.Text(string="Result Message", readonly=True)
-    composition_id = fields.Many2one('gift.composition', string="Generated Composition", readonly=True)
-    error_message = fields.Text(string="Error Details", readonly=True)
+    result_message = fields.Text(readonly=True)
+    composition_id = fields.Many2one('gift.composition', readonly=True)
+    error_message = fields.Text(readonly=True)
 
-    recommended_products = fields.Many2many('product.template', string="Recommended Products", readonly=True)
-    total_cost = fields.Monetary(string="Total Cost", readonly=True, currency_field='currency_id')
-    confidence_score = fields.Float(string="Confidence Score", readonly=True)
+    recommended_products = fields.Many2many('product.template', readonly=True)
+    total_cost = fields.Monetary(readonly=True, currency_field='currency_id')
+    confidence_score = fields.Float(readonly=True)
 
-    # ----------------- Helpers -----------------
+    # ----------------- Defaults / Onchanges -----------------
 
     @api.model
     def _default_recommender(self):
-        """Pick first active recommender, else create a minimal one."""
         rec = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
         if not rec:
             rec = self.env['ollama.gift.recommender'].create({'name': 'Default Ollama Recommender'})
@@ -82,70 +77,81 @@ class OllamaRecommendationWizard(models.TransientModel):
 
     @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
     def _onchange_dietary_checkboxes(self):
-        """Keep text field synced with quick toggles."""
         toggles = []
-        if self.is_vegan:
-            toggles.append('vegan')
-        if self.is_halal:
-            toggles.append('halal')
-        if self.is_gluten_free:
-            toggles.append('gluten_free')
-        if self.is_non_alcoholic:
-            toggles.append('non_alcoholic')
+        if self.is_vegan: toggles.append('vegan')
+        if self.is_halal: toggles.append('halal')
+        if self.is_gluten_free: toggles.append('gluten_free')
+        if self.is_non_alcoholic: toggles.append('non_alcoholic')
 
         if toggles:
             existing = []
             if self.dietary_restrictions:
                 existing = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
-            all_restrictions = sorted(set(toggles + existing))
-            self.dietary_restrictions = ', '.join(all_restrictions)
+            self.dietary_restrictions = ', '.join(sorted(set(existing + toggles)))
 
     @api.constrains('target_budget')
     def _check_target_budget(self):
         for rec in self:
             if rec.target_budget <= 0:
                 raise ValidationError("Target budget must be greater than 0.")
-            if rec.target_budget > 1000000:
+            if rec.target_budget > 1_000_000:
                 raise ValidationError("Target budget seems unusually high. Please confirm.")
 
-    # ----------------- Actions -----------------
+    # ----------------- Core Actions -----------------
 
-    def action_generate_recommendation(self):
-        """Generate recommendation using Ollama."""
+    def _resolve_partner(self):
+        """Resolve partner from (1) form field, (2) read() cache, (3) context/active_id."""
         self.ensure_one()
 
-        # --- Robust partner resolution (trust form first) ---
-        partner = self.partner_id
+        # (1) Trust the in-memory value first
+        if self.partner_id and self.partner_id.exists():
+            return self.partner_id
+
+        # (2) Read raw value (may be (id, name) tuple depending on context)
+        vals = self.read(['partner_id'])[0]
+        raw = vals.get('partner_id')
+        pid = None
+        if isinstance(raw, (list, tuple)) and raw:
+            # Many2one read returns [id, display_name] in some views
+            pid = raw[0]
+        elif isinstance(raw, int):
+            pid = raw
+
+        # (3) Context fallbacks
+        ctx = dict(self._context or {})
+        if not pid:
+            pid = ctx.get('default_partner_id')
+        if not pid and ctx.get('active_model') == 'res.partner':
+            pid = ctx.get('active_id')
+
+        if not pid:
+            return self.env['res.partner']  # empty recordset
+
+        partner = self.env['res.partner'].browse(pid)
+        return partner if partner.exists() else self.env['res.partner']
+
+    def action_generate_recommendation(self):
+        self.ensure_one()
+
+        # Resolve partner robustly
+        partner = self._resolve_partner()
         if not partner:
-            ctx = self._context or {}
-            pid = ctx.get('default_partner_id') or (
-                ctx.get('active_id') if ctx.get('active_model') == 'res.partner' else False
-            )
-            if pid:
-                partner = self.env['res.partner'].browse(pid)
-
-        if not partner or not partner.exists():
             raise UserError("Please select a client.")
-
-        # ensure field remains set for UI
         if not self.partner_id:
+            # keep the field set for UI continuity
             self.partner_id = partner.id
 
         if not self.recommender_id:
             raise UserError("No recommender available. Please configure an Ollama recommender first.")
 
-        # Debug snapshot
-        _logger.info("=== WIZARD DEBUG === id=%s partner=%s budget=%s", self.id, partner.id, self.target_budget)
-
+        _logger.info("Wizard %s generating for partner %s budget=%s", self.id, partner.id, self.target_budget)
         try:
             self.state = 'generating'
 
-            # Parse dietary restrictions text -> list
             dietary = []
             if self.dietary_restrictions:
                 dietary = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
 
-            # Call engine
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=partner.id,
                 target_budget=self.target_budget,
@@ -172,9 +178,8 @@ class OllamaRecommendationWizard(models.TransientModel):
                     'context': {'show_results': True},
                 }
 
-            # else -> error path
             self.state = 'error'
-            self.error_message = result.get('error', 'Unknown error occurred')
+            self.error_message = result.get('error', 'Unknown error')
             self.result_message = result.get('message')
             raise UserError("Recommendation failed: %s" % (result.get('message')))
 
@@ -185,7 +190,6 @@ class OllamaRecommendationWizard(models.TransientModel):
             raise
 
     def action_view_composition(self):
-        """Open the generated composition."""
         self.ensure_one()
         if not self.composition_id:
             raise UserError("No composition generated yet.")
@@ -199,7 +203,6 @@ class OllamaRecommendationWizard(models.TransientModel):
         }
 
     def action_generate_another(self):
-        """Start another run with same params."""
         self.ensure_one()
         new_wizard = self.create({
             'currency_id': self.currency_id.id,
@@ -223,7 +226,6 @@ class OllamaRecommendationWizard(models.TransientModel):
         }
 
     def action_test_recommender_connection(self):
-        """Ping Ollama via the recommender."""
         self.ensure_one()
         if not self.recommender_id:
             raise UserError("Please select a recommender first.")
@@ -233,10 +235,5 @@ class OllamaRecommendationWizard(models.TransientModel):
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
-            'params': {
-                'title': title,
-                'message': result.get('message'),
-                'type': level,
-                'sticky': not result.get('success'),
-            }
+            'params': {'title': title, 'message': result.get('message'), 'type': level, 'sticky': not result.get('success')},
         }
