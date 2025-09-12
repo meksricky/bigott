@@ -141,48 +141,64 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ----------------- Actions -----------------
 
     def action_generate_recommendation(self):
-        """Generate recommendation with proper data handling"""
+        """Generate recommendation - simplified like the working wizard"""
         self.ensure_one()
         
-        # Force save the current form data
-        self.ensure_one()
+        # Direct access like the working wizard does
+        if not self.partner_id:
+            raise UserError("Please select a client first")
         
-        # Read the values to ensure we have the latest data
-        vals = self.read(['partner_id', 'target_budget'])[0]
+        if not self.recommender_id:
+            raise UserError("No recommender available. Please configure an Ollama recommender first.")
         
-        # Extract partner_id properly
-        partner_id = None
-        if vals.get('partner_id'):
-            if isinstance(vals['partner_id'], (list, tuple)):
-                partner_id = vals['partner_id'][0]
-            else:
-                partner_id = vals['partner_id']
+        _logger.info("Wizard %s generating for partner %s budget=%s", 
+                    self.id, self.partner_id.id, self.target_budget)
         
-        if not partner_id:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Debug Info',
-                    'message': f'No partner selected. Wizard ID: {self.id}',
-                    'type': 'warning',
-                    'sticky': True
+        try:
+            self.state = 'generating'
+            
+            # Parse dietary restrictions
+            dietary = []
+            if self.dietary_restrictions:
+                dietary = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
+            
+            # Call the recommender directly using partner_id.id
+            result = self.recommender_id.generate_gift_recommendations(
+                partner_id=self.partner_id.id,  # Direct access like working wizard
+                target_budget=self.target_budget,
+                client_notes=self.client_notes,
+                dietary_restrictions=dietary
+            )
+            
+            if result.get('success'):
+                self.state = 'done'
+                self.result_message = result.get('message')
+                self.composition_id = result.get('composition_id')
+                products = result.get('products') or []
+                self.recommended_products = [(6, 0, [p.id for p in products])]
+                self.total_cost = result.get('total_cost') or 0.0
+                self.confidence_score = result.get('confidence_score') or 0.0
+                
+                return {
+                    'type': 'ir.actions.act_window',
+                    'name': 'Recommendation Results',
+                    'res_model': 'ollama.recommendation.wizard',
+                    'res_id': self.id,
+                    'view_mode': 'form',
+                    'target': 'new',
+                    'context': {'show_results': True},
                 }
-            }
-        
-        # Load the partner record
-        partner = self.env['res.partner'].browse(partner_id)
-        
-        return {
-            'type': 'ir.actions.client',
-            'tag': 'display_notification',
-            'params': {
-                'title': 'Success!',
-                'message': f'Client: {partner.name}, Budget: €{vals.get("target_budget", 0)}',
-                'type': 'success',
-                'sticky': True
-            }
-        }
+            
+            self.state = 'error'
+            self.error_message = result.get('error', 'Unknown error')
+            self.result_message = result.get('message')
+            raise UserError("Recommendation failed: %s" % (result.get('message')))
+            
+        except Exception as e:
+            self.state = 'error'
+            self.error_message = str(e)
+            _logger.exception("Recommendation wizard error: %s", e)
+            raise
 
     def test_method(self):
         return {
