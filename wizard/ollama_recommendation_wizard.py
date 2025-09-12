@@ -105,49 +105,41 @@ class OllamaRecommendationWizard(models.TransientModel):
         """Generate recommendation using Ollama"""
         import logging
         _logger = logging.getLogger(__name__)
-        
-        self.ensure_one()
-        
-        # Debug logging
-        _logger.info(f"=== WIZARD DEBUG ===")
-        _logger.info(f"Wizard ID: {self.id}")
-        _logger.info(f"Partner ID: {self.partner_id}")
-        _logger.info(f"Partner ID value: {self.partner_id.id if self.partner_id else 'NONE'}")
-        _logger.info(f"Target Budget: {self.target_budget}")
-        _logger.info(f"All wizard fields: {self.read()}")
-        _logger.info(f"===================")
-        
-        # Determine partner_id robustly (record or context)
-        ctx = self._context or {}
-        context_partner_id = ctx.get('default_partner_id')
-        if not context_partner_id and ctx.get('active_model') == 'res.partner':
-            context_partner_id = ctx.get('active_id')
 
-        partner_id_val = self.partner_id.id or context_partner_id
-        if not partner_id_val:
+        self.ensure_one()
+
+        # ---- BEGIN patched partner resolution ----
+        partner = self.partner_id  # trust the form value first
+        if not partner:
+            ctx = self._context or {}
+            context_partner_id = ctx.get('default_partner_id') or (
+                ctx.get('active_id') if ctx.get('active_model') == 'res.partner' else False
+            )
+            if context_partner_id:
+                partner = self.env['res.partner'].browse(context_partner_id)
+
+        if not partner or not partner.exists():
+            # if we still have nothing, fail explicitly
             raise UserError("Please select a client.")
-        # Ensure the field is set for downstream code and for display
-        if not self.partner_id and partner_id_val:
-            try:
-                self.partner_id = partner_id_val
-            except Exception as e:
-                _logger.warning(f"Unable to set partner_id on wizard: {e}")
-        
+
+        # keep the field set for downstream code and UI
+        if not self.partner_id:
+            self.partner_id = partner.id
+        # ---- END patched partner resolution ----
+
         if not self.recommender_id:
             raise UserError("No recommender available. Please configure an Ollama recommender first.")
         
         try:
             # Update state
             self.state = 'generating'
-            
-            # Parse dietary restrictions
+
             dietary_restrictions = []
             if self.dietary_restrictions:
                 dietary_restrictions = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
-            
-            # Generate recommendation
+
             result = self.recommender_id.generate_gift_recommendations(
-                partner_id=partner_id_val,
+                partner_id=partner.id,
                 target_budget=self.target_budget,
                 client_notes=self.client_notes,
                 dietary_restrictions=dietary_restrictions
