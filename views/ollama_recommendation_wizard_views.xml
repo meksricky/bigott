@@ -9,7 +9,7 @@
                 <header>
                     <field name="state" widget="statusbar" statusbar_visible="draft,generating,done"/>
                 </header>
-                
+
                 <sheet>
                     <!-- Input Section -->
                     <div attrs="{'invisible': [('state', 'in', ['done'])]}">
@@ -21,7 +21,8 @@
                         <group>
                             <group string="Client Information">
                                 <field name="partner_id" required="1" options="{'no_create': True}"/>
-                                <field name="target_budget" widget="monetary"/>
+                                <!-- Monetary fields render with company currency automatically -->
+                                <field name="target_budget"/>
                             </group>
                             <group string="AI Configuration">
                                 <field name="recommender_id" options="{'no_create': True}"/>
@@ -37,12 +38,12 @@
                                 <field name="is_gluten_free"/>
                                 <field name="is_non_alcoholic"/>
                             </group>
-                            <field name="dietary_restrictions" colspan="2" 
+                            <field name="dietary_restrictions" colspan="2"
                                    placeholder="Enter additional restrictions separated by commas"/>
                         </group>
 
                         <group string="Additional Information">
-                            <field name="client_notes" colspan="2" 
+                            <field name="client_notes" colspan="2"
                                    placeholder="Special requests, occasion details, preferences, etc."/>
                         </group>
                     </div>
@@ -59,13 +60,13 @@
 
                         <group>
                             <group string="Summary">
-                                <field name="total_cost" widget="monetary" readonly="1"/>
+                                <field name="total_cost" readonly="1"/>
                                 <field name="confidence_score" widget="progressbar" readonly="1"/>
                                 <field name="composition_id" readonly="1"/>
                             </group>
                             <group string="Client">
                                 <field name="partner_id" readonly="1"/>
-                                <field name="target_budget" widget="monetary" readonly="1"/>
+                                <field name="target_budget" readonly="1"/>
                             </group>
                         </group>
 
@@ -76,7 +77,8 @@
                                     <field name="name"/>
                                     <field name="lebiggot_category"/>
                                     <field name="product_grade"/>
-                                    <field name="list_price" widget="monetary"/>
+                                    <!-- product.template.list_price is Monetary already -->
+                                    <field name="list_price"/>
                                 </tree>
                             </field>
                         </group>
@@ -94,32 +96,32 @@
                         <p>Please wait while Ollama analyzes the client data and generates recommendations.</p>
                     </div>
                 </sheet>
-                
+
                 <footer>
-                    <button name="action_generate_recommendation" 
-                            string="🎁 Generate Recommendation" 
-                            type="object" 
+                    <button name="action_generate_recommendation"
+                            string="🎁 Generate Recommendation"
+                            type="object"
                             class="oe_highlight"
                             attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
-                    
-                    <button name="action_test_recommender_connection" 
-                            string="🔗 Test Connection" 
-                            type="object" 
+
+                    <button name="action_test_recommender_connection"
+                            string="🔗 Test Connection"
+                            type="object"
                             class="btn-secondary"
                             attrs="{'invisible': [('state', 'in', ['generating', 'done'])]}"/>
-                    
-                    <button name="action_view_composition" 
-                            string="📋 View Composition" 
-                            type="object" 
+
+                    <button name="action_view_composition"
+                            string="📋 View Composition"
+                            type="object"
                             class="oe_highlight"
                             attrs="{'invisible': [('state', '!=', 'done')]}"/>
-                    
-                    <button name="action_generate_another" 
-                            string="🔄 Generate Another" 
-                            type="object" 
+
+                    <button name="action_generate_another"
+                            string="🔄 Generate Another"
+                            type="object"
                             class="btn-secondary"
                             attrs="{'invisible': [('state', '!=', 'done')]}"/>
-                    
+
                     <button string="Cancel" class="btn-secondary" special="cancel"
                             attrs="{'invisible': [('state', 'in', ['done'])]}"/>
                 </footer>
@@ -135,5 +137,4 @@
         <field name="target">new</field>
         <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
     </record>
-
 </odoo>
