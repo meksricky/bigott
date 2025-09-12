@@ -141,64 +141,62 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ----------------- Actions -----------------
 
     def action_generate_recommendation(self):
-        """Generate recommendation - simplified like the working wizard"""
+        """Generate recommendation - matching working wizard pattern"""
         self.ensure_one()
         
-        # Direct access like the working wizard does
+        # Validation exactly like the working wizard
         if not self.partner_id:
             raise UserError("Please select a client first")
-        
-        if not self.recommender_id:
-            raise UserError("No recommender available. Please configure an Ollama recommender first.")
-        
-        _logger.info("Wizard %s generating for partner %s budget=%s", 
-                    self.id, self.partner_id.id, self.target_budget)
+            
+        if self.target_budget <= 0:
+            raise UserError("Target budget must be greater than 0")
         
         try:
-            self.state = 'generating'
+            _logger.info(f"Wizard generating for {self.partner_id.name}")
             
             # Parse dietary restrictions
             dietary = []
             if self.dietary_restrictions:
                 dietary = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
             
-            # Call the recommender directly using partner_id.id
+            # Direct call like the working wizard
+            if not self.recommender_id:
+                self.recommender_id = self.env['ollama.gift.recommender'].get_or_create_recommender()
+            
             result = self.recommender_id.generate_gift_recommendations(
-                partner_id=self.partner_id.id,  # Direct access like working wizard
+                partner_id=self.partner_id.id,
                 target_budget=self.target_budget,
-                client_notes=self.client_notes,
+                client_notes=self.client_notes or '',
                 dietary_restrictions=dietary
             )
             
-            if result.get('success'):
-                self.state = 'done'
-                self.result_message = result.get('message')
-                self.composition_id = result.get('composition_id')
-                products = result.get('products') or []
-                self.recommended_products = [(6, 0, [p.id for p in products])]
-                self.total_cost = result.get('total_cost') or 0.0
-                self.confidence_score = result.get('confidence_score') or 0.0
-                
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Recommendation Results',
-                    'res_model': 'ollama.recommendation.wizard',
-                    'res_id': self.id,
-                    'view_mode': 'form',
-                    'target': 'new',
-                    'context': {'show_results': True},
-                }
+            if not result or not result.get('success'):
+                raise UserError(f"Failed to generate recommendation: {result.get('message', 'Unknown error')}")
             
-            self.state = 'error'
-            self.error_message = result.get('error', 'Unknown error')
-            self.result_message = result.get('message')
-            raise UserError("Recommendation failed: %s" % (result.get('message')))
+            # Update wizard state
+            self.write({
+                'state': 'done',
+                'result_message': result.get('message'),
+                'composition_id': result.get('composition_id'),
+                'recommended_products': [(6, 0, [p.id for p in result.get('products', [])])],
+                'total_cost': result.get('total_cost', 0.0),
+                'confidence_score': result.get('confidence_score', 0.0)
+            })
+            
+            # Return action to show results
+            return {
+                'type': 'ir.actions.act_window',
+                'name': 'Recommendation Results',
+                'res_model': 'ollama.recommendation.wizard',
+                'res_id': self.id,
+                'view_mode': 'form',
+                'target': 'new',
+                'context': {'show_results': True},
+            }
             
         except Exception as e:
-            self.state = 'error'
-            self.error_message = str(e)
-            _logger.exception("Recommendation wizard error: %s", e)
-            raise
+            _logger.error(f"Recommendation generation failed: {str(e)}")
+            raise UserError(f"Generation failed: {str(e)}")
 
     def test_method(self):
         return {
