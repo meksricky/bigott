@@ -142,9 +142,23 @@ class OllamaRecommendationWizard(models.TransientModel):
 
     def action_generate_recommendation(self):
         """Generate recommendation - matching working wizard pattern"""
+        """Debug version with explicit write"""
         self.ensure_one()
         
-        # Validation exactly like the working wizard
+        # Force read current values
+        self.ensure_one()
+        
+        # Log current state
+        _logger.info(f"Wizard ID: {self.id}")
+        _logger.info(f"Partner before read: {self.partner_id}")
+        
+        # Force write to ensure data is saved
+        if self.partner_id:
+            self.write({'partner_id': self.partner_id.id})
+        
+        # Re-read to ensure we have the data
+        self.ensure_one()
+        
         if not self.partner_id:
             raise UserError("Please select a client first")
             
