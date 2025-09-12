@@ -11,8 +11,13 @@ class OllamaRecommendationWizard(models.TransientModel):
     _description = 'Ollama Gift Recommendation Wizard'
     
     # Client Selection
-    partner_id = fields.Many2one('res.partner', string="Client", 
-                            domain=[('is_company', '=', False)])
+    partner_id = fields.Many2one(
+        'res.partner',
+        string="Client",
+        # domain=[('is_company', '=', False)],
+        required=True,
+        default=lambda self: self._context.get('default_partner_id')
+    )
     
     # Budget
     target_budget = fields.Float(string="Target Budget (€)", required=True, default=100.0)
@@ -98,14 +103,20 @@ class OllamaRecommendationWizard(models.TransientModel):
     
     def action_generate_recommendation(self):
         """Generate recommendation using Ollama"""
+        import logging
+        _logger = logging.getLogger(__name__)
+        
         self.ensure_one()
         
-        # Force save the wizard to ensure all values are persisted
-        if not self._context.get('wizard_saved'):
-            # Save the current state
-            self.with_context(wizard_saved=True).write({})
-            # Re-read the record to get fresh data
-            self = self.browse(self.id)
+        # Debug logging
+        _logger.info(f"=== WIZARD DEBUG ===")
+        _logger.info(f"Wizard ID: {self.id}")
+        _logger.info(f"Partner ID: {self.partner_id}")
+        _logger.info(f"Partner ID value: {self.partner_id.id if self.partner_id else 'NONE'}")
+        _logger.info(f"Target Budget: {self.target_budget}")
+        _logger.info(f"All wizard fields: {self.read()}")
+        _logger.info(f"===================")
+        
 
         if not self.partner_id:
             raise UserError("Please select a client.")
