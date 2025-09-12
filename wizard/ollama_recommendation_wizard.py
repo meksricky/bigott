@@ -139,63 +139,34 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ----------------- Actions -----------------
 
     def action_generate_recommendation(self):
+        """Simplified test method"""
         self.ensure_one()
-
-        # Robust partner resolve
-        partner = self._resolve_partner()
-        if not partner:
-            raise UserError("Please select a client.")
+        
+        # Just test if we can access the data
         if not self.partner_id:
-            self.partner_id = partner.id  # keep it set for UI continuity
-
-        if not self.recommender_id:
-            raise UserError("No recommender available. Please configure an Ollama recommender first.")
-
-        _logger.info("Wizard %s generating for partner %s budget=%s", self.id, partner.id, self.target_budget)
-
-        try:
-            self.state = 'generating'
-
-            dietary = []
-            if self.dietary_restrictions:
-                dietary = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
-
-            result = self.recommender_id.generate_gift_recommendations(
-                partner_id=partner.id,
-                target_budget=self.target_budget,
-                client_notes=self.client_notes,
-                dietary_restrictions=dietary
-            )
-
-            if result.get('success'):
-                self.state = 'done'
-                self.result_message = result.get('message')
-                self.composition_id = result.get('composition_id')
-                products = result.get('products') or []
-                self.recommended_products = [(6, 0, [p.id for p in products])]
-                self.total_cost = result.get('total_cost') or 0.0
-                self.confidence_score = result.get('confidence_score') or 0.0
-
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Recommendation Results',
-                    'res_model': 'ollama.recommendation.wizard',
-                    'res_id': self.id,
-                    'view_mode': 'form',
-                    'target': 'new',
-                    'context': {'show_results': True},
+            # Instead of raising an error, return a notification
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Debug Info',
+                    'message': f'Partner ID is empty. Wizard ID: {self.id}',
+                    'type': 'warning',
+                    'sticky': True
                 }
-
-            self.state = 'error'
-            self.error_message = result.get('error', 'Unknown error')
-            self.result_message = result.get('message')
-            raise UserError("Recommendation failed: %s" % (result.get('message')))
-
-        except Exception as e:
-            self.state = 'error'
-            self.error_message = str(e)
-            _logger.exception("Recommendation wizard error: %s", e)
-            raise
+            }
+        
+        # If we get here, the partner was selected successfully
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Success!',
+                'message': f'Client: {self.partner_id.name}, Budget: €{self.target_budget}',
+                'type': 'success',
+                'sticky': True
+            }
+        }
 
     def action_view_composition(self):
         self.ensure_one()
