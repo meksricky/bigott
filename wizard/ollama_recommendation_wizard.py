@@ -12,6 +12,8 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
 
+    print("=== WIZARD MODEL IS LOADING ===")
+
     # --- Currency for Monetary fields ---
     currency_id = fields.Many2one(
         'res.currency',
