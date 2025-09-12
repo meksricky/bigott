@@ -9,7 +9,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
 
-    # ---- Currency (for Monetary fields) ----
+    # ---- Currency (for Monetary fields). ----
     currency_id = fields.Many2one(
         'res.currency',
         default=lambda self: self.env.company.currency_id,
