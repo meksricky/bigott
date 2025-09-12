@@ -141,30 +141,44 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ----------------- Actions -----------------
 
     def action_generate_recommendation(self):
-        """Simplified test method"""
+        """Generate recommendation with proper data handling"""
         self.ensure_one()
         
-        # Just test if we can access the data
-        if not self.partner_id:
-            # Instead of raising an error, return a notification
+        # Force save the current form data
+        self.ensure_one()
+        
+        # Read the values to ensure we have the latest data
+        vals = self.read(['partner_id', 'target_budget'])[0]
+        
+        # Extract partner_id properly
+        partner_id = None
+        if vals.get('partner_id'):
+            if isinstance(vals['partner_id'], (list, tuple)):
+                partner_id = vals['partner_id'][0]
+            else:
+                partner_id = vals['partner_id']
+        
+        if not partner_id:
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
                     'title': 'Debug Info',
-                    'message': f'Partner ID is empty. Wizard ID: {self.id}',
+                    'message': f'No partner selected. Wizard ID: {self.id}',
                     'type': 'warning',
                     'sticky': True
                 }
             }
         
-        # If we get here, the partner was selected successfully
+        # Load the partner record
+        partner = self.env['res.partner'].browse(partner_id)
+        
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
                 'title': 'Success!',
-                'message': f'Client: {self.partner_id.name}, Budget: €{self.target_budget}',
+                'message': f'Client: {partner.name}, Budget: €{vals.get("target_budget", 0)}',
                 'type': 'success',
                 'sticky': True
             }
