@@ -20,9 +20,11 @@
 
                         <group>
                             <group string="Client Information">
-                                <field name="partner_id" required="1" options="{'no_create': True}"/>
-                                <!-- Monetary fields render using currency_id automatically -->
-                                <field name="target_budget"/>
+                                <field name="partner_id" 
+                                       placeholder="Select client..."
+                                       domain="[('is_company', '=', False)]"
+                                       options="{'no_create': True}"/>
+                                <field name="target_budget" widget="monetary"/>
                             </group>
                             <group string="AI Configuration">
                                 <field name="recommender_id" options="{'no_create': True}"/>
@@ -48,9 +50,11 @@
                         </group>
                     </div>
 
-                    <!-- Generating State (add title/text to satisfy FA accessibility rule) -->
+                    <!-- Generating State -->
                     <div class="text-center" attrs="{'invisible': [('state', '!=', 'generating')]}">
-                        <div class="fa fa-3x fa-spin fa-spinner text-muted" title="Loading…">Loading…</div>
+                        <div class="fa fa-3x fa-spin fa-spinner text-muted">
+                            <span class="sr-only">Loading...</span>
+                        </div>
                         <h3>Generating AI Recommendation...</h3>
                         <p>Please wait while Ollama analyzes the client data and generates recommendations.</p>
                     </div>
@@ -68,13 +72,13 @@
 
                         <group>
                             <group string="Summary">
-                                <field name="total_cost" readonly="1"/>
+                                <field name="total_cost" readonly="1" widget="monetary"/>
                                 <field name="confidence_score" widget="progressbar" readonly="1"/>
                                 <field name="composition_id" readonly="1"/>
                             </group>
                             <group string="Client">
                                 <field name="partner_id" readonly="1"/>
-                                <field name="target_budget" readonly="1"/>
+                                <field name="target_budget" readonly="1" widget="monetary"/>
                             </group>
                         </group>
 
@@ -83,9 +87,6 @@
                                 <tree>
                                     <field name="default_code"/>
                                     <field name="name"/>
-                                    <field name="lebiggot_category"/>
-                                    <field name="product_grade"/>
-                                    <!-- product.template.list_price is Monetary already -->
                                     <field name="list_price"/>
                                 </tree>
                             </field>
@@ -102,7 +103,7 @@
                     <button name="action_generate_recommendation"
                             string="🎁 Generate Recommendation"
                             type="object"
-                            class="oe_highlight"
+                            class="btn-primary"
                             attrs="{'invisible': [('state', 'in', ['generating','done'])]}"/>
 
                     <button name="action_test_recommender_connection"
@@ -114,7 +115,7 @@
                     <button name="action_view_composition"
                             string="📋 View Composition"
                             type="object"
-                            class="oe_highlight"
+                            class="btn-primary"
                             attrs="{'invisible': [('state', '!=', 'done')]}"/>
 
                     <button name="action_generate_another"
@@ -123,21 +124,17 @@
                             class="btn-secondary"
                             attrs="{'invisible': [('state', '!=', 'done')]}"/>
 
-                    <button string="Cancel" class="btn-secondary" special="cancel"
-                            attrs="{'invisible': [('state', 'in', ['done'])]}"/>
-
-                    <button name="test_method" string="Test Code" type="object"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
                 </footer>
             </form>
         </field>
     </record>
 
-    <!-- Wizard Action (used by the button on the recommender form) -->
+    <!-- Wizard Action -->
     <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
         <field name="name">Generate Gift Recommendation</field>
         <field name="res_model">ollama.recommendation.wizard</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>
-        <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
     </record>
 </odoo>
