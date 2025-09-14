@@ -43,6 +43,13 @@ class ResPartner(models.Model):
         ('premium', 'Premium Client'),
         ('vip', 'VIP Client')
     ], string='Client Tier', compute='_compute_client_tier', store=True)
+
+    composition_count = fields.Integer('Composition Count', compute='_compute_composition_count')
+
+    @api.depends('composition_ids')
+    def _compute_composition_count(self):
+        for partner in self:
+            partner.composition_count = len(partner.composition_ids)
     
     @api.depends('order_history_ids')
     def _compute_client_insights(self):

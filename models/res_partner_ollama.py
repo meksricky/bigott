@@ -12,7 +12,6 @@ class ResPartner(models.Model):
         """Direct action to generate recommendation for ANY client"""
         self.ensure_one()
         
-        # NO restriction on company vs individual
         _logger.info(f"Generating recommendation for {self.name} (Company: {self.is_company})")
         
         # Get or create recommender
@@ -20,7 +19,7 @@ class ResPartner(models.Model):
         if not recommender:
             recommender = self.env['ollama.gift.recommender'].sudo().create({
                 'name': 'Default Ollama Recommender',
-                'ollama_enabled': False  # Start with fallback mode
+                'ollama_enabled': False
             })
         
         # Default values
@@ -28,7 +27,7 @@ class ResPartner(models.Model):
         dietary_restrictions = []
         
         try:
-            # Use sudo() to bypass permission issues
+            # Generate recommendation
             result = recommender.sudo().generate_gift_recommendations(
                 partner_id=self.id,
                 target_budget=target_budget,
@@ -39,16 +38,14 @@ class ResPartner(models.Model):
             if result.get('success'):
                 composition_id = result.get('composition_id')
                 
-                # Show success notification
+                # CHANGED: Open the composition directly instead of just showing notification
                 return {
-                    'type': 'ir.actions.client',
-                    'tag': 'display_notification',
-                    'params': {
-                        'title': 'Success!',
-                        'message': f'Recommendation generated for {self.name}',
-                        'type': 'success',
-                        'sticky': False,
-                    }
+                    'type': 'ir.actions.act_window',
+                    'name': f'Gift Composition for {self.name}',
+                    'res_model': 'gift.composition',
+                    'res_id': composition_id,
+                    'view_mode': 'form',
+                    'target': 'current',  # Opens in main window
                 }
             else:
                 raise UserError(f"Generation failed: {result.get('message', 'Unknown error')}")

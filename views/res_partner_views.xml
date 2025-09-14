@@ -380,6 +380,23 @@
                 </xpath>
             </field>
         </record>
+
+        <record id="view_partner_form_composition_button" model="ir.ui.view">
+            <field name="name">res.partner.form.composition.button</field>
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="base.view_partner_form"/>
+            <field name="arch" type="xml">
+                <xpath expr="//div[@name='button_box']" position="inside">
+                    <button class="oe_stat_button" 
+                            type="action" 
+                            name="%(action_gift_composition)d"
+                            icon="fa-gift"
+                            context="{'search_default_partner_id': active_id}">
+                        <field string="Compositions" name="composition_count" widget="statinfo"/>
+                    </button>
+                </xpath>
+            </field>
+        </record>
         
     </data>
 </odoo>
