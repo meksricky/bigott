@@ -439,61 +439,85 @@ Return ONLY valid JSON with this exact structure:
         return available
     
     def _select_products_intelligently(self, products, target_budget):
-        """Intelligent product selection algorithm"""
+        """Intelligent product selection with strict budget adherence"""
         
-        # Group products by price range
-        price_ranges = {
-            'premium': [],    # > 40% of budget
-            'mid': [],        # 20-40% of budget
-            'standard': [],   # 10-20% of budget
-            'small': []       # < 10% of budget
-        }
+        # Target 90-95% of budget
+        min_target = target_budget * 0.90
+        max_target = target_budget * 0.95
         
-        for product in products:
-            price_ratio = product.list_price / target_budget
-            if price_ratio > 0.4:
-                price_ranges['premium'].append(product)
-            elif price_ratio > 0.2:
-                price_ranges['mid'].append(product)
-            elif price_ratio > 0.1:
-                price_ranges['standard'].append(product)
-            else:
-                price_ranges['small'].append(product)
+        # Sort products by value (price/quality ratio if available)
+        products = sorted(products, key=lambda p: p.list_price, reverse=True)
         
-        selected = []
-        total = 0
-        target = target_budget * 0.9  # Aim for 90% of budget
+        best_combination = []
+        best_total = 0
         
-        # Strategy: 1 premium/mid + 2-3 standard + 1-2 small
+        # Try different combinations to find optimal budget match
+        for num_products in range(3, 6):  # Try 3, 4, or 5 products
+            current_combo = []
+            current_total = 0
+            
+            # Greedy selection with backtracking
+            for product in products:
+                test_total = current_total + product.list_price
+                
+                if test_total <= max_target:
+                    current_combo.append(product)
+                    current_total = test_total
+                    
+                    if len(current_combo) == num_products:
+                        break
+            
+            # If we're under budget, try to add one more smaller item
+            if current_total < min_target and len(current_combo) < 8:
+                remaining = max_target - current_total
+                fillers = [p for p in products if p not in current_combo and p.list_price <= remaining]
+                if fillers:
+                    filler = max(fillers, key=lambda p: p.list_price)
+                    current_combo.append(filler)
+                    current_total += filler.list_price
+            
+            # Check if this is the best combination so far
+            if min_target <= current_total <= max_target:
+                if abs(target_budget * 0.925 - current_total) < abs(target_budget * 0.925 - best_total):
+                    best_combination = current_combo
+                    best_total = current_total
         
-        # Try to add one premium or mid-range item
-        if price_ranges['premium'] and total + price_ranges['premium'][0].list_price <= target:
-            item = random.choice(price_ranges['premium'][:5])
-            selected.append(item)
-            total += item.list_price
-        elif price_ranges['mid']:
-            item = random.choice(price_ranges['mid'][:5])
-            if total + item.list_price <= target:
-                selected.append(item)
-                total += item.list_price
+        # If no perfect match, use dynamic programming for exact optimization
+        if not best_combination or best_total < min_target:
+            best_combination = self._optimize_with_dp(products[:30], target_budget)
+            best_total = sum(p.list_price for p in best_combination)
         
-        # Add standard items
-        for item in sorted(price_ranges['standard'], key=lambda x: x.list_price, reverse=True)[:10]:
-            if total + item.list_price <= target and item not in selected:
-                selected.append(item)
-                total += item.list_price
-                if len(selected) >= 3 and total >= target_budget * 0.75:
-                    break
+        return best_combination
+
+    def _optimize_with_dp(self, products, target_budget):
+        """Dynamic programming solution for optimal budget usage"""
         
-        # Fill with small items if needed
-        for item in price_ranges['small'][:10]:
-            if total + item.list_price <= target_budget * 1.05 and item not in selected:
-                selected.append(item)
-                total += item.list_price
-                if len(selected) >= 5 or total >= target_budget * 0.85:
-                    break
+        target = int(target_budget * 0.92 * 100)  # Work in cents, aim for 92%
+        n = len(products)
         
-        return selected
+        # DP table: dp[i][j] = best product set using first i products with budget j
+        dp = {}
+        
+        for i in range(n + 1):
+            for budget in range(target + 1):
+                if i == 0 or budget == 0:
+                    dp[(i, budget)] = (0, [])
+                else:
+                    price = int(products[i-1].list_price * 100)
+                    if price <= budget:
+                        # Include this product
+                        prev_value, prev_products = dp[(i-1, budget-price)]
+                        with_product = (prev_value + price, prev_products + [products[i-1]])
+                        
+                        # Don't include this product
+                        without_product = dp[(i-1, budget)]
+                        
+                        dp[(i, budget)] = max(with_product, without_product, key=lambda x: x[0])
+                    else:
+                        dp[(i, budget)] = dp[(i-1, budget)]
+        
+        _, selected_products = dp[(n, target)]
+        return selected_products if selected_products else products[:4]  # Fallback
     
     def _build_fallback_reasoning(self, products, total_cost, target_budget):
         """Build reasoning HTML for fallback recommendations"""
@@ -587,3 +611,57 @@ Return ONLY valid JSON with this exact structure:
                 ('state', 'in', ['confirmed', 'approved', 'delivered'])
             ]
         }
+
+    def _select_products_with_learning(self, products, target_budget, partner_id):
+        """Select products using learned patterns"""
+        
+        # Get learning data
+        learning = self.env['recommendation.learning'].sudo()
+        patterns = learning.get_recommendations_for_budget(target_budget, partner_id)
+        
+        if patterns:
+            _logger.info(f"Using patterns learned from {len(patterns.get('source_sales', []))} sales")
+        
+        # Your existing selection logic, but guided by patterns
+        selected = self._select_products_intelligently(products, target_budget)
+        
+        # Validate budget compliance
+        selected = self._ensure_budget_compliance(selected, products, target_budget)
+        
+        return selected
+
+    def _ensure_budget_compliance(self, selected_products, all_products, target_budget):
+        """Ensure selection is within 5% of budget"""
+        
+        total = sum(p.list_price for p in selected_products)
+        min_target = target_budget * 0.95
+        max_target = target_budget * 1.05
+        
+        # If within range, we're good
+        if min_target <= total <= max_target:
+            return selected_products
+        
+        # Over budget - remove cheapest items
+        while total > max_target and len(selected_products) > 3:
+            cheapest = min(selected_products, key=lambda p: p.list_price)
+            selected_products = [p for p in selected_products if p.id != cheapest.id]
+            total = sum(p.list_price for p in selected_products)
+        
+        # Under budget - add items
+        while total < min_target:
+            remaining = min_target - total
+            candidates = [
+                p for p in all_products 
+                if p.id not in [s.id for s in selected_products] 
+                and p.list_price <= remaining * 1.1
+            ]
+            
+            if not candidates:
+                break
+                
+            # Add best candidate
+            best = max(candidates, key=lambda p: p.list_price)
+            selected_products.append(best)
+            total += best.list_price
+        
+        return selected_products

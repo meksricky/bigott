@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Tree View -->
+    <record id="view_recommendation_learning_tree" model="ir.ui.view">
+        <field name="name">recommendation.learning.tree</field>
+        <field name="model">recommendation.learning</field>
+        <field name="arch" type="xml">
+            <tree string="Learning Patterns">
+                <field name="pattern_type"/>
+                <field name="partner_id"/>
+                <field name="optimal_product_count"/>
+                <field name="success_rate" widget="percentage"/>
+                <field name="last_updated"/>
+            </tree>
+        </field>
+    </record>
+
+    <!-- Form View -->
+    <record id="view_recommendation_learning_form" model="ir.ui.view">
+        <field name="name">recommendation.learning.form</field>
+        <field name="model">recommendation.learning</field>
+        <field name="arch" type="xml">
+            <form string="Learning Pattern">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="pattern_type"/>
+                            <field name="partner_id" attrs="{'invisible': [('pattern_type', '!=', 'client_specific')]}"/>
+                            <field name="last_updated" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="success_rate" widget="percentage"/>
+                            <field name="optimal_product_count"/>
+                            <field name="preferred_price_range"/>
+                        </group>
+                    </group>
+                    
+                    <notebook>
+                        <page string="Source Sales" name="sources">
+                            <field name="source_sale_ids" readonly="1">
+                                <tree>
+                                    <field name="name"/>
+                                    <field name="partner_id"/>
+                                    <field name="date_order"/>
+                                    <field name="amount_total"/>
+                                </tree>
+                            </field>
+                        </page>
+                        <page string="Source Compositions" name="compositions">
+                            <field name="source_composition_ids" readonly="1">
+                                <tree>
+                                    <field name="name"/>
+                                    <field name="partner_id"/>
+                                    <field name="target_budget"/>
+                                    <field name="actual_cost"/>
+                                </tree>
+                            </field>
+                        </page>
+                        <page string="Pattern Data" name="data">
+                            <field name="pattern_data" widget="ace" options="{'mode': 'json'}"/>
+                        </page>
+                        <page string="Notes" name="notes">
+                            <field name="learning_notes"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action -->
+    <record id="action_recommendation_learning" model="ir.actions.act_window">
+        <field name="name">AI Learning Patterns</field>
+        <field name="res_model">recommendation.learning</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+    
+    <!-- Menu -->
+    <menuitem id="menu_recommendation_learning"
+              name="AI Learning"
+              parent="menu_ollama_analytics"
+              action="action_recommendation_learning"
+              sequence="10"/>
+</odoo>

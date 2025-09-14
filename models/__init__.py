@@ -6,3 +6,4 @@ from . import client_order_history
 from . import res_partner
 from . import ollama_gift_recommender
 from . import res_partner_ollama
+from . import recommendation_learning

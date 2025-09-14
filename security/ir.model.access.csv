@@ -7,3 +7,4 @@ access_ollama_wizard_bigott_user,ollama.recommendation.wizard.bigott.user,senor_
 access_client_order_history_user,client.order.history.user,model_client_order_history,base.group_user,1,1,1,1
 access_gift_composition_user,gift.composition.user,model_gift_composition,base.group_user,1,1,1,1
 access_ollama_gift_recommender_user,ollama.gift.recommender.user,model_ollama_gift_recommender,base.group_user,1,1,1,1
+access_recommendation_learning_user,recommendation.learning.user,model_recommendation_learning,base.group_user,1,1,1,1
