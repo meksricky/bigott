@@ -168,26 +168,70 @@ class OllamaGiftRecommender(models.Model):
             
             # Try Ollama first if enabled
             if self.ollama_enabled:
-                result = self._generate_with_ollama(
-                    partner, target_budget, client_notes, dietary_restrictions
-                )
-                if result and result.get('success'):
-                    return result
-                else:
-                    _logger.info("Ollama failed, falling back to rule-based system")
+                try:
+                    result = self._generate_with_ollama(
+                        partner, target_budget, client_notes, dietary_restrictions
+                    )
+                    if result and result.get('success'):
+                        return result
+                except Exception as e:
+                    _logger.warning(f"Ollama failed ({str(e)}), using fallback")
             
-            # Fallback to rule-based system
+            # Always fall back to rule-based system if Ollama fails
             return self._generate_fallback_recommendation(
                 partner, target_budget, client_notes, dietary_restrictions
             )
             
         except Exception as e:
             _logger.error(f"Gift recommendation failed: {str(e)}")
+            # Even if everything fails, try basic recommendation
+            try:
+                return self._generate_basic_recommendation(partner_id, target_budget)
+            except:
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'message': f'Recommendation failed: {str(e)}'
+                }
+
+    def _generate_basic_recommendation(self, partner_id, target_budget):
+        """Ultra-simple fallback when everything else fails"""
+        
+        # Just get some products in budget range
+        products = self.env['product.template'].sudo().search([
+            ('sale_ok', '=', True),
+            ('list_price', '>', target_budget * 0.1),
+            ('list_price', '<', target_budget * 0.4)
+        ], limit=5)
+        
+        if not products:
+            products = self.env['product.template'].sudo().search([
+                ('sale_ok', '=', True),
+                ('list_price', '>', 0)
+            ], limit=5)
+        
+        if products:
+            composition = self.env['gift.composition'].sudo().create({
+                'partner_id': partner_id,
+                'target_budget': target_budget,
+                'target_year': fields.Date.today().year,
+                'composition_type': 'ai_generated',
+                'product_ids': [(6, 0, products.ids)],
+                'state': 'draft',
+                'client_notes': 'Basic recommendation (fallback mode)',
+                'confidence_score': 0.5
+            })
+            
             return {
-                'success': False,
-                'error': str(e),
-                'message': f'Recommendation failed: {str(e)}'
+                'success': True,
+                'composition_id': composition.id,
+                'products': products,
+                'total_cost': sum(products.mapped('list_price')),
+                'confidence_score': 0.5,
+                'message': 'Basic recommendation generated'
             }
+        
+        return {'success': False, 'error': 'No products available'}
     
     def _generate_with_ollama(self, partner, target_budget, client_notes, dietary_restrictions):
         """Generate recommendations using Ollama AI"""

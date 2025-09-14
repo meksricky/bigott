@@ -163,3 +163,77 @@ class RecommendationLearning(models.Model):
             'last_updated': fields.Datetime.now(),
             'learning_notes': f"Learned from {len(source_orders)} sales on {fields.Date.today()}"
         })
+
+    @api.model
+    def get_recommendations_for_budget(self, target_budget, partner_id=None):
+        """Get learned recommendations for a specific budget"""
+        
+        # Try client-specific patterns first
+        if partner_id:
+            client_learning = self.search([
+                ('partner_id', '=', partner_id),
+                ('pattern_type', '=', 'client_specific')
+            ], limit=1)
+            
+            if client_learning and client_learning.pattern_data:
+                try:
+                    data = json.loads(client_learning.pattern_data)
+                    return self._extract_budget_recommendations(data, target_budget)
+                except:
+                    pass
+        
+        # Fall back to general patterns
+        general_learning = self.search([('pattern_type', '=', 'general')], limit=1)
+        if general_learning and general_learning.pattern_data:
+            try:
+                patterns = json.loads(general_learning.pattern_data)
+                return self._extract_budget_recommendations(patterns, target_budget)
+            except Exception as e:
+                _logger.error(f"Failed to parse learning data: {e}")
+        
+        # Return empty dict if no patterns found
+        return {}
+
+    def _extract_budget_recommendations(self, patterns, target_budget):
+        """Extract relevant recommendations for a budget range"""
+        
+        budget_range = self._get_budget_range(target_budget)
+        
+        result = {
+            'budget_range': budget_range,
+            'product_count': 4,  # Default
+            'categories': []
+        }
+        
+        # Get budget-specific patterns if available
+        if 'budget_patterns' in patterns:
+            budget_data = patterns['budget_patterns'].get(budget_range, {})
+            if budget_data:
+                # If it's a list, get average values
+                if isinstance(budget_data, list) and budget_data:
+                    counts = [b.get('product_count', 4) for b in budget_data if 'product_count' in b]
+                    if counts:
+                        result['product_count'] = int(sum(counts) / len(counts))
+                    
+                    # Collect all categories
+                    for b in budget_data:
+                        if 'categories' in b:
+                            result['categories'].extend(b['categories'])
+                
+                elif isinstance(budget_data, dict):
+                    result['product_count'] = budget_data.get('product_count', 4)
+                    result['categories'] = budget_data.get('categories', [])
+        
+        # Get popular products if available
+        if 'products_used' in patterns:
+            # Sort products by usage count
+            products = patterns['products_used']
+            if products:
+                sorted_products = sorted(
+                    [(pid, p.get('usage_count', 0)) for pid, p in products.items()],
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                result['popular_products'] = [p[0] for p in sorted_products[:20]]
+        
+        return result
