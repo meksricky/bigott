@@ -203,16 +203,17 @@ class OllamaGiftRecommender(models.Model):
             if not selected_products:
                 return {'success': False, 'error': 'Could not select products within budget'}
             
-            # Create composition
+            # Create composition with CORRECT FIELD NAMES
             composition = self.env['gift.composition'].sudo().create({
                 'partner_id': partner_id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
-                'composition_type': 'custom',
+                'composition_type': 'ai_generated',  # Changed from 'custom' to match model
                 'product_ids': [(6, 0, [p.id for p in selected_products])],
-                'actual_cost': total_cost,
                 'state': 'draft',
-                'notes': f"Auto-generated for {partner.name}. History: {len(client_history)} records"
+                'client_notes': f"Auto-generated for {partner.name}. History: {len(client_history)} records. {client_notes}",  # CHANGED from 'notes' to 'client_notes'
+                'confidence_score': 0.7,
+                'dietary_restrictions': ', '.join(dietary_restrictions) if dietary_restrictions else None
             })
             
             # Update tracking
