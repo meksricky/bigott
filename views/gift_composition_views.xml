@@ -160,6 +160,20 @@
         </field>
     </record>
 
+    <record id="action_gift_composition" model="ir.actions.act_window">
+        <field name="name">Gift Compositions</field>
+        <field name="res_model">gift.composition</field>
+        <field name="view_mode">tree,form</field>
+        <field name="help" type="html">
+            <p class="o_view_nocontent_smiling_face">
+                No gift compositions yet!
+            </p>
+            <p>
+                Click "Create" to add a new gift composition or generate one using AI.
+            </p>
+        </field>
+    </record>
+
     <!-- Menu item under Sales -->
     <menuitem id="menu_gift_composition"
             name="Gift Compositions"
