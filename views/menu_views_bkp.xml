@@ -98,4 +98,56 @@
               parent="menu_ollama_main" 
               sequence="40"/>
 
+    <!-- Top Level Menu -->
+    <menuitem id="menu_gift_ai_root" 
+              name="🎁 Gift AI" 
+              sequence="10"/>
+    
+    <!-- Main Sections -->
+    <menuitem id="menu_ollama_main" 
+              name="🤖 Ollama AI" 
+              parent="menu_gift_ai_root" 
+              sequence="10"/>
+    
+    <!-- Ollama Recommenders -->
+    <menuitem id="menu_ollama_gift_recommender" 
+              name="Recommenders" 
+              parent="menu_ollama_main" 
+              action="action_ollama_gift_recommender" 
+              sequence="10"/>
+    
+    <!-- Gift Compositions -->
+    <menuitem id="menu_gift_compositions" 
+              name="Gift Compositions" 
+              parent="menu_ollama_main" 
+              action="action_gift_composition" 
+              sequence="20"/>
+    
+    <!-- Analytics Section -->
+    <menuitem id="menu_ollama_analytics" 
+              name="📊 Analytics" 
+              parent="menu_ollama_main" 
+              sequence="30"/>
+    
+    <!-- AI Learning under Analytics -->
+    <menuitem id="menu_recommendation_learning"
+              name="AI Learning Patterns"
+              parent="menu_ollama_analytics"
+              action="action_recommendation_learning"
+              sequence="10"/>
+    
+    <!-- Client History -->
+    <menuitem id="menu_client_history"
+              name="Client History"
+              parent="menu_ollama_analytics"
+              action="action_client_order_history"
+              sequence="20"/>
+    
+    <!-- Quick Actions -->
+    <menuitem id="menu_quick_recommendation" 
+              name="🚀 Quick Recommendation" 
+              parent="menu_gift_ai_root" 
+              action="action_ollama_recommendation_wizard" 
+              sequence="5"/>
+
 </odoo>
