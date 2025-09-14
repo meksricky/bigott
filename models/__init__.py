@@ -3,3 +3,4 @@
 from . import product_template
 from . import gift_composition
 from . import ollama_gift_recommender
+from . import res_partner_ollama
