@@ -4,3 +4,6 @@ access_gift_composition_bigott_manager,gift.composition.bigott.manager,senor_big
 access_ollama_recommender_bigott_user,ollama.gift.recommender.bigott.user,senor_bigott_recommender.model_ollama_gift_recommender,base.group_user,1,0,0,0
 access_ollama_recommender_bigott_manager,ollama.gift.recommender.bigott.manager,senor_bigott_recommender.model_ollama_gift_recommender,sales_team.group_sale_manager,1,1,1,1
 access_ollama_wizard_bigott_user,ollama.recommendation.wizard.bigott.user,senor_bigott_recommender.model_ollama_recommendation_wizard,base.group_user,1,1,1,1
+access_client_order_history_user,client.order.history.user,model_client_order_history,base.group_user,1,1,1,1
+access_gift_composition_user,gift.composition.user,model_gift_composition,base.group_user,1,1,1,1
+access_ollama_gift_recommender_user,ollama.gift.recommender.user,model_ollama_gift_recommender,base.group_user,1,1,1,1
