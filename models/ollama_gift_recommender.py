@@ -458,99 +458,164 @@ Return ONLY valid JSON with this exact structure:
         }
     
     def _get_available_products(self, target_budget, dietary_restrictions):
-        """Get DIVERSE products based on budget"""
+        """Get diverse products for budget"""
         
-        # Calculate price ranges for variety
-        min_price = target_budget * 0.05  # At least 5% of budget
-        max_price = target_budget * 0.40  # Max 40% of budget
+        # Better price ranges based on budget
+        if target_budget < 100:
+            min_price = 5
+            max_price = target_budget * 0.5
+        elif target_budget < 200:
+            min_price = 10
+            max_price = target_budget * 0.45
+        else:
+            min_price = 15
+            max_price = target_budget * 0.40
         
         domain = [
             ('sale_ok', '=', True),
-            ('list_price', '>=', min_price),  # No tiny items
+            ('list_price', '>=', min_price),
             ('list_price', '<=', max_price),
         ]
         
-        # Get products and shuffle for variety
-        products = self.env['product.template'].sudo().search(domain, limit=200)
+        # Get products
+        products = self.env['product.template'].sudo().search(domain, limit=500, order='list_price DESC')
         
-        # Filter by stock
+        # Filter by stock if field exists
         available = []
         for product in products:
-            # Check if we have a qty_available field
             if hasattr(product, 'qty_available'):
                 if product.qty_available > 0:
                     available.append(product)
             else:
-                # If no stock field, include it
                 available.append(product)
-        
-        # IMPORTANT: Randomize to avoid always picking same products
-        import random
-        random.shuffle(available)
         
         _logger.info(f"Found {len(available)} products for budget €{target_budget} (€{min_price:.2f}-€{max_price:.2f})")
         
-        return available[:100]  # Limit to 100 for performance
+        return available
 
     def _select_products_intelligently(self, products, target_budget):
-        """Select DIFFERENT products each time"""
+        """Select products to match budget within 5%"""
         import random
         
         if not products:
             return []
         
-        # Check if we have learning data
-        learning = self.env['recommendation.learning'].sudo()
-        patterns = learning.get_recommendations_for_budget(target_budget)
+        # Target 90-95% of budget
+        min_target = target_budget * 0.90
+        max_target = target_budget * 0.95
+        ideal_target = target_budget * 0.92
         
-        # Default strategy
-        target_count = 4
-        if patterns and 'product_count' in patterns:
-            target_count = patterns.get('product_count', 4)
+        # Filter products by reasonable price range
+        min_price = target_budget * 0.05  # At least 5% of budget
+        max_price = target_budget * 0.45  # Max 45% of budget
         
-        selected = []
+        suitable_products = [
+            p for p in products 
+            if min_price <= p.list_price <= max_price
+        ]
+        
+        if not suitable_products:
+            # If no products in ideal range, use all available
+            suitable_products = list(products)
+        
+        _logger.info(f"Found {len(suitable_products)} products in price range €{min_price:.2f}-€{max_price:.2f}")
+        
+        # Try multiple combinations to find best fit
+        best_combination = []
+        best_total = 0
+        best_variance = 1.0
+        
+        # Try 10 random combinations
+        for attempt in range(10):
+            random.shuffle(suitable_products)
+            combo = []
+            total = 0
+            
+            # Build combination
+            for product in suitable_products:
+                if total + product.list_price <= max_target:
+                    combo.append(product)
+                    total += product.list_price
+                    
+                    # Check if we're in the sweet spot
+                    if min_target <= total <= max_target and len(combo) >= 3:
+                        variance = abs(total - ideal_target) / target_budget
+                        if variance < best_variance:
+                            best_combination = combo.copy()
+                            best_total = total
+                            best_variance = variance
+            
+            # If this attempt is better than our best, keep it
+            if not best_combination and combo:
+                if abs(total - ideal_target) < abs(best_total - ideal_target):
+                    best_combination = combo.copy()
+                    best_total = total
+        
+        # If still no good combination, build one deterministically
+        if not best_combination or best_total < min_target:
+            best_combination = self._build_optimal_combination(suitable_products, target_budget)
+            best_total = sum(p.list_price for p in best_combination)
+        
+        _logger.info(f"Selected {len(best_combination)} products for €{best_total:.2f} "
+                    f"(target: €{target_budget:.2f}, variance: {((best_total/target_budget-1)*100):.1f}%)")
+        
+        return best_combination
+
+    def _build_optimal_combination(self, products, target_budget):
+        """Build optimal combination using greedy algorithm"""
+        
+        if not products:
+            return []
+        
+        target = target_budget * 0.92
+        
+        # Sort by price descending
+        sorted_products = sorted(products, key=lambda p: p.list_price, reverse=True)
+        
+        combination = []
         total = 0
-        used_categories = set()
         
-        # Shuffle products for variety
-        products_list = list(products)
-        random.shuffle(products_list)
-        
-        # Smart selection with variety
-        for product in products_list:
-            if len(selected) >= target_count:
+        # First, try to add one expensive item (20-40% of budget)
+        for product in sorted_products:
+            if target_budget * 0.20 <= product.list_price <= target_budget * 0.40:
+                combination.append(product)
+                total += product.list_price
                 break
-                
-            # Skip if too expensive for remaining budget
-            if total + product.list_price > target_budget * 1.05:
-                continue
-            
-            # Get category
-            category = getattr(product, 'lebiggot_category', 'general')
-            
-            # Prefer diverse categories
-            if category in used_categories and len(selected) < 2:
-                continue  # Skip same category early on
-            
-            # Add product
-            selected.append(product)
-            total += product.list_price
-            used_categories.add(category)
-            
-            _logger.info(f"Selected: {product.name} - €{product.list_price:.2f}")
         
-        # If we're under budget, add more
-        remaining = target_budget * 0.95 - total
-        if remaining > 20 and len(selected) < 6:
-            fillers = [p for p in products_list if p not in selected and p.list_price <= remaining]
-            if fillers:
-                filler = random.choice(fillers[:5])  # Random from top 5 options
-                selected.append(filler)
-                total += filler.list_price
+        # Then add medium items (10-25% of budget)
+        for product in sorted_products:
+            if product not in combination:
+                if target_budget * 0.10 <= product.list_price <= target_budget * 0.25:
+                    if total + product.list_price <= target * 1.05:
+                        combination.append(product)
+                        total += product.list_price
+                        
+                        if len(combination) >= 3 and total >= target * 0.95:
+                            break
         
-        _logger.info(f"Final selection: {len(selected)} products, €{total:.2f} (target: €{target_budget})")
+        # Fill remaining with smaller items
+        for product in sorted_products:
+            if product not in combination:
+                if total + product.list_price <= target_budget * 0.95:
+                    combination.append(product)
+                    total += product.list_price
+                    
+                    if total >= target_budget * 0.90:
+                        break
         
-        return selected
+        # If still under budget, add more products
+        if total < target_budget * 0.85:
+            remaining = target_budget * 0.90 - total
+            for product in sorted_products:
+                if product not in combination and product.list_price <= remaining:
+                    combination.append(product)
+                    total += product.list_price
+                    remaining = target_budget * 0.95 - total
+                    
+                    if remaining <= 0:
+                        break
+        
+        return combination if combination else products[:4]
 
     def _optimize_with_dp(self, products, target_budget):
         """Dynamic programming solution for optimal budget usage"""
