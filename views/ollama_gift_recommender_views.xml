@@ -33,6 +33,10 @@
                             string="🎁 Generate Recommendation" 
                             type="action" 
                             class="oe_highlight"/>
+                    <button name="trigger_learning" 
+                            string="🧠 Trigger Learning" 
+                            type="object" 
+                            class="btn-warning"/>
                 </header>
                 
                 <sheet>
@@ -164,10 +168,5 @@
             </xpath>
         </field>
     </record>
-
-    <button name="trigger_learning" 
-        string="🧠 Trigger Learning" 
-        type="object" 
-        class="btn-warning"/>
 
 </odoo>
