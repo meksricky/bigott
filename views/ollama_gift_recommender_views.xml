@@ -165,4 +165,9 @@
         </field>
     </record>
 
+    <button name="trigger_learning" 
+        string="🧠 Trigger Learning" 
+        type="object" 
+        class="btn-warning"/>
+
 </odoo>
