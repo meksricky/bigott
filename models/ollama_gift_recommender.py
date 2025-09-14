@@ -8,6 +8,7 @@ import requests
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 import re
+import random
 
 _logger = logging.getLogger(__name__)
 
@@ -55,106 +56,107 @@ class OllamaGiftRecommender(models.Model):
         if not recommender:
             recommender = self.create({
                 'name': 'Default Ollama Gift Recommender',
-                'ollama_enabled': True
+                'ollama_enabled': False  # Start with fallback mode until Ollama is configured
             })
         return recommender
     
     def test_ollama_connection(self):
         """Test connection to Ollama service"""
+        self.ensure_one()
+        
         if not self.ollama_enabled:
-            raise UserError("Ollama is not enabled for this recommender.")
+            return {
+                'success': False,
+                'message': 'Ollama is disabled. Enable it to use AI recommendations.'
+            }
         
         try:
-            url = f"{self.ollama_base_url.rstrip('/')}/api/tags"
-            response = requests.get(url, timeout=5)
+            # Try to list available models
+            response = requests.get(
+                f"{self.ollama_base_url}/api/tags",
+                timeout=5
+            )
             
             if response.status_code == 200:
                 data = response.json()
-                models = [model['name'] for model in data.get('models', [])]
+                models = [m['name'] for m in data.get('models', [])]
                 
-                if self.ollama_model in models:
-                    return {
-                        'success': True,
-                        'message': f"✅ Successfully connected to Ollama. Model '{self.ollama_model}' is available.",
-                        'available_models': models
-                    }
-                else:
+                if self.ollama_model not in models:
                     return {
                         'success': False,
-                        'message': f"❌ Model '{self.ollama_model}' not found. Available models: {', '.join(models)}",
-                        'available_models': models
+                        'message': f'Model {self.ollama_model} not found. Available: {", ".join(models)}'
                     }
+                
+                return {
+                    'success': True,
+                    'message': f'✅ Connected! Model {self.ollama_model} is ready.'
+                }
             else:
                 return {
                     'success': False,
-                    'message': f"❌ Ollama service returned status {response.status_code}",
-                    'available_models': []
+                    'message': f'Connection failed: HTTP {response.status_code}'
                 }
                 
         except requests.exceptions.ConnectionError:
             return {
                 'success': False,
-                'message': "❌ Cannot connect to Ollama service. Please check if Ollama is running and the URL is correct.",
-                'available_models': []
+                'message': '❌ Cannot connect to Ollama. Is it running on ' + self.ollama_base_url + '?'
             }
         except Exception as e:
             return {
                 'success': False,
-                'message': f"❌ Error testing Ollama connection: {str(e)}",
-                'available_models': []
+                'message': f'Error: {str(e)}'
             }
     
-    def _call_ollama(self, prompt, system_prompt=None):
+    def _call_ollama(self, prompt, format_json=False):
         """Make a call to Ollama API"""
         if not self.ollama_enabled:
-            _logger.warning("Ollama not enabled - skipping AI recommendation")
             return None
         
         try:
-            url = f"{self.ollama_base_url.rstrip('/')}/api/generate"
-            
-            # Build the full prompt with system instructions if provided
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
+            url = f"{self.ollama_base_url}/api/generate"
             
             payload = {
                 'model': self.ollama_model,
-                'prompt': full_prompt,
+                'prompt': prompt,
                 'stream': False,
                 'options': {
                     'temperature': 0.7,
                     'top_p': 0.9,
-                    'num_predict': 1500
+                    'num_predict': 2000
                 }
             }
+            
+            if format_json:
+                payload['format'] = 'json'
             
             start_time = datetime.now()
             response = requests.post(url, json=payload, timeout=self.ollama_timeout)
             response_time = (datetime.now() - start_time).total_seconds()
             
             # Update average response time
-            if self.total_recommendations > 0:
-                self.avg_response_time = ((self.avg_response_time * self.total_recommendations) + response_time) / (self.total_recommendations + 1)
-            else:
-                self.avg_response_time = response_time
+            self._update_response_time(response_time)
             
             if response.status_code == 200:
                 data = response.json()
                 return data.get('response', '').strip()
             else:
-                _logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+                _logger.error(f"Ollama API error: {response.status_code}")
                 return None
                 
-        except requests.exceptions.Timeout:
-            _logger.error(f"Ollama request timed out after {self.ollama_timeout} seconds")
-            return None
         except Exception as e:
             _logger.error(f"Ollama request failed: {str(e)}")
             return None
     
+    def _update_response_time(self, new_time):
+        """Update average response time"""
+        if self.total_recommendations > 0:
+            self.avg_response_time = ((self.avg_response_time * self.total_recommendations) + new_time) / (self.total_recommendations + 1)
+        else:
+            self.avg_response_time = new_time
+    
     def generate_gift_recommendations(self, partner_id, target_budget, client_notes='', dietary_restrictions=None):
-        """Generate gift recommendations - works for ANY client with or without history"""
+        """Main method to generate gift recommendations"""
         self.ensure_one()
         
         try:
@@ -164,56 +166,143 @@ class OllamaGiftRecommender(models.Model):
             
             _logger.info(f"Generating for {partner.name} - Budget: €{target_budget}")
             
-            # Try to get history, but don't fail if none exists
-            client_history = []
+            # Try Ollama first if enabled
+            if self.ollama_enabled:
+                result = self._generate_with_ollama(
+                    partner, target_budget, client_notes, dietary_restrictions
+                )
+                if result and result.get('success'):
+                    return result
+                else:
+                    _logger.info("Ollama failed, falling back to rule-based system")
+            
+            # Fallback to rule-based system
+            return self._generate_fallback_recommendation(
+                partner, target_budget, client_notes, dietary_restrictions
+            )
+            
+        except Exception as e:
+            _logger.error(f"Gift recommendation failed: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Recommendation failed: {str(e)}'
+            }
+    
+    def _generate_with_ollama(self, partner, target_budget, client_notes, dietary_restrictions):
+        """Generate recommendations using Ollama AI"""
+        
+        # Get available products
+        products = self._get_available_products(target_budget, dietary_restrictions)
+        if not products:
+            return None
+        
+        # Build context
+        history_context = self._get_client_context(partner.id)
+        product_catalog = self._prepare_product_catalog(products, target_budget)
+        
+        # Create the prompt
+        prompt = self._build_ollama_prompt(
+            partner, target_budget, client_notes, 
+            dietary_restrictions, history_context, product_catalog
+        )
+        
+        # Call Ollama
+        response = self._call_ollama(prompt, format_json=True)
+        if not response:
+            return None
+        
+        # Parse and process response
+        return self._process_ollama_response(
+            response, partner, target_budget, client_notes, dietary_restrictions
+        )
+    
+    def _build_ollama_prompt(self, partner, target_budget, client_notes, 
+                             dietary_restrictions, history_context, product_catalog):
+        """Build the prompt for Ollama"""
+        
+        dietary_str = ', '.join(dietary_restrictions) if dietary_restrictions else 'None'
+        
+        return f"""You are an expert gift curator for Señor Bigott, a premium gift company.
+Create a personalized gift composition for a client.
+
+CLIENT INFORMATION:
+- Name: {partner.name}
+- Type: {'Company' if partner.is_company else 'Individual'}
+- Budget: €{target_budget}
+- Notes: {client_notes or 'None'}
+- Dietary Restrictions: {dietary_str}
+
+{history_context}
+
+AVAILABLE PRODUCTS (select from these):
+{product_catalog}
+
+RULES:
+1. Select 3-5 products that total 85-95% of the budget
+2. Ensure variety in categories (no more than 2 from same category)
+3. Honor all dietary restrictions
+4. Create a cohesive gift experience with a clear theme
+5. Balance premium and accessible items
+
+Return ONLY valid JSON with this exact structure:
+{{
+    "selected_products": [
+        {{"id": <product_id>, "reason": "<why this product>"}},
+        ...
+    ],
+    "theme": "<overall gift theme>",
+    "reasoning": "<detailed explanation of choices>",
+    "confidence": <0.0-1.0>
+}}"""
+    
+    def _process_ollama_response(self, response, partner, target_budget, client_notes, dietary_restrictions):
+        """Process Ollama's response and create composition"""
+        
+        try:
+            # Parse JSON response
             try:
-                history_records = self.env['client.order.history'].sudo().search([
-                    ('partner_id', '=', partner_id)
-                ], limit=5)
-                client_history = [{'year': h.order_year, 'budget': h.total_budget} for h in history_records]
-            except:
-                _logger.info("No history available, using general patterns")
+                recommendation = json.loads(response)
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    recommendation = json.loads(json_match.group())
+                else:
+                    return None
             
-            # Get available products
-            products = self.env['product.template'].sudo().search([
-                ('sale_ok', '=', True),
-                ('list_price', '>', 0),
-                ('list_price', '<=', target_budget / 2)  # Max price per product
-            ], limit=50)
+            # Extract product IDs
+            product_ids = []
+            for p in recommendation.get('selected_products', []):
+                if isinstance(p, dict) and 'id' in p:
+                    product_ids.append(p['id'])
             
-            if not products:
-                return {'success': False, 'error': 'No products available'}
+            if not product_ids:
+                return None
             
-            # Simple recommendation logic (fallback when Ollama is not available)
-            selected_products = []
-            total_cost = 0
-            
-            # Sort products by price
-            products = sorted(products, key=lambda p: p.list_price)
-            
-            # Select products until budget is reached
-            for product in products:
-                if total_cost + product.list_price <= target_budget * 1.1:  # Allow 10% over budget
-                    selected_products.append(product)
-                    total_cost += product.list_price
-                    
-                    if len(selected_products) >= 5:  # Max 5 products
-                        break
-            
+            # Get the actual products
+            selected_products = self.env['product.template'].sudo().browse(product_ids).exists()
             if not selected_products:
-                return {'success': False, 'error': 'Could not select products within budget'}
+                return None
             
-            # Create composition with CORRECT FIELD NAMES
+            # Calculate total
+            total_cost = sum(selected_products.mapped('list_price'))
+            
+            # Build reasoning HTML
+            reasoning_html = self._build_reasoning_html(recommendation, total_cost, target_budget)
+            
+            # Create composition
             composition = self.env['gift.composition'].sudo().create({
-                'partner_id': partner_id,
+                'partner_id': partner.id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
-                'composition_type': 'ai_generated',  # Changed from 'custom' to match model
-                'product_ids': [(6, 0, [p.id for p in selected_products])],
+                'composition_type': 'ai_generated',
+                'product_ids': [(6, 0, selected_products.ids)],
                 'state': 'draft',
-                'client_notes': f"Auto-generated for {partner.name}. History: {len(client_history)} records. {client_notes}",  # CHANGED from 'notes' to 'client_notes'
-                'confidence_score': 0.7,
-                'dietary_restrictions': ', '.join(dietary_restrictions) if dietary_restrictions else None
+                'client_notes': client_notes,
+                'confidence_score': recommendation.get('confidence', 0.8),
+                'dietary_restrictions': ', '.join(dietary_restrictions) if dietary_restrictions else None,
+                'reasoning': reasoning_html
             })
             
             # Update tracking
@@ -228,393 +317,273 @@ class OllamaGiftRecommender(models.Model):
                 'composition_id': composition.id,
                 'products': selected_products,
                 'total_cost': total_cost,
-                'confidence_score': 0.7,
-                'message': f'Generated composition with {len(selected_products)} products for €{total_cost:.2f}'
+                'confidence_score': recommendation.get('confidence', 0.8),
+                'message': f'AI generated {len(selected_products)} products for €{total_cost:.2f}'
             }
             
         except Exception as e:
-            _logger.error(f"Gift recommendation failed: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e),
-                'message': f'Recommendation failed: {str(e)}'
-            }
+            _logger.error(f"Failed to process Ollama response: {e}")
+            return None
     
-    def _gather_client_data(self, partner):
-        """Gather comprehensive client data for analysis"""
+    def _build_reasoning_html(self, recommendation, total_cost, target_budget):
+        """Build HTML reasoning from Ollama recommendation"""
         
-        # Get historical sales data
-        sales_orders = self.env['sale.order'].search([
-            ('partner_id', '=', partner.id),
-            ('state', 'in', ['sale', 'done']),
-            ('amount_total', '>', 0)
-        ], order='date_order desc', limit=10)
+        html = f"""
+        <div style="padding: 20px; background: #f8f9fa; border-radius: 8px;">
+            <h3>🤖 AI Gift Recommendation</h3>
+            
+            <div style="margin: 15px 0;">
+                <strong>Theme:</strong> {recommendation.get('theme', 'Curated Gift Collection')}
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Budget Usage:</strong> €{total_cost:.2f} of €{target_budget:.2f} 
+                ({(total_cost/target_budget*100):.1f}%)
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Confidence:</strong> {recommendation.get('confidence', 0.8)*100:.0f}%
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Reasoning:</strong>
+                <p>{recommendation.get('reasoning', 'Products selected for optimal variety and value.')}</p>
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Product Selection:</strong>
+                <ul>
+        """
         
-        # Get historical gift compositions
-        gift_compositions = self.env['gift.composition'].search([
-            ('partner_id', '=', partner.id)
-        ], order='create_date desc', limit=5)
+        for product in recommendation.get('selected_products', []):
+            html += f"<li>{product.get('reason', 'Selected for quality and value')}</li>"
         
-        # Get client order history
-        client_history = self.env['client.order.history'].search([
-            ('partner_id', '=', partner.id)
-        ], order='order_year desc', limit=3)
+        html += """
+                </ul>
+            </div>
+        </div>
+        """
         
-        return {
-            'partner': partner,
-            'sales_orders': sales_orders,
-            'gift_compositions': gift_compositions,
-            'client_history': client_history,
-            'total_past_orders': len(sales_orders),
-            'avg_order_value': sum(sales_orders.mapped('amount_total')) / len(sales_orders) if sales_orders else 0,
-            'preferred_categories': self._analyze_preferred_categories(sales_orders, gift_compositions),
-            'past_budgets': sales_orders.mapped('amount_total')[:5],  # Last 5 budgets
-        }
+        return html
     
-    def _analyze_preferred_categories(self, sales_orders, gift_compositions):
-        """Analyze client's preferred product categories"""
-        categories = []
-        
-        # From sales orders
-        for order in sales_orders:
-            for line in order.order_line:
-                if line.product_id.product_tmpl_id.lebiggot_category:
-                    categories.append(line.product_id.product_tmpl_id.lebiggot_category)
-        
-        # From gift compositions
-        for comp in gift_compositions:
-            for product in comp.product_ids:
-                if product.lebiggot_category:
-                    categories.append(product.lebiggot_category)
-        
-        # Count occurrences and return most common
-        if categories:
-            category_counts = Counter(categories)
-            return [cat for cat, count in category_counts.most_common(5)]
-        
-        return []
-    
-    def _get_available_products(self, dietary_restrictions=None):
-        """Get products that are available (stock + internal reference) and meet dietary restrictions"""
-        
-        # Base domain for available products
-        domain = [
-            ('active', '=', True),
-            ('sale_ok', '=', True),
-            ('list_price', '>', 0),
-            ('default_code', '!=', False),  # Must have internal reference
-            ('lebiggot_category', '!=', False),  # Must have category
-        ]
-        
-        products = self.env['product.template'].search(domain)
-        
-        # Filter by stock availability
-        available_products = []
-        for product in products:
-            if self._check_product_stock(product):
-                available_products.append(product)
-        
-        # Filter by dietary restrictions
-        if dietary_restrictions:
-            filtered_products = []
-            for product in available_products:
-                if self._check_dietary_compliance(product, dietary_restrictions):
-                    filtered_products.append(product)
-            available_products = filtered_products
-        
-        return available_products
-    
-    def _check_product_stock(self, product):
-        """Check if product has available stock"""
-        if product.type != 'product':
-            return True  # Services and consumables are always "available"
-        
-        stock_quants = self.env['stock.quant'].search([
-            ('product_id', 'in', product.product_variant_ids.ids),
-            ('location_id.usage', '=', 'internal')
-        ])
-        
-        available_qty = sum(stock_quants.mapped('available_quantity'))
-        return available_qty > 0
-    
-    def _check_dietary_compliance(self, product, dietary_restrictions):
-        """Check if product meets dietary restrictions"""
-        
-        for restriction in dietary_restrictions:
-            restriction = restriction.lower().strip()
-            
-            if restriction == 'vegan':
-                # Check product fields
-                if hasattr(product, 'is_vegan') and not product.is_vegan:
-                    return False
-                # Keyword check in product name/description
-                non_vegan_keywords = ['meat', 'fish', 'dairy', 'cheese', 'ham', 'salmon', 'beef', 'pork', 'chicken', 'milk']
-                if any(keyword in product.name.lower() for keyword in non_vegan_keywords):
-                    return False
-            
-            elif restriction == 'halal':
-                # Check product fields
-                if hasattr(product, 'is_halal') and not product.is_halal:
-                    return False
-                # Keyword check
-                non_halal_keywords = ['pork', 'wine', 'alcohol', 'champagne', 'beer', 'whiskey', 'brandy']
-                if any(keyword in product.name.lower() for keyword in non_halal_keywords):
-                    return False
-            
-            elif restriction in ['non_alcoholic', 'no_alcohol']:
-                # Check product fields
-                if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
-                    return False
-                # Keyword check
-                alcohol_keywords = ['wine', 'champagne', 'alcohol', 'beer', 'whiskey', 'brandy', 'vodka', 'rum', 'gin']
-                if any(keyword in product.name.lower() for keyword in alcohol_keywords):
-                    return False
-            
-            elif restriction == 'gluten_free':
-                # Check product fields
-                if hasattr(product, 'is_gluten_free') and not product.is_gluten_free:
-                    return False
-                # Keyword check
-                gluten_keywords = ['wheat', 'bread', 'pasta', 'flour', 'barley', 'oats']
-                if any(keyword in product.name.lower() for keyword in gluten_keywords):
-                    return False
-        
-        return True
-    
-    def _get_system_prompt(self):
-        """Get the system prompt for Ollama"""
-        return """You are a luxury gourmet gift recommendation specialist for Señor Bigott, an exclusive Spanish luxury food company. Your role is to analyze client data and recommend the perfect gift composition.
-
-CRITICAL REQUIREMENTS:
-1. Only recommend products that are explicitly listed in the available products
-2. Respect the client's budget (within 15% flexibility)
-3. Honor all dietary restrictions
-4. Consider the client's purchase history and preferences
-5. Ensure variety and balance in the gift composition
-6. Focus on luxury and premium quality
-
-RESPONSE FORMAT:
-Provide your response in this exact JSON format:
-{
-    "recommended_products": ["product_code_1", "product_code_2", "..."],
-    "reasoning": "Detailed explanation of why these products were chosen",
-    "confidence_score": 0.85,
-    "total_estimated_cost": 150.50,
-    "composition_notes": "Brief notes about the overall composition"
-}
-
-Always respond with valid JSON only. Do not include any text outside the JSON structure."""
-    
-    def _build_recommendation_prompt(self, client_data, target_budget, client_notes, dietary_restrictions, available_products):
-        """Build the recommendation prompt for Ollama"""
-        
-        # Build client profile
-        partner = client_data['partner']
-        client_profile = f"""
-CLIENT PROFILE:
-- Name: {partner.name}
-- Total Past Orders: {client_data['total_past_orders']}
-- Average Order Value: €{client_data['avg_order_value']:.2f}
-- Preferred Categories: {', '.join(client_data['preferred_categories']) if client_data['preferred_categories'] else 'None identified'}
-- Recent Budget History: {[f"€{budget:.2f}" for budget in client_data['past_budgets']]}
-"""
-        
-        # Build dietary restrictions section
-        dietary_info = ""
-        if dietary_restrictions:
-            dietary_info = f"\nDIETARY RESTRICTIONS: {', '.join(dietary_restrictions)}"
-        
-        # Build client notes section
-        notes_info = ""
-        if client_notes:
-            notes_info = f"\nCLIENT NOTES: {client_notes}"
-        
-        # Build available products section (limit to reasonable number for prompt)
-        products_info = "\nAVAILABLE PRODUCTS:\n"
-        for product in available_products[:50]:  # Limit to first 50 to avoid token limits
-            products_info += f"- Code: {product.default_code}, Name: {product.name}, Price: €{product.list_price:.2f}, Category: {product.lebiggot_category or 'N/A'}, Grade: {product.product_grade or 'N/A'}\n"
-        
-        if len(available_products) > 50:
-            products_info += f"... and {len(available_products) - 50} more products available.\n"
-        
-        # Build the full prompt
-        prompt = f"""
-Please recommend luxury gourmet products for this client with a budget of €{target_budget:.2f}.
-
-{client_profile}
-{dietary_info}
-{notes_info}
-{products_info}
-
-TASK: Select 6-8 products from the available list that would create an exceptional luxury gift composition for this client. Consider their history, preferences, budget, and any restrictions. Ensure the total cost is close to the target budget (within €{target_budget * 0.15:.2f}).
-
-Focus on creating a balanced composition with variety across categories while maintaining the luxury standard expected from Señor Bigott.
-"""
-        
-        return prompt
-    
-    def _parse_ollama_response(self, ollama_response, available_products, target_budget):
-        """Parse Ollama response and validate recommendations"""
-        
-        try:
-            # Try to extract JSON from response
-            json_match = re.search(r'\{.*\}', ollama_response, re.DOTALL)
-            if json_match:
-                response_data = json.loads(json_match.group())
-            else:
-                raise ValueError("No JSON found in response")
-            
-            # Validate required fields
-            if 'recommended_products' not in response_data:
-                raise ValueError("Missing recommended_products in response")
-            
-            # Get product objects by code
-            recommended_codes = response_data['recommended_products']
-            recommended_products = []
-            
-            # Create mapping of available products by code
-            products_by_code = {p.default_code: p for p in available_products if p.default_code}
-            
-            for code in recommended_codes:
-                if code in products_by_code:
-                    recommended_products.append(products_by_code[code])
-                else:
-                    _logger.warning(f"Product code {code} not found in available products")
-            
-            if not recommended_products:
-                raise ValueError("No valid products found in recommendations")
-            
-            # Calculate total cost
-            total_cost = sum(p.list_price for p in recommended_products)
-            
-            # Validate budget
-            budget_variance = abs(total_cost - target_budget) / target_budget
-            if budget_variance > 0.3:  # 30% tolerance for parsing
-                _logger.warning(f"Budget variance high: {budget_variance:.1%}")
-            
-            return {
-                'products': recommended_products,
-                'reasoning': response_data.get('reasoning', 'AI-generated recommendation'),
-                'confidence_score': min(1.0, max(0.0, response_data.get('confidence_score', 0.7))),
-                'total_cost': total_cost,
-                'composition_notes': response_data.get('composition_notes', ''),
-                'budget_variance': budget_variance
-            }
-            
-        except Exception as e:
-            _logger.error(f"Failed to parse Ollama response: {str(e)}")
-            _logger.debug(f"Ollama response was: {ollama_response}")
-            
-            # Return fallback result
-            return self._create_fallback_result(available_products, target_budget)
-    
-    def _create_fallback_result(self, available_products, target_budget):
-        """Create a fallback recommendation when Ollama parsing fails"""
-        
-        # Simple budget-based selection
-        selected_products = []
-        remaining_budget = target_budget
-        
-        # Sort products by category diversity
-        categories_used = set()
-        
-        for product in sorted(available_products, key=lambda p: p.list_price):
-            if len(selected_products) >= self.max_products:
-                break
-            
-            if product.list_price <= remaining_budget:
-                # Prefer products from unused categories
-                if product.lebiggot_category not in categories_used or len(selected_products) < 4:
-                    selected_products.append(product)
-                    remaining_budget -= product.list_price
-                    if product.lebiggot_category:
-                        categories_used.add(product.lebiggot_category)
-        
-        return {
-            'products': selected_products,
-            'reasoning': 'Fallback recommendation based on budget and category diversity',
-            'confidence_score': 0.5,
-            'total_cost': sum(p.list_price for p in selected_products),
-            'composition_notes': 'Generated using fallback algorithm',
-            'budget_variance': abs(sum(p.list_price for p in selected_products) - target_budget) / target_budget
-        }
-    
-    def _fallback_recommendation(self, partner, target_budget, available_products, dietary_restrictions):
+    def _generate_fallback_recommendation(self, partner, target_budget, client_notes, dietary_restrictions):
         """Fallback recommendation when Ollama is not available"""
         
-        fallback_result = self._create_fallback_result(available_products, target_budget)
+        # Get products
+        products = self._get_available_products(target_budget, dietary_restrictions)
+        if not products:
+            return {'success': False, 'error': 'No products available'}
         
-        # Create gift composition
-        composition = self._create_gift_composition(
-            partner, fallback_result, target_budget, 
-            None, dietary_restrictions, "Fallback recommendation (Ollama unavailable)"
-        )
+        # Smart selection algorithm
+        selected_products = self._select_products_intelligently(products, target_budget)
+        
+        if not selected_products:
+            return {'success': False, 'error': 'Could not select appropriate products'}
+        
+        total_cost = sum(p.list_price for p in selected_products)
+        confidence = min(0.75, 1 - abs(target_budget - total_cost) / target_budget)
+        
+        # Create composition
+        composition = self.env['gift.composition'].sudo().create({
+            'partner_id': partner.id,
+            'target_budget': target_budget,
+            'target_year': fields.Date.today().year,
+            'composition_type': 'ai_generated',
+            'product_ids': [(6, 0, [p.id for p in selected_products])],
+            'state': 'draft',
+            'client_notes': f"Auto-generated for {partner.name}. {client_notes}",
+            'confidence_score': confidence,
+            'dietary_restrictions': ', '.join(dietary_restrictions) if dietary_restrictions else None,
+            'reasoning': self._build_fallback_reasoning(selected_products, total_cost, target_budget)
+        })
+        
+        # Update tracking
+        self.sudo().write({
+            'total_recommendations': self.total_recommendations + 1,
+            'successful_recommendations': self.successful_recommendations + 1,
+            'last_recommendation_date': fields.Datetime.now()
+        })
         
         return {
             'success': True,
             'composition_id': composition.id,
-            'message': f"Generated fallback recommendation for {partner.name} (Ollama unavailable)",
-            'products': fallback_result['products'],
-            'total_cost': fallback_result['total_cost'],
-            'reasoning': fallback_result['reasoning'],
-            'confidence_score': fallback_result['confidence_score']
+            'products': selected_products,
+            'total_cost': total_cost,
+            'confidence_score': confidence,
+            'message': f'Generated {len(selected_products)} products for €{total_cost:.2f} (Rule-based)'
         }
     
-    def _create_gift_composition(self, partner, recommendation_result, target_budget, client_notes, dietary_restrictions, ollama_response):
-        """Create gift composition record"""
+    def _get_available_products(self, target_budget, dietary_restrictions):
+        """Get available products based on budget and restrictions"""
         
-        reasoning_html = f"""
-        <div class="ollama-recommendation">
-            <h4>🤖 Ollama AI Recommendation</h4>
-            <p><strong>Reasoning:</strong> {recommendation_result['reasoning']}</p>
-            <p><strong>Confidence Score:</strong> {recommendation_result['confidence_score']:.1%}</p>
-            <p><strong>Budget Variance:</strong> {recommendation_result.get('budget_variance', 0):.1%}</p>
-            {f"<p><strong>Composition Notes:</strong> {recommendation_result['composition_notes']}</p>" if recommendation_result.get('composition_notes') else ""}
+        domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>', 0),
+            ('list_price', '<=', target_budget * 0.5)  # No single product over 50% of budget
+        ]
+        
+        # Add dietary filters if needed
+        if dietary_restrictions:
+            # This would need custom fields on products
+            # For now, filter by name/description
+            pass
+        
+        products = self.env['product.template'].sudo().search(domain, limit=200)
+        
+        # Filter by stock availability
+        available = []
+        for product in products:
+            if product.qty_available > 0:
+                available.append(product)
+        
+        return available
+    
+    def _select_products_intelligently(self, products, target_budget):
+        """Intelligent product selection algorithm"""
+        
+        # Group products by price range
+        price_ranges = {
+            'premium': [],    # > 40% of budget
+            'mid': [],        # 20-40% of budget
+            'standard': [],   # 10-20% of budget
+            'small': []       # < 10% of budget
+        }
+        
+        for product in products:
+            price_ratio = product.list_price / target_budget
+            if price_ratio > 0.4:
+                price_ranges['premium'].append(product)
+            elif price_ratio > 0.2:
+                price_ranges['mid'].append(product)
+            elif price_ratio > 0.1:
+                price_ranges['standard'].append(product)
+            else:
+                price_ranges['small'].append(product)
+        
+        selected = []
+        total = 0
+        target = target_budget * 0.9  # Aim for 90% of budget
+        
+        # Strategy: 1 premium/mid + 2-3 standard + 1-2 small
+        
+        # Try to add one premium or mid-range item
+        if price_ranges['premium'] and total + price_ranges['premium'][0].list_price <= target:
+            item = random.choice(price_ranges['premium'][:5])
+            selected.append(item)
+            total += item.list_price
+        elif price_ranges['mid']:
+            item = random.choice(price_ranges['mid'][:5])
+            if total + item.list_price <= target:
+                selected.append(item)
+                total += item.list_price
+        
+        # Add standard items
+        for item in sorted(price_ranges['standard'], key=lambda x: x.list_price, reverse=True)[:10]:
+            if total + item.list_price <= target and item not in selected:
+                selected.append(item)
+                total += item.list_price
+                if len(selected) >= 3 and total >= target_budget * 0.75:
+                    break
+        
+        # Fill with small items if needed
+        for item in price_ranges['small'][:10]:
+            if total + item.list_price <= target_budget * 1.05 and item not in selected:
+                selected.append(item)
+                total += item.list_price
+                if len(selected) >= 5 or total >= target_budget * 0.85:
+                    break
+        
+        return selected
+    
+    def _build_fallback_reasoning(self, products, total_cost, target_budget):
+        """Build reasoning HTML for fallback recommendations"""
+        
+        categories = {}
+        for p in products:
+            cat = getattr(p, 'lebiggot_category', 'General')
+            categories[cat] = categories.get(cat, 0) + 1
+        
+        return f"""
+        <div style="padding: 20px; background: #f8f9fa; border-radius: 8px;">
+            <h3>📦 Smart Recommendation (Rule-based)</h3>
             
-            <details>
-                <summary>View Raw AI Response</summary>
-                <pre style="background: #f5f5f5; padding: 10px; margin: 10px 0; white-space: pre-wrap;">{ollama_response}</pre>
-            </details>
+            <div style="margin: 15px 0;">
+                <strong>Selection Method:</strong> Intelligent rule-based algorithm
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Products:</strong> {len(products)} items selected
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Total Cost:</strong> €{total_cost:.2f} of €{target_budget:.2f} 
+                ({(total_cost/target_budget*100):.1f}% budget usage)
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Categories:</strong> {', '.join([f"{cat} ({count})" for cat, count in categories.items()])}
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <strong>Strategy:</strong> Balanced selection with premium and accessible items for optimal gift experience.
+            </div>
         </div>
         """
+    
+    def _get_client_context(self, partner_id):
+        """Get client history context"""
+        try:
+            history = self.env['client.order.history'].sudo().search([
+                ('partner_id', '=', partner_id)
+            ], limit=3, order='order_year desc')
+            
+            if not history:
+                return "HISTORY: New client - no previous orders"
+            
+            context = "HISTORY:\n"
+            for h in history:
+                context += f"- {h.order_year}: €{h.total_budget:.0f} budget, {h.total_products} products\n"
+            
+            return context
+        except:
+            return "HISTORY: Not available"
+    
+    def _prepare_product_catalog(self, products, target_budget):
+        """Prepare product catalog for AI"""
         
-        composition = self.env['gift.composition'].create({
-            'partner_id': partner.id,
-            'target_year': datetime.now().year,
-            'target_budget': target_budget,
-            'composition_type': 'custom',
-            'product_ids': [(6, 0, [p.id for p in recommendation_result['products']])],
-            'dietary_restrictions': ','.join(dietary_restrictions or []),
-            'reasoning': reasoning_html,
-            'confidence_score': recommendation_result['confidence_score'],
-            'novelty_score': 0.8,  # Default for Ollama recommendations
-            'actual_cost': recommendation_result['total_cost'],
-            'state': 'draft'
-        })
+        catalog = []
+        for product in products[:50]:  # Limit to top 50 to avoid huge prompts
+            catalog.append({
+                'id': product.id,
+                'name': product.name[:50],  # Truncate long names
+                'price': product.list_price,
+                'category': getattr(product, 'lebiggot_category', 'general'),
+                'stock': product.qty_available
+            })
         
-        return composition
-
+        return json.dumps(catalog, indent=2)
+    
+    # Action methods for buttons
     def action_view_recommendations(self):
-        """View all gift compositions created by this recommender"""
+        """View all recommendations"""
         return {
             'type': 'ir.actions.act_window',
-            'name': 'Gift Recommendations',
+            'name': 'All Recommendations',
             'res_model': 'gift.composition',
             'view_mode': 'tree,form',
-            'domain': [('reasoning', 'ilike', 'Ollama AI Recommendation')],
+            'domain': [('composition_type', '=', 'ai_generated')],
             'context': {'search_default_partner_id': True}
         }
-
+    
     def action_view_successful_recommendations(self):
-        """View successful recommendations only"""
+        """View successful recommendations"""
         return {
             'type': 'ir.actions.act_window',
             'name': 'Successful Recommendations',
             'res_model': 'gift.composition',
             'view_mode': 'tree,form',
             'domain': [
-                ('reasoning', 'ilike', 'Ollama AI Recommendation'),
-                ('state', 'in', ['approved', 'delivered'])
-            ],
-            'context': {'search_default_partner_id': True}
+                ('composition_type', '=', 'ai_generated'),
+                ('state', 'in', ['confirmed', 'approved', 'delivered'])
+            ]
         }
