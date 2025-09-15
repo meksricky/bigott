@@ -28,18 +28,18 @@
         <field name="arch" type="xml">
             <form string="Gift Composition">
                 <header>
-                    <button name="action_confirm" string="Confirm" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
-                    <button name="action_approve" string="Approve" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'confirmed')]}"/>
-                    <button name="action_deliver" string="Mark as Delivered" type="object" class="oe_highlight" attrs="{'invisible': [('state', '!=', 'approved')]}"/>
-                    <button name="action_cancel" string="Cancel" type="object" attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/>
-                    <button name="action_reset_to_draft" string="Reset to Draft" type="object" attrs="{'invisible': [('state', '!=', 'cancelled')]}"/>
-                    <!-- <button name="action_confirm" string="Confirm" type="object" class="oe_highlight" 
-                            attrs="{'invisible': [('state', '!=', 'draft')]}"/> -->
                     <button name="action_regenerate" string="🔄 Regenerate" type="object" 
-                            attrs="{'invisible': [('state', '!=', 'draft')]}"/>
-                    <!-- <button name="action_approve" string="Approve" type="object" 
-                            attrs="{'invisible': [('state', '!=', 'confirmed')]}"/> -->
-                    <field name="state" widget="statusbar"/>
+                            class="btn-warning" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                    <button name="action_confirm" string="Confirm" type="object" 
+                            class="oe_highlight" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                    <button name="action_approve" string="Approve" type="object" 
+                            class="oe_highlight" attrs="{'invisible': [('state', '!=', 'confirmed')]}"/>
+                    <button name="action_deliver" string="Mark as Delivered" type="object" 
+                            attrs="{'invisible': [('state', '!=', 'approved')]}"/>
+                    <button name="action_cancel" string="Cancel" type="object" 
+                            attrs="{'invisible': [('state', 'in', ['delivered', 'cancelled'])]}"/>
+                    <button name="action_reset_to_draft" string="Reset to Draft" type="object" 
+                            attrs="{'invisible': [('state', '!=', 'cancelled')]}"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,approved,delivered"/>
                 </header>
                 
@@ -73,33 +73,13 @@
                     
                     <notebook>
                         <page string="Products" name="products">
-                            <!-- <field name="product_ids">
-                                <tree>
+                            <field name="product_ids" attrs="{'readonly': [('state', '!=', 'draft')]}">
+                                <tree editable="bottom" delete="true" create="true">
                                     <field name="default_code"/>
                                     <field name="name"/>
-                                    <field name="lebiggot_category"/>
-                                    <field name="product_grade"/>
-                                    <field name="brand"/>
-                                    <field name="list_price" widget="monetary"/>
-                                </tree>
-                            </field> -->
-
-                            <field name="product_ids" widget="many2many_tags" 
-                                options="{'no_create': True}"
-                                attrs="{'readonly': [('state', '!=', 'draft')]}">
-                                <tree editable="bottom">
-                                    <field name="default_code"/>
-                                    <field name="name"/>
-                                    <field name="lebiggot_category"/>
-                                    <field name="product_grade"/>
-                                    <field name="brand"/>
-                                    <field name="list_price" widget="monetary"/>
-                                    <button name="action_remove" string="Remove" type="object" icon="fa-trash-o"/>
+                                    <field name="list_price"/>
                                 </tree>
                             </field>
-                            
-                            <button name="action_add_product" string="➕ Add Product" type="object" 
-                                    class="btn-secondary" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
                         </page>
                         
                         <page string="Client Notes &amp; Restrictions" name="notes">
@@ -124,10 +104,6 @@
                         </page>
                     </notebook>
                 </sheet>
-                
-                <!-- REMOVED MAIL CHATTER TEMPORARILY -->
-                <!-- Will add back after module is installed -->
-                
             </form>
         </field>
     </record>
