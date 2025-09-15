@@ -53,3 +53,20 @@ class ResPartner(models.Model):
         except Exception as e:
             _logger.error(f"Recommendation failed: {str(e)}")
             raise UserError(f"Failed to generate recommendation: {str(e)}")
+
+    def action_open_recommendation_wizard(self):
+        """Open wizard with partner pre-selected"""
+        self.ensure_one()
+        
+        return {
+            'type': 'ir.actions.act_window',
+            'name': f'Generate Recommendation for {self.name}',
+            'res_model': 'ollama.recommendation.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_partner_id': self.id,
+                'active_model': 'res.partner',
+                'active_id': self.id,
+            }
+        }

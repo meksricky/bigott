@@ -150,19 +150,19 @@
         </field>
     </record>
 
-    <record id="view_partner_form_ollama_direct_button" model="ir.ui.view">
-        <field name="name">res.partner.form.ollama.direct.button</field>
+    <record id="view_partner_form_ollama_wizard_button" model="ir.ui.view">
+        <field name="name">res.partner.form.ollama.wizard.button</field>
         <field name="model">res.partner</field>
         <field name="inherit_id" ref="base.view_partner_form"/>
         <field name="arch" type="xml">
             <xpath expr="//div[@name='button_box']" position="inside">
                 <button class="oe_stat_button" 
                         type="object" 
-                        name="action_generate_ollama_recommendation"
+                        name="action_open_recommendation_wizard"
                         icon="fa-magic">
                     <div class="o_stat_info">
-                        <span class="o_stat_text">Quick AI</span>
-                        <span class="o_stat_text">Recommendation</span>
+                        <span class="o_stat_text">AI Gift</span>
+                        <span class="o_stat_text">Wizard</span>
                     </div>
                 </button>
             </xpath>
