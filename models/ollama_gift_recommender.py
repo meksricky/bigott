@@ -673,3 +673,19 @@ Return ONLY valid JSON:
                 ('state', 'in', ['confirmed', 'approved', 'delivered'])
             ]
         }
+
+    def trigger_learning(self):
+        """Placeholder for future machine learning functionality"""
+        self.ensure_one()
+        
+        # For now, just show a notification that this feature is coming soon
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': '🧠 Learning Module',
+                'message': 'Machine learning features are coming soon! This will analyze past recommendations to improve future suggestions.',
+                'type': 'info',
+                'sticky': False,
+            }
+        }
