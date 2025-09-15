@@ -281,14 +281,16 @@ class OllamaRecommendationWizard(models.TransientModel):
                     composition = self.env['gift.composition'].browse(
                         result['composition_id']
                     )
+                    
+                    # Calculate variance separately to avoid f-string formatting issues
+                    budget_variance = ((composition.actual_cost - self.target_budget) / self.target_budget * 100) if self.target_budget else 0
+                    
                     result_html += f"""
                     <div class="mt-3">
                         <strong>Composition:</strong> {composition.name}<br/>
                         <strong>Products:</strong> {len(composition.product_ids)} items<br/>
                         <strong>Total Cost:</strong> €{composition.actual_cost:.2f}<br/>
-                        <strong>Budget Variance:</strong> {
-                            ((composition.actual_cost - self.target_budget) / self.target_budget * 100):.1f
-                        }%
+                        <strong>Budget Variance:</strong> {budget_variance:.1f}%
                     </div>
                     """
                 
@@ -319,15 +321,18 @@ class OllamaRecommendationWizard(models.TransientModel):
                 raise UserError(_("Generation failed. Please try again."))
                 
         except Exception as e:
+            error_msg = str(e)
+            error_html = f"""
+            <div class="alert alert-danger">
+                <h4>✗ Generation Failed</h4>
+                <p>{error_msg}</p>
+            </div>
+            """
+            
             self.write({
                 'state': 'error',
-                'error_message': str(e),
-                'result_message': f"""
-                <div class="alert alert-danger">
-                    <h4>✗ Generation Failed</h4>
-                    <p>{str(e)}</p>
-                </div>
-                """
+                'error_message': error_msg,
+                'result_message': error_html
             })
             _logger.exception("Recommendation generation error")
             raise
