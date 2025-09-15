@@ -89,46 +89,39 @@ class GiftComposition(models.Model):
                 record.budget_variance = 0.0
     
     def action_regenerate(self):
-        """Regenerate the composition - create a new recommendation wizard"""
+        """Regenerate the recommendation"""
         self.ensure_one()
         
-        if self.state != 'draft':
-            raise UserError("Can only regenerate compositions in draft state.")
+        # Get recommender
+        recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
         
-        # Check if Ollama recommender exists
-        recommender = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
-        if not recommender:
-            raise UserError("No active Ollama recommender found. Please configure one first.")
+        # Generate new recommendation
+        result = recommender.generate_gift_recommendations(
+            partner_id=self.partner_id.id,
+            target_budget=self.target_budget,
+            client_notes=self.client_notes,
+            dietary_restrictions=self.dietary_restrictions.split(',') if self.dietary_restrictions else []
+        )
         
-        # Create and open a new recommendation wizard with pre-filled data
-        wizard = self.env['ollama.recommendation.wizard'].create({
-            'partner_id': self.partner_id.id,
-            'target_budget': self.target_budget,
-            'target_year': self.target_year,
-            'client_notes': self.client_notes,
-            'dietary_restrictions': self.dietary_restrictions,
-            'recommender_id': recommender.id,
-        })
-        
-        # Mark this composition for replacement
-        self.message_post(body="Regenerating composition - a new recommendation will be generated.")
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': 'Regenerate Gift Recommendation',
-            'res_model': 'ollama.recommendation.wizard',
-            'res_id': wizard.id,
-            'view_mode': 'form',
-            'target': 'new',
-            'context': {
-                'default_partner_id': self.partner_id.id,
-                'default_target_budget': self.target_budget,
-                'default_target_year': self.target_year,
-                'default_client_notes': self.client_notes,
-                'default_dietary_restrictions': self.dietary_restrictions,
-                'regenerating_composition_id': self.id,
+        if result.get('success'):
+            # Update this composition with new products
+            self.write({
+                'product_ids': [(6, 0, [p.id for p in result.get('products', [])])],
+                'confidence_score': result.get('confidence_score', 0.75),
+                'reasoning': result.get('reasoning', 'Regenerated recommendation')
+            })
+            
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Success',
+                    'message': 'Recommendation regenerated successfully',
+                    'type': 'success',
+                }
             }
-        }
+        
+        raise UserError('Failed to regenerate recommendation')
     
     def action_confirm(self):
         """Confirm the composition"""
