@@ -6,7 +6,12 @@
         <field name="model">ollama.recommendation.wizard</field>
         <field name="arch" type="xml">
             <form string="AI-Powered Gift Recommendation">
+                <!-- Hidden fields needed for attrs conditions -->
                 <field name="state" invisible="1"/>
+                <field name="composition_id" invisible="1"/>
+                <field name="use_ollama" invisible="1"/>
+                <field name="recommended_products" invisible="1"/>
+                
                 <sheet>
                     <!-- Header based on state -->
                     <div attrs="{'invisible': [('state', '!=', 'generating')]}" class="alert alert-info">
@@ -30,7 +35,7 @@
                     <group>
                         <group string="Client Information">
                             <field name="partner_id" 
-                                   options="{'no_create': True}"
+                                   options="{'no_create': True}" 
                                    attrs="{'readonly': [('state', '!=', 'draft')]}"/>
                             <field name="target_year" 
                                    attrs="{'readonly': [('state', '!=', 'draft')]}"/>
@@ -42,15 +47,13 @@
                                    attrs="{'readonly': [('state', '!=', 'draft')]}"/>
                             <field name="engine_type" 
                                    attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                            <field name="use_ollama" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
                         </group>
                     </group>
                     
                     <group string="Special Requirements">
                         <field name="client_notes" 
                                nolabel="1" 
-                               placeholder="Any special preferences, occasion details, or requirements..."
+                               placeholder="Any special preferences, occasion details, or requirements..." 
                                attrs="{'readonly': [('state', '!=', 'draft')]}"/>
                     </group>
                     
@@ -62,14 +65,12 @@
                     
                     <!-- Results Section -->
                     <notebook attrs="{'invisible': [('state', '!=', 'done')]}">
-                        <page string="Recommended Products" 
-                              attrs="{'invisible': [('recommended_products', '=', [])]}">
-                            <field name="recommended_products">
+                        <page string="Recommended Products">
+                            <field name="recommended_products" mode="tree">
                                 <tree>
                                     <field name="name"/>
                                     <field name="default_code"/>
                                     <field name="list_price"/>
-                                    <field name="lebiggot_category"/>
                                 </tree>
                             </field>
                             <group>
@@ -96,7 +97,7 @@
                             name="action_test_connection" 
                             type="object" 
                             class="btn-secondary"
-                            attrs="{'invisible': ['|', ('state', '!=', 'draft'), ('use_ollama', '=', False)]}"/>
+                            attrs="{'invisible': [('state', '!=', 'draft')]}"/>
                     
                     <!-- Done State Actions -->
                     <button string="View Composition" 
