@@ -35,6 +35,19 @@ class RecommendationLearning(models.Model):
     source_sale_ids = fields.Many2many('sale.order', string='Source Sales Orders')
     source_composition_ids = fields.Many2many('gift.composition', string='Source Compositions')
     learning_notes = fields.Text('Learning Notes')
+
+    def _get_budget_range(self, budget):
+        """Categorize budget into ranges"""
+        if budget < 100:
+            return 'small'
+        elif budget < 250:
+            return 'medium'
+        elif budget < 500:
+            return 'large'
+        elif budget < 1000:
+            return 'xlarge'
+        else:
+            return 'premium'
     
     @api.model
     def learn_from_sales(self):
