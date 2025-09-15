@@ -654,3 +654,51 @@ Return ONLY valid JSON:
         ])
         
         return sum(stock_quants.mapped('available_quantity')) > 0
+
+    def trigger_learning(self):
+        """Placeholder for learning trigger"""
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Learning',
+                'message': 'Learning feature not yet implemented',
+                'type': 'info',
+            }
+        }
+
+    def action_view_learning_analytics(self):
+        """View analytics placeholder"""
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Analytics',
+                'message': 'Analytics feature not yet implemented',
+                'type': 'info',
+            }
+        }
+
+    def action_view_recommendations(self):
+        """View all recommendations"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'All Recommendations',
+            'res_model': 'gift.composition',
+            'view_mode': 'tree,form',
+            'domain': [('composition_type', '=', 'ai_generated')],
+            'context': {'search_default_partner_id': True}
+        }
+
+    def action_view_successful_recommendations(self):
+        """View successful recommendations"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Successful Recommendations',
+            'res_model': 'gift.composition',
+            'view_mode': 'tree,form',
+            'domain': [
+                ('composition_type', '=', 'ai_generated'),
+                ('state', 'in', ['confirmed', 'approved', 'delivered'])
+            ]
+        }
