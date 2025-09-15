@@ -178,10 +178,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     # === MAIN ACTION METHOD ===
     
     def action_generate_recommendation(self):
-        """
-        Main generation method - uses working logic from composition wizard
-        but enhanced with Ollama capabilities
-        """
+        """Generate recommendation without composition.engine dependency"""
         self.ensure_one()
         
         # Validation
@@ -191,101 +188,39 @@ class OllamaRecommendationWizard(models.TransientModel):
         if self.target_budget <= 0:
             raise ValidationError(_("Target budget must be greater than 0"))
         
-        if self.target_budget > 10000:
-            raise ValidationError(_("Budget seems unusually high. Please verify."))
-        
         try:
             # Update state
             self.write({'state': 'generating'})
-            self.env.cr.commit()  # Show state change immediately
+            self.env.cr.commit()
             
             # Parse dietary restrictions
             dietary_list = self._parse_dietary_restrictions()
             
-            # Determine which engine to use
-            use_ollama = False
-            if self.engine_type == 'ollama':
-                use_ollama = True
-            elif self.engine_type == 'hybrid':
-                use_ollama = True  # Try Ollama first, fallback to standard
-            elif self.engine_type == 'auto':
-                # Auto-detect: use Ollama if available and configured
-                use_ollama = self.use_ollama and self.recommender_id
+            # Get recommender
+            if not self.recommender_id:
+                self.recommender_id = self._get_or_create_recommender()
             
-            result = None
+            # Generate using recommender
+            result = self.recommender_id.generate_gift_recommendations(
+                partner_id=self.partner_id.id,
+                target_budget=self.target_budget,
+                client_notes=self.client_notes or '',
+                dietary_restrictions=dietary_list
+            )
             
-            # Try Ollama first if selected
-            if use_ollama and self.recommender_id:
-                try:
-                    _logger.info("Attempting Ollama AI generation...")
-                    result = self.recommender_id.generate_gift_recommendations(
-                        partner_id=self.partner_id.id,
-                        target_budget=self.target_budget,
-                        client_notes=self.client_notes or '',
-                        dietary_restrictions=dietary_list
-                    )
-                    if result.get('success'):
-                        _logger.info("Ollama generation successful")
-                except Exception as e:
-                    _logger.warning(f"Ollama failed: {e}")
-                    if self.engine_type == 'ollama':
-                        raise UserError(_(
-                            "AI generation failed: %s\n"
-                            "Try using 'Auto-Select' or 'Standard' engine instead."
-                        ) % str(e))
-            
-            # Fallback to composition engine if needed
-            if not result or not result.get('success'):
-                _logger.info("Using standard composition engine...")
-                
-                # Use the working composition engine logic
-                engine = self.env['composition.engine']
-                if not engine:
-                    raise UserError(_("No composition engine available"))
-                
-                comp_result = engine.generate_composition(
-                    partner_id=self.partner_id.id,
-                    target_budget=self.target_budget,
-                    target_year=self.target_year,
-                    dietary_restrictions=dietary_list,
-                    notes_text=self.client_notes or ''
-                )
-                
-                if comp_result and comp_result.get('composition_id'):
-                    composition = self.env['gift.composition'].browse(
-                        comp_result['composition_id']
-                    )
-                    
-                    # Convert to standard result format
-                    result = {
-                        'success': True,
-                        'composition_id': composition.id,
-                        'products': composition.product_ids,
-                        'total_cost': composition.actual_cost,
-                        'confidence_score': 0.85,  # Default confidence
-                        'message': 'Composition generated successfully'
-                    }
-                else:
-                    raise UserError(_("Failed to generate composition"))
-            
-            # Process successful result
             if result and result.get('success'):
-                # Prepare result HTML
-                result_html = f"""
-                <div class="alert alert-success">
-                    <h4>✓ Recommendation Generated Successfully!</h4>
-                </div>
-                """
-                
-                if result.get('composition_id'):
-                    composition = self.env['gift.composition'].browse(
-                        result['composition_id']
-                    )
+                # Process successful result
+                composition_id = result.get('composition_id')
+                if composition_id:
+                    composition = self.env['gift.composition'].browse(composition_id)
                     
-                    # Calculate variance separately to avoid f-string formatting issues
+                    # Calculate variance
                     budget_variance = ((composition.actual_cost - self.target_budget) / self.target_budget * 100) if self.target_budget else 0
                     
-                    result_html += f"""
+                    result_html = f"""
+                    <div class="alert alert-success">
+                        <h4>✓ Recommendation Generated Successfully!</h4>
+                    </div>
                     <div class="mt-3">
                         <strong>Composition:</strong> {composition.name}<br/>
                         <strong>Products:</strong> {len(composition.product_ids)} items<br/>
@@ -293,33 +228,30 @@ class OllamaRecommendationWizard(models.TransientModel):
                         <strong>Budget Variance:</strong> {budget_variance:.1f}%
                     </div>
                     """
-                
-                # Update wizard with results
-                self.write({
-                    'state': 'done',
-                    'composition_id': result.get('composition_id'),
-                    'recommended_products': [(6, 0, [
-                        p.id for p in result.get('products', [])
-                    ])],
-                    'total_cost': result.get('total_cost', 0),
-                    'confidence_score': result.get('confidence_score', 0),
-                    'result_message': result_html
-                })
-                
-                # Return refreshed view
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Gift Recommendation Results',
-                    'res_model': 'ollama.recommendation.wizard',
-                    'res_id': self.id,
-                    'view_mode': 'form',
-                    'target': 'new',
-                    'context': {'show_results': True}
-                }
+                    
+                    # Update wizard
+                    self.write({
+                        'state': 'done',
+                        'composition_id': composition_id,
+                        'recommended_products': [(6, 0, composition.product_ids.ids)],
+                        'total_cost': composition.actual_cost,
+                        'confidence_score': result.get('confidence_score', 0.85),
+                        'result_message': result_html
+                    })
+                    
+                    return {
+                        'type': 'ir.actions.act_window',
+                        'name': 'Gift Recommendation Results',
+                        'res_model': 'ollama.recommendation.wizard',
+                        'res_id': self.id,
+                        'view_mode': 'form',
+                        'target': 'new',
+                        'context': {'show_results': True}
+                    }
             
-            else:
-                raise UserError(_("Generation failed. Please try again."))
-                
+            # If we get here, generation failed
+            raise UserError(_("Failed to generate recommendations"))
+            
         except Exception as e:
             error_msg = str(e)
             error_html = f"""
