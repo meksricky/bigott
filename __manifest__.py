@@ -49,7 +49,8 @@ Features:
         'data/cron_jobs.xml',
         
         # Views
-        'wizard/ollama_recommendation_wizard_views.xml',
+        # 'wizard/ollama_recommendation_wizard_views.xml',
+        'wizard/composition_wizard_views.xml',
         'views/product_template_views.xml',
         'views/gift_composition_views.xml',
         'views/ollama_gift_recommender_views.xml', 
