@@ -75,57 +75,171 @@ class CompositionEngine(models.Model):
         
         return available_products
 
-    def generate_composition(self, partner_id, target_budget, target_year=None,
-                            dietary_restrictions=None, force_type=None, notes_text=None):
-        if not target_year:
-            target_year = datetime.now().year
-
-        client_analysis = self._enhanced_client_analysis(partner_id)
-        processed_notes = self._process_client_notes(notes_text, client_analysis)
-
-        if force_type:
-            composition_type = force_type
-        elif client_analysis['has_history']:
-            composition_type = client_analysis['box_type_preference']
-        else:
-            composition_type = 'experience'
-
-        if composition_type == 'experience':
-            draft = self._generate_experience_composition(
-                partner_id, target_budget, target_year,
-                dietary_restrictions, client_analysis, processed_notes
+    def generate_composition(self, partner_id, target_budget, target_year, 
+                            dietary_restrictions=None, notes_text=''):
+        """Generate composition with STRICT notes enforcement"""
+        
+        # CRITICAL: Parse notes FIRST
+        parser = self.env['notes.parser']
+        notes_requirements = parser.parse_client_notes(notes_text)
+        
+        _logger.info(f"Parsed notes requirements: {notes_requirements}")
+        
+        # If notes specify exact requirements, follow them STRICTLY
+        if notes_requirements.get('mandatory_count'):
+            return self._generate_from_notes_requirements(
+                partner_id, target_budget, notes_requirements, dietary_restrictions
             )
-        else:
-            draft = self._generate_custom_composition(
-                partner_id, target_budget, target_year,
-                dietary_restrictions, client_analysis, processed_notes
+        
+        # Otherwise use historical structure
+        return self._generate_from_history(
+            partner_id, target_budget, target_year, 
+            dietary_restrictions, notes_requirements
+        )
+
+    def _generate_from_notes_requirements(self, partner_id, target_budget, 
+                                        notes_requirements, dietary_restrictions):
+        """Generate EXACTLY what notes specify"""
+        
+        mandatory_count = notes_requirements['mandatory_count']
+        categories_required = notes_requirements.get('categories_required', {})
+        preferences = notes_requirements.get('preferences', {})
+        
+        _logger.info(f"Generating EXACTLY {mandatory_count} products as specified in notes")
+        
+        selected_products = []
+        
+        # 1. First, fulfill specific category requirements
+        for category, count in categories_required.items():
+            cat_products = self._select_best_products(
+                category=category,
+                count=count,
+                budget_per_item=target_budget / mandatory_count,
+                preferences=preferences,
+                dietary_restrictions=dietary_restrictions
             )
-
-        # At this point `draft` is a gift.composition record
-        draft_products = draft.product_ids
-
-        # === Apply deterministic rules ===
-        Rules = self.env.get('business.rules.engine')
-        rule_notes = []
-        if Rules and hasattr(Rules, 'apply_composition_rules'):
-            final_products, picked_experience, rule_notes = Rules.apply_composition_rules(
-                partner_id=partner_id,
-                target_year=target_year,
-                draft_products=draft_products,
-                picked_experience=getattr(draft, 'experience_id', None)
+            selected_products.extend(cat_products)
+        
+        # 2. Fill remaining slots
+        remaining_slots = mandatory_count - len(selected_products)
+        if remaining_slots > 0:
+            # Distribute remaining budget
+            spent = sum(p.list_price for p in selected_products)
+            remaining_budget = target_budget - spent
+            avg_per_item = remaining_budget / remaining_slots if remaining_slots > 0 else 0
+            
+            # Select products based on preferences
+            if preferences.get('loves_sweets'):
+                # Add more sweets
+                sweet_products = self._select_best_products(
+                    category='COMIDA/DULCES',
+                    count=min(remaining_slots, remaining_slots // 2),
+                    budget_per_item=avg_per_item,
+                    preferences=preferences,
+                    dietary_restrictions=dietary_restrictions
+                )
+                selected_products.extend(sweet_products)
+                remaining_slots -= len(sweet_products)
+            
+            # Fill any remaining with balanced selection
+            if remaining_slots > 0:
+                balanced = self._select_balanced_products(
+                    count=remaining_slots,
+                    budget_per_item=avg_per_item,
+                    preferences=preferences,
+                    dietary_restrictions=dietary_restrictions,
+                    exclude_ids=[p.id for p in selected_products]
+                )
+                selected_products.extend(balanced)
+        
+        # 3. CRITICAL: Ensure we have EXACTLY the requested count
+        if len(selected_products) > mandatory_count:
+            # Remove cheapest items
+            selected_products.sort(key=lambda p: p.list_price)
+            selected_products = selected_products[-mandatory_count:]
+        elif len(selected_products) < mandatory_count:
+            # Add more items
+            gap = mandatory_count - len(selected_products)
+            additional = self._find_filler_products(
+                count=gap,
+                max_budget=target_budget * 0.2,  # Don't exceed budget too much
+                exclude_ids=[p.id for p in selected_products]
             )
-            draft.write({
-                'product_ids': [(6, 0, final_products.ids)],
-                'experience_id': picked_experience.id if picked_experience else False,
-                'rationale_json': json.dumps(rule_notes, ensure_ascii=False),
-            })
-
+            selected_products.extend(additional)
+        
+        # 4. Final budget adjustment
+        total_cost = sum(p.list_price for p in selected_products)
+        budget_variance = abs(total_cost - target_budget) / target_budget
+        
+        # Only adjust if outside acceptable range
+        flexibility = notes_requirements.get('budget_flexibility', 0.10)
+        if budget_variance > flexibility:
+            selected_products = self._optimize_for_budget(
+                selected_products, target_budget, flexibility
+            )
+        
+        # Create composition
+        final_cost = sum(p.list_price for p in selected_products)
+        
+        composition = self.env['gift.composition'].create({
+            'partner_id': partner_id,
+            'target_year': target_year,
+            'target_budget': target_budget,
+            'actual_cost': final_cost,
+            'product_ids': [(6, 0, [p.id for p in selected_products])],
+            'state': 'draft',
+            'notes': notes_text,
+            'reasoning': f"Generated exactly {len(selected_products)} products as requested. {notes_text}"
+        })
+        
+        _logger.info(f"Created composition with EXACTLY {len(selected_products)} products as requested")
+        
         return {
-            'composition_id': draft.id,
-            'products': draft.product_ids,
-            'experience': getattr(draft, 'experience_id', False),
-            'rule_notes': rule_notes,
+            'composition_id': composition.id,
+            'success': True,
+            'products': selected_products,
+            'total_cost': final_cost,
+            'product_count': len(selected_products)
         }
+
+    def _ensure_budget_compliance_strict(self, products, target_budget):
+        """Ensure composition is within +/- 5% of target budget"""
+        
+        if not products:
+            return products
+        
+        current_cost = sum(p.list_price for p in products)
+        min_budget = target_budget * 0.95  # -5%
+        max_budget = target_budget * 1.05  # +5%
+        
+        # If over budget, remove most expensive items
+        while current_cost > max_budget and products:
+            products.sort(key=lambda p: p.list_price, reverse=True)
+            removed = products.pop(0)
+            current_cost -= removed.list_price
+        
+        # If under budget, try to add more items to reach minimum
+        if current_cost < min_budget:
+            available_products = self._get_available_products_with_stock([
+                ('active', '=', True),
+                ('sale_ok', '=', True),
+                ('list_price', '>', 0),
+                ('id', 'not in', [p.id for p in products])
+            ])
+            
+            # Sort by price to find items that fit
+            available_products = sorted(available_products, key=lambda p: p.list_price)
+            
+            for product in available_products:
+                if current_cost + product.list_price <= max_budget:
+                    products.append(product)
+                    current_cost += product.list_price
+                    
+                    # Stop when we reach acceptable range
+                    if current_cost >= min_budget:
+                        break
+        
+        return products
     
     def _enhanced_client_analysis(self, partner_id):
         """Enhanced client analysis that extracts deeper insights"""
