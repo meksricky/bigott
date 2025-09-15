@@ -194,41 +194,37 @@ class OllamaGiftRecommender(models.Model):
                     'message': f'Recommendation failed: {str(e)}'
                 }
 
-    def _generate_basic_recommendation(self, partner_id, target_budget):
-        """Ultra-simple fallback when everything else fails"""
+    def _generate_basic_recommendation(self, partner_id, target_budget, client_notes=''):
+        """Basic fallback with notes support"""
         
-        # Just get some products in budget range
         products = self.env['product.template'].sudo().search([
             ('sale_ok', '=', True),
-            ('list_price', '>', target_budget * 0.1),
-            ('list_price', '<', target_budget * 0.4)
-        ], limit=5)
-        
-        if not products:
-            products = self.env['product.template'].sudo().search([
-                ('sale_ok', '=', True),
-                ('list_price', '>', 0)
-            ], limit=5)
+            ('list_price', '>', target_budget * 0.05),
+            ('list_price', '<', target_budget * 0.40)
+        ], limit=20)
         
         if products:
+            selected = self._select_products_intelligently(products, target_budget)
+            
             composition = self.env['gift.composition'].sudo().create({
                 'partner_id': partner_id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
                 'composition_type': 'ai_generated',
-                'product_ids': [(6, 0, products.ids)],
+                'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
-                'client_notes': 'Basic recommendation (fallback mode)',
-                'confidence_score': 0.5
+                'client_notes': client_notes,  # Include notes
+                'confidence_score': 0.5,
+                'reasoning': 'Generated using basic recommendation (fallback mode)'
             })
             
             return {
                 'success': True,
                 'composition_id': composition.id,
-                'products': products,
-                'total_cost': sum(products.mapped('list_price')),
+                'products': selected,
+                'total_cost': sum(p.list_price for p in selected),
                 'confidence_score': 0.5,
-                'message': 'Basic recommendation generated'
+                'message': f'Generated {len(selected)} products for budget €{target_budget}'
             }
         
         return {'success': False, 'error': 'No products available'}
@@ -458,29 +454,21 @@ Return ONLY valid JSON with this exact structure:
         }
     
     def _get_available_products(self, target_budget, dietary_restrictions):
-        """Get diverse products for budget"""
+        """Get products without arbitrary limits"""
         
-        # Better price ranges based on budget
-        if target_budget < 100:
-            min_price = 5
-            max_price = target_budget * 0.5
-        elif target_budget < 200:
-            min_price = 10
-            max_price = target_budget * 0.45
-        else:
-            min_price = 15
-            max_price = target_budget * 0.40
+        # Minimum product price - at least €10
+        min_price = max(10, target_budget * 0.02)
         
         domain = [
             ('sale_ok', '=', True),
             ('list_price', '>=', min_price),
-            ('list_price', '<=', max_price),
+            ('list_price', '<=', target_budget * 0.8),  # No single product over 80% of budget
         ]
         
-        # Get products
-        products = self.env['product.template'].sudo().search(domain, limit=500, order='list_price DESC')
+        # Get ALL matching products
+        products = self.env['product.template'].sudo().search(domain, limit=1000)
         
-        # Filter by stock if field exists
+        # Filter by stock if available
         available = []
         for product in products:
             if hasattr(product, 'qty_available'):
@@ -489,12 +477,12 @@ Return ONLY valid JSON with this exact structure:
             else:
                 available.append(product)
         
-        _logger.info(f"Found {len(available)} products for budget €{target_budget} (€{min_price:.2f}-€{max_price:.2f})")
+        _logger.info(f"Found {len(available)} products >= €{min_price:.2f}")
         
         return available
 
     def _select_products_intelligently(self, products, target_budget):
-        """Select products to match budget within 5%"""
+        """Select products to use 90-95% of budget"""
         import random
         
         if not products:
@@ -503,61 +491,53 @@ Return ONLY valid JSON with this exact structure:
         # Target 90-95% of budget
         min_target = target_budget * 0.90
         max_target = target_budget * 0.95
-        ideal_target = target_budget * 0.92
         
-        # Filter products by reasonable price range
-        min_price = target_budget * 0.05  # At least 5% of budget
-        max_price = target_budget * 0.45  # Max 45% of budget
+        # Filter out very cheap products (under €10 or 2% of budget, whichever is higher)
+        min_acceptable_price = max(10, target_budget * 0.02)
         
-        suitable_products = [
-            p for p in products 
-            if min_price <= p.list_price <= max_price
-        ]
-        
+        suitable_products = [p for p in products if p.list_price >= min_acceptable_price]
         if not suitable_products:
-            # If no products in ideal range, use all available
-            suitable_products = list(products)
+            suitable_products = products
         
-        _logger.info(f"Found {len(suitable_products)} products in price range €{min_price:.2f}-€{max_price:.2f}")
+        # Randomize for variety
+        random.shuffle(suitable_products)
         
-        # Try multiple combinations to find best fit
+        # Try to build best combination
         best_combination = []
         best_total = 0
-        best_variance = 1.0
         
-        # Try 10 random combinations
-        for attempt in range(10):
-            random.shuffle(suitable_products)
+        # Try multiple random combinations
+        for attempt in range(5):
             combo = []
             total = 0
+            products_copy = suitable_products.copy()
+            random.shuffle(products_copy)
             
-            # Build combination
-            for product in suitable_products:
+            for product in products_copy:
                 if total + product.list_price <= max_target:
                     combo.append(product)
                     total += product.list_price
-                    
-                    # Check if we're in the sweet spot
-                    if min_target <= total <= max_target and len(combo) >= 3:
-                        variance = abs(total - ideal_target) / target_budget
-                        if variance < best_variance:
-                            best_combination = combo.copy()
-                            best_total = total
-                            best_variance = variance
             
-            # If this attempt is better than our best, keep it
-            if not best_combination and combo:
-                if abs(total - ideal_target) < abs(best_total - ideal_target):
-                    best_combination = combo.copy()
+            # Keep the best combination (closest to target)
+            if min_target <= total <= max_target:
+                if abs(total - (target_budget * 0.92)) < abs(best_total - (target_budget * 0.92)):
+                    best_combination = combo
                     best_total = total
         
-        # If still no good combination, build one deterministically
-        if not best_combination or best_total < min_target:
-            best_combination = self._build_optimal_combination(suitable_products, target_budget)
-            best_total = sum(p.list_price for p in best_combination)
+        # If no good combination found, build one greedily
+        if best_total < min_target:
+            best_combination = []
+            best_total = 0
+            
+            # Sort by price descending
+            sorted_products = sorted(suitable_products, key=lambda p: p.list_price, reverse=True)
+            
+            for product in sorted_products:
+                if best_total + product.list_price <= max_target:
+                    best_combination.append(product)
+                    best_total += product.list_price
         
-        _logger.info(f"Selected {len(best_combination)} products for €{best_total:.2f} "
-                    f"(target: €{target_budget:.2f}, variance: {((best_total/target_budget-1)*100):.1f}%)")
+        _logger.info(f"Selected {len(best_combination)} products for €{best_total:.2f} of €{target_budget:.2f}")
         
         return best_combination
 
@@ -798,5 +778,21 @@ Return ONLY valid JSON with this exact structure:
         """Manually trigger AI learning"""
         self.ensure_one()
         learning = self.env['recommendation.learning'].sudo()
-        result = learning.manual_trigger_learning()
-        return result
+        
+        # Count what we have
+        sales = self.env['sale.order'].search_count([('state', 'in', ['sale', 'done'])])
+        compositions = self.env['gift.composition'].search_count([])
+        
+        # Run learning
+        if learning.learn_from_sales:
+            learning.learn_from_sales()
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Learning Complete',
+                'message': f'Analyzed {sales} sales and {compositions} compositions',
+                'type': 'success',
+            }
+        }

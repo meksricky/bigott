@@ -114,3 +114,52 @@ class GiftComposition(models.Model):
         self.confirmation_date = False
         self.delivery_date = False
         self.message_post(body="Gift composition reset to draft.")
+
+    def action_regenerate(self):
+        """Regenerate the recommendation"""
+        self.ensure_one()
+        
+        # Get recommender
+        recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
+        
+        # Generate new recommendation
+        result = recommender.generate_gift_recommendations(
+            partner_id=self.partner_id.id,
+            target_budget=self.target_budget,
+            client_notes=self.client_notes,
+            dietary_restrictions=self.dietary_restrictions.split(',') if self.dietary_restrictions else []
+        )
+        
+        if result.get('success'):
+            # Update this composition with new products
+            self.write({
+                'product_ids': [(6, 0, [p.id for p in result.get('products', [])])],
+                'confidence_score': result.get('confidence_score', 0.75),
+                'reasoning': result.get('reasoning', 'Regenerated recommendation')
+            })
+            
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Success',
+                    'message': 'Recommendation regenerated successfully',
+                    'type': 'success',
+                }
+            }
+        
+        raise UserError('Failed to regenerate recommendation')
+
+    def action_add_product(self):
+        """Open wizard to add products"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Add Products',
+            'res_model': 'product.template',
+            'view_mode': 'tree',
+            'target': 'new',
+            'context': {
+                'composition_id': self.id,
+            },
+            'domain': [('sale_ok', '=', True)],
+        }
