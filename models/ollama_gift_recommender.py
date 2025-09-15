@@ -48,6 +48,17 @@ class OllamaGiftRecommender(models.Model):
                 record.success_rate = (record.successful_recommendations / record.total_recommendations) * 100
             else:
                 record.success_rate = 0.0
+
+    @api.model
+    def get_or_create_recommender(self):
+        """Get existing recommender or create new one"""
+        recommender = self.search([('active', '=', True)], limit=1)
+        if not recommender:
+            recommender = self.create({
+                'name': 'Default Ollama Gift Recommender',
+                'ollama_enabled': False  # Start with fallback mode until Ollama is configured
+            })
+        return recommender
     
     def test_ollama_connection(self):
         """Test connection to Ollama service"""
