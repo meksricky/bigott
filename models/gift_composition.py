@@ -1,6 +1,7 @@
 # models/gift_composition.py
 
 from odoo import models, fields, api
+from odoo.exceptions import UserError
 from datetime import datetime
 
 class GiftComposition(models.Model):
@@ -33,11 +34,11 @@ class GiftComposition(models.Model):
     
     # Composition Metadata
     target_year = fields.Integer(string="Target Year", default=lambda self: datetime.now().year)
-    dietary_restrictions = fields.Text(string="Dietary Restrictions")  # NO ondelete here!
-    client_notes = fields.Text(string="Client Notes")  # NO ondelete here!
+    dietary_restrictions = fields.Text(string="Dietary Restrictions")
+    client_notes = fields.Text(string="Client Notes")
     
     # AI/Recommendation Data
-    reasoning = fields.Html(string="Recommendation Reasoning")  # NO ondelete here!
+    reasoning = fields.Html(string="Recommendation Reasoning")
     confidence_score = fields.Float(string="Confidence Score", default=0.0)
     novelty_score = fields.Float(string="Novelty Score", default=0.0)
     
@@ -86,6 +87,48 @@ class GiftComposition(models.Model):
                 record.budget_variance = variance
             else:
                 record.budget_variance = 0.0
+    
+    def action_regenerate(self):
+        """Regenerate the composition - create a new recommendation wizard"""
+        self.ensure_one()
+        
+        if self.state != 'draft':
+            raise UserError("Can only regenerate compositions in draft state.")
+        
+        # Check if Ollama recommender exists
+        recommender = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
+        if not recommender:
+            raise UserError("No active Ollama recommender found. Please configure one first.")
+        
+        # Create and open a new recommendation wizard with pre-filled data
+        wizard = self.env['ollama.recommendation.wizard'].create({
+            'partner_id': self.partner_id.id,
+            'target_budget': self.target_budget,
+            'target_year': self.target_year,
+            'client_notes': self.client_notes,
+            'dietary_restrictions': self.dietary_restrictions,
+            'recommender_id': recommender.id,
+        })
+        
+        # Mark this composition for replacement
+        self.message_post(body="Regenerating composition - a new recommendation will be generated.")
+        
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Regenerate Gift Recommendation',
+            'res_model': 'ollama.recommendation.wizard',
+            'res_id': wizard.id,
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_partner_id': self.partner_id.id,
+                'default_target_budget': self.target_budget,
+                'default_target_year': self.target_year,
+                'default_client_notes': self.client_notes,
+                'default_dietary_restrictions': self.dietary_restrictions,
+                'regenerating_composition_id': self.id,
+            }
+        }
     
     def action_confirm(self):
         """Confirm the composition"""
