@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
+    <!-- Root menu for this module -->
+    <menuitem id="menu_senor_bigott_root" name="Señor Bigott AI" sequence="10"/>
+
     <!-- Tree View -->
     <record id="view_recommendation_learning_tree" model="ir.ui.view">
         <field name="name">recommendation.learning.tree</field>
@@ -34,7 +37,6 @@
                             <field name="preferred_price_range"/>
                         </group>
                     </group>
-                    
                     <notebook>
                         <page string="Source Sales" name="sources">
                             <group string="Learning Sources">
@@ -90,11 +92,11 @@
         <field name="res_model">recommendation.learning</field>
         <field name="view_mode">tree,form</field>
     </record>
-    
-    <!-- Menu -->
+
+    <!-- Child menu under our root -->
     <menuitem id="menu_recommendation_learning"
               name="AI Learning"
-              parent="menu_ollama_analytics"
+              parent="menu_senor_bigott_root"
               action="action_recommendation_learning"
               sequence="10"/>
 </odoo>
