@@ -8,12 +8,12 @@ class GiftComposition(models.Model):
     _description = 'Gift Composition'
     _order = 'create_date desc'
     _rec_name = 'display_name'
-    _inherit = ['mail.thread', 'mail.activity.mixin']  # Add this line
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     
     # Basic Information
     name = fields.Char(string="Name", compute='_compute_name', store=True)
     display_name = fields.Char(string="Display Name", compute='_compute_display_name')
-    partner_id = fields.Many2one('res.partner', string="Client", required=True, tracking=True)
+    partner_id = fields.Many2one('res.partner', string="Client", required=True, tracking=True, ondelete='cascade')
     
     # Composition Details
     composition_type = fields.Selection([
@@ -33,11 +33,11 @@ class GiftComposition(models.Model):
     
     # Composition Metadata
     target_year = fields.Integer(string="Target Year", default=lambda self: datetime.now().year)
-    dietary_restrictions = fields.Text(string="Dietary Restrictions")
-    client_notes = fields.Text(string="Client Notes")
+    dietary_restrictions = fields.Text(string="Dietary Restrictions")  # NO ondelete here!
+    client_notes = fields.Text(string="Client Notes")  # NO ondelete here!
     
     # AI/Recommendation Data
-    reasoning = fields.Html(string="Recommendation Reasoning")
+    reasoning = fields.Html(string="Recommendation Reasoning")  # NO ondelete here!
     confidence_score = fields.Float(string="Confidence Score", default=0.0)
     novelty_score = fields.Float(string="Novelty Score", default=0.0)
     
@@ -48,7 +48,7 @@ class GiftComposition(models.Model):
         ('approved', 'Approved'),
         ('delivered', 'Delivered'),
         ('cancelled', 'Cancelled')
-    ], string="Status", default='draft', tracking=True)  # Add tracking=True
+    ], string="Status", default='draft', tracking=True)
     
     # Timestamps
     confirmation_date = fields.Datetime(string="Confirmation Date")
@@ -58,7 +58,8 @@ class GiftComposition(models.Model):
     def _compute_name(self):
         for record in self:
             if record.partner_id:
-                record.name = f"{record.partner_id.name} - {record.target_year} - {record.composition_type.title()}"
+                type_str = dict(self._fields['composition_type'].selection).get(record.composition_type, '')
+                record.name = f"{record.partner_id.name} - {record.target_year} - {type_str}"
             else:
                 record.name = f"Gift Composition - {record.target_year}"
     
@@ -88,78 +89,45 @@ class GiftComposition(models.Model):
     
     def action_confirm(self):
         """Confirm the composition"""
-        self.state = 'confirmed'
-        self.confirmation_date = fields.Datetime.now()
+        self.ensure_one()
+        self.write({
+            'state': 'confirmed',
+            'confirmation_date': fields.Datetime.now()
+        })
         self.message_post(body="Gift composition confirmed.")
+        return True
     
     def action_approve(self):
         """Approve the composition"""
-        self.state = 'approved'
+        self.ensure_one()
+        self.write({'state': 'approved'})
         self.message_post(body="Gift composition approved.")
+        return True
     
     def action_deliver(self):
         """Mark as delivered"""
-        self.state = 'delivered'
-        self.delivery_date = fields.Datetime.now()
+        self.ensure_one()
+        self.write({
+            'state': 'delivered',
+            'delivery_date': fields.Datetime.now()
+        })
         self.message_post(body="Gift composition delivered.")
+        return True
     
     def action_cancel(self):
         """Cancel the composition"""
-        self.state = 'cancelled'
+        self.ensure_one()
+        self.write({'state': 'cancelled'})
         self.message_post(body="Gift composition cancelled.")
+        return True
     
     def action_reset_to_draft(self):
         """Reset to draft"""
-        self.state = 'draft'
-        self.confirmation_date = False
-        self.delivery_date = False
-        self.message_post(body="Gift composition reset to draft.")
-
-    def action_regenerate(self):
-        """Regenerate the recommendation"""
         self.ensure_one()
-        
-        # Get recommender
-        recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
-        
-        # Generate new recommendation
-        result = recommender.generate_gift_recommendations(
-            partner_id=self.partner_id.id,
-            target_budget=self.target_budget,
-            client_notes=self.client_notes,
-            dietary_restrictions=self.dietary_restrictions.split(',') if self.dietary_restrictions else []
-        )
-        
-        if result.get('success'):
-            # Update this composition with new products
-            self.write({
-                'product_ids': [(6, 0, [p.id for p in result.get('products', [])])],
-                'confidence_score': result.get('confidence_score', 0.75),
-                'reasoning': result.get('reasoning', 'Regenerated recommendation')
-            })
-            
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Success',
-                    'message': 'Recommendation regenerated successfully',
-                    'type': 'success',
-                }
-            }
-        
-        raise UserError('Failed to regenerate recommendation')
-
-    def action_add_product(self):
-        """Open wizard to add products"""
-        return {
-            'type': 'ir.actions.act_window',
-            'name': 'Add Products',
-            'res_model': 'product.template',
-            'view_mode': 'tree',
-            'target': 'new',
-            'context': {
-                'composition_id': self.id,
-            },
-            'domain': [('sale_ok', '=', True)],
-        }
+        self.write({
+            'state': 'draft',
+            'confirmation_date': False,
+            'delivery_date': False
+        })
+        self.message_post(body="Gift composition reset to draft.")
+        return True
