@@ -2,7 +2,7 @@
 from odoo import models, fields, api
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _logger = logging.getLogger(__name__)
 
