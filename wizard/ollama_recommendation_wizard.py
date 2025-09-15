@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 # wizard/ollama_recommendation_wizard.py
+# HYBRID VERSION - Combining working composition wizard logic with Ollama features
 
-from odoo import models, fields, api
+from odoo import models, fields, api, _
 from odoo.exceptions import UserError, ValidationError
+import json
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -10,262 +12,355 @@ _logger = logging.getLogger(__name__)
 
 class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
-    _description = 'Ollama Gift Recommendation Wizard'
+    _description = 'AI-Powered Gift Recommendation Wizard'
 
-    # --- Currency for Monetary fields ---
-    currency_id = fields.Many2one(
-        'res.currency',
-        default=lambda self: self.env.company.currency_id,
-        required=True
-    )
-
-    # --- Client ---
+    # === BASIC FIELDS (from composition wizard that works) ===
     partner_id = fields.Many2one(
-        'res.partner',
-        string="Client",
-        required=True
-    )
-
-    # --- Budget ---
-    target_budget = fields.Monetary(
-        string="Target Budget",
+        'res.partner', 
+        string='Client', 
         required=True,
-        default=100.0,
-        currency_field='currency_id'
+        domain="[('is_company', '=', False)]"  # Only individuals
     )
-
-    # --- Notes & Dietary ---
-    client_notes = fields.Text(string="Client Notes")
-    dietary_restrictions = fields.Text(
-        string="Dietary Restrictions",
-        help="Comma-separated: vegan, halal, gluten_free, non_alcoholic"
+    
+    target_year = fields.Integer(
+        string='Target Year', 
+        required=True,
+        default=lambda self: fields.Date.context_today(self).year
     )
-    is_vegan = fields.Boolean(string="Vegan")
-    is_halal = fields.Boolean(string="Halal")
-    is_gluten_free = fields.Boolean(string="Gluten Free")
-    is_non_alcoholic = fields.Boolean(string="Non-Alcoholic")
-
-    # --- Engine ---
+    
+    target_budget = fields.Float(
+        string='Target Budget (€)', 
+        required=True, 
+        default=200.0
+    )
+    
+    # === DIETARY RESTRICTIONS (enhanced) ===
+    dietary_restrictions = fields.Selection([
+        ('none', 'None'),
+        ('vegan', 'Vegan'),
+        ('halal', 'Halal'),
+        ('non_alcoholic', 'Non-Alcoholic'),
+        ('gluten_free', 'Gluten Free'),
+        ('vegan_halal', 'Vegan + Halal'),
+        ('vegan_non_alcoholic', 'Vegan + Non-Alcoholic'),
+        ('halal_non_alcoholic', 'Halal + Non-Alcoholic'),
+        ('all_restrictions', 'All Restrictions')
+    ], string='Dietary Restrictions', default='none')
+    
+    # === OLLAMA SPECIFIC FIELDS ===
+    use_ollama = fields.Boolean(
+        string='Use AI Assistant', 
+        default=True,
+        help='Use Ollama AI for intelligent recommendations'
+    )
+    
     recommender_id = fields.Many2one(
         'ollama.gift.recommender',
-        string="Recommender",
-        default=lambda self: self._default_recommender()
+        string='AI Recommender',
+        default=lambda self: self._get_or_create_recommender()
     )
-
-    # --- State & Results ---
+    
+    client_notes = fields.Text(
+        string='Special Requirements',
+        placeholder='Any special preferences, occasion details, or requirements...'
+    )
+    
+    # === ENGINE SELECTION ===
+    engine_type = fields.Selection([
+        ('auto', 'Auto-Select (Recommended)'),
+        ('ollama', 'Ollama AI Engine'),
+        ('composition', 'Standard Composition Engine'),
+        ('hybrid', 'Hybrid (AI + Business Rules)')
+    ], string='Engine Type', default='auto')
+    
+    # === STATE MANAGEMENT ===
     state = fields.Selection([
         ('draft', 'Draft'),
         ('generating', 'Generating...'),
         ('done', 'Complete'),
-        ('error', 'Error'),
-    ], default='draft')
-
-    result_message = fields.Text(readonly=True)
+        ('error', 'Error')
+    ], default='draft', readonly=True)
+    
+    # === RESULTS FIELDS ===
     composition_id = fields.Many2one('gift.composition', readonly=True)
+    recommended_products = fields.Many2many(
+        'product.template', 
+        string='Recommended Products', 
+        readonly=True
+    )
+    total_cost = fields.Float(string='Total Cost', readonly=True)
+    confidence_score = fields.Float(string='AI Confidence', readonly=True)
+    result_message = fields.Html(string='Results', readonly=True)
     error_message = fields.Text(readonly=True)
-
-    recommended_products = fields.Many2many('product.template', string="Recommended Products", readonly=True)
-    total_cost = fields.Monetary(string="Total Cost", readonly=True, currency_field='currency_id')
-    confidence_score = fields.Float(string="Confidence Score", readonly=True)
-
+    
+    # === CLIENT INTELLIGENCE (from composition wizard) ===
+    client_info = fields.Html(
+        string='Client Intelligence', 
+        compute='_compute_client_info'
+    )
+    
+    # === HELPER METHODS ===
+    
     @api.model
-    def default_get(self, fields_list):
-        """Override default_get to handle context values properly"""
-        res = super().default_get(fields_list)
+    def _get_or_create_recommender(self):
+        """Get existing or create default recommender"""
+        recommender = self.env['ollama.gift.recommender'].search([
+            ('active', '=', True)
+        ], limit=1)
         
-        # Get partner from context
-        if 'partner_id' not in res:
-            # Try different context keys
-            partner_id = self._context.get('default_partner_id') or \
-                        self._context.get('active_id') if self._context.get('active_model') == 'res.partner' else False
-            
-            if partner_id:
-                res['partner_id'] = partner_id
-                
-        return res
-
-    @api.model
-    def _default_recommender(self):
-        """Get or create a default recommender"""
-        rec = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
-        if not rec:
-            rec = self.env['ollama.gift.recommender'].create({
-                'name': 'Default Ollama Recommender',
+        if not recommender:
+            recommender = self.env['ollama.gift.recommender'].create({
+                'name': 'Default AI Recommender',
                 'active': True
             })
-        return rec
-
-    @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
-    def _onchange_dietary_checkboxes(self):
-        """Update dietary restrictions based on checkboxes"""
-        toggles = []
-        if self.is_vegan:
-            toggles.append('vegan')
-        if self.is_halal:
-            toggles.append('halal')
-        if self.is_gluten_free:
-            toggles.append('gluten_free')
-        if self.is_non_alcoholic:
-            toggles.append('non_alcoholic')
-
-        if toggles:
-            existing = []
-            if self.dietary_restrictions:
-                existing = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
-            all_restrictions = list(set(existing + toggles))
-            self.dietary_restrictions = ', '.join(sorted(all_restrictions))
-
-    @api.constrains('target_budget')
-    def _check_target_budget(self):
-        """Validate budget constraints"""
-        for rec in self:
-            if rec.target_budget <= 0:
-                raise ValidationError("Target budget must be greater than 0.")
-            if rec.target_budget > 1_000_000:
-                raise ValidationError("Target budget seems unusually high. Please confirm.")
-
+        return recommender.id
+    
+    @api.depends('partner_id', 'target_budget')
+    def _compute_client_info(self):
+        """Compute client intelligence display (working logic from composition wizard)"""
+        for wizard in self:
+            if not wizard.partner_id:
+                wizard.client_info = "<p>Select a client to see their information</p>"
+                continue
+            
+            # Build client profile HTML
+            info_html = f"<h4>{wizard.partner_id.name}</h4>"
+            
+            # Get purchase history
+            history = self.env['client.order.history'].search([
+                ('partner_id', '=', wizard.partner_id.id)
+            ], order='order_year desc', limit=5)
+            
+            if history:
+                info_html += "<h5>Purchase History:</h5><ul>"
+                for h in history:
+                    info_html += f"""
+                    <li>
+                        <strong>{h.order_year}:</strong> 
+                        €{h.total_budget:.2f} - {h.box_type or 'Standard'} box
+                    </li>
+                    """
+                info_html += "</ul>"
+                
+                # Average budget
+                avg_budget = sum(h.total_budget for h in history) / len(history)
+                if wizard.target_budget and avg_budget:
+                    variance = ((wizard.target_budget - avg_budget) / avg_budget) * 100
+                    if variance > 20:
+                        info_html += f"""
+                        <div class='alert alert-info'>
+                            Budget is {variance:.0f}% higher than average (€{avg_budget:.2f})
+                        </div>
+                        """
+                    elif variance < -20:
+                        info_html += f"""
+                        <div class='alert alert-warning'>
+                            Budget is {abs(variance):.0f}% lower than average (€{avg_budget:.2f})
+                        </div>
+                        """
+            else:
+                info_html += "<p><em>New client - no purchase history</em></p>"
+            
+            wizard.client_info = info_html
+    
+    def _parse_dietary_restrictions(self):
+        """Parse dietary restrictions into list format"""
+        if self.dietary_restrictions == 'none':
+            return []
+        elif self.dietary_restrictions == 'all_restrictions':
+            return ['vegan', 'halal', 'non_alcoholic', 'gluten_free']
+        elif '_' in self.dietary_restrictions:
+            # Handle combined restrictions
+            return self.dietary_restrictions.split('_')
+        else:
+            return [self.dietary_restrictions]
+    
+    # === MAIN ACTION METHOD ===
+    
     def action_generate_recommendation(self):
-        """SIMPLIFIED: Generate gift recommendations using Ollama"""
+        """
+        Main generation method - uses working logic from composition wizard
+        but enhanced with Ollama capabilities
+        """
         self.ensure_one()
-
-        # Simple partner check - no complex resolution
+        
+        # Validation
         if not self.partner_id:
-            raise UserError("Please select a client.")
-
-        if not self.recommender_id:
-            # Try to create one
-            self.recommender_id = self._default_recommender()
-            if not self.recommender_id:
-                raise UserError("No recommender available. Please configure an Ollama recommender first.")
-
-        _logger.info("Generating recommendation for partner %s with budget %s", 
-                    self.partner_id.name, self.target_budget)
-
+            raise UserError(_("Please select a client"))
+        
+        if self.target_budget <= 0:
+            raise ValidationError(_("Target budget must be greater than 0"))
+        
+        if self.target_budget > 10000:
+            raise ValidationError(_("Budget seems unusually high. Please verify."))
+        
         try:
-            # Set state to generating
+            # Update state
             self.write({'state': 'generating'})
-            self.env.cr.commit()  # Commit to show the state change
+            self.env.cr.commit()  # Show state change immediately
             
             # Parse dietary restrictions
-            dietary = []
-            if self.dietary_restrictions:
-                dietary = [r.strip() for r in self.dietary_restrictions.split(',') if r.strip()]
-
-            # ALTERNATIVE: Use composition engine directly if Ollama fails
-            try:
-                # Try Ollama first
-                result = self.recommender_id.generate_gift_recommendations(
-                    partner_id=self.partner_id.id,
-                    target_budget=self.target_budget,
-                    client_notes=self.client_notes or '',
-                    dietary_restrictions=dietary
-                )
-            except Exception as ollama_error:
-                _logger.warning("Ollama failed, falling back to composition engine: %s", ollama_error)
-                
-                # Fallback to composition engine
-                composition_engine = self.env['composition.engine']
-                if composition_engine:
-                    comp_result = composition_engine.generate_composition(
+            dietary_list = self._parse_dietary_restrictions()
+            
+            # Determine which engine to use
+            use_ollama = False
+            if self.engine_type == 'ollama':
+                use_ollama = True
+            elif self.engine_type == 'hybrid':
+                use_ollama = True  # Try Ollama first, fallback to standard
+            elif self.engine_type == 'auto':
+                # Auto-detect: use Ollama if available and configured
+                use_ollama = self.use_ollama and self.recommender_id
+            
+            result = None
+            
+            # Try Ollama first if selected
+            if use_ollama and self.recommender_id:
+                try:
+                    _logger.info("Attempting Ollama AI generation...")
+                    result = self.recommender_id.generate_gift_recommendations(
                         partner_id=self.partner_id.id,
                         target_budget=self.target_budget,
-                        target_year=fields.Date.today().year,
-                        dietary_restrictions=dietary,
-                        notes_text=self.client_notes or ''
+                        client_notes=self.client_notes or '',
+                        dietary_restrictions=dietary_list
+                    )
+                    if result.get('success'):
+                        _logger.info("Ollama generation successful")
+                except Exception as e:
+                    _logger.warning(f"Ollama failed: {e}")
+                    if self.engine_type == 'ollama':
+                        raise UserError(_(
+                            "AI generation failed: %s\n"
+                            "Try using 'Auto-Select' or 'Standard' engine instead."
+                        ) % str(e))
+            
+            # Fallback to composition engine if needed
+            if not result or not result.get('success'):
+                _logger.info("Using standard composition engine...")
+                
+                # Use the working composition engine logic
+                engine = self.env['composition.engine']
+                if not engine:
+                    raise UserError(_("No composition engine available"))
+                
+                comp_result = engine.generate_composition(
+                    partner_id=self.partner_id.id,
+                    target_budget=self.target_budget,
+                    target_year=self.target_year,
+                    dietary_restrictions=dietary_list,
+                    notes_text=self.client_notes or ''
+                )
+                
+                if comp_result and comp_result.get('composition_id'):
+                    composition = self.env['gift.composition'].browse(
+                        comp_result['composition_id']
                     )
                     
-                    if comp_result and comp_result.get('composition_id'):
-                        composition = self.env['gift.composition'].browse(comp_result['composition_id'])
-                        result = {
-                            'success': True,
-                            'composition_id': composition.id,
-                            'products': composition.product_ids,
-                            'total_cost': composition.actual_cost,
-                            'confidence_score': 0.75,
-                            'message': 'Generated using fallback engine'
-                        }
-                    else:
-                        raise UserError("Both Ollama and fallback engine failed")
+                    # Convert to standard result format
+                    result = {
+                        'success': True,
+                        'composition_id': composition.id,
+                        'products': composition.product_ids,
+                        'total_cost': composition.actual_cost,
+                        'confidence_score': 0.85,  # Default confidence
+                        'message': 'Composition generated successfully'
+                    }
                 else:
-                    raise ollama_error
-
-            if result.get('success'):
+                    raise UserError(_("Failed to generate composition"))
+            
+            # Process successful result
+            if result and result.get('success'):
+                # Prepare result HTML
+                result_html = f"""
+                <div class="alert alert-success">
+                    <h4>✓ Recommendation Generated Successfully!</h4>
+                </div>
+                """
+                
+                if result.get('composition_id'):
+                    composition = self.env['gift.composition'].browse(
+                        result['composition_id']
+                    )
+                    result_html += f"""
+                    <div class="mt-3">
+                        <strong>Composition:</strong> {composition.name}<br/>
+                        <strong>Products:</strong> {len(composition.product_ids)} items<br/>
+                        <strong>Total Cost:</strong> €{composition.actual_cost:.2f}<br/>
+                        <strong>Budget Variance:</strong> {
+                            ((composition.actual_cost - self.target_budget) / self.target_budget * 100):.1f
+                        }%
+                    </div>
+                    """
+                
                 # Update wizard with results
-                update_vals = {
+                self.write({
                     'state': 'done',
-                    'result_message': result.get('message', 'Recommendations generated successfully'),
                     'composition_id': result.get('composition_id'),
-                    'total_cost': result.get('total_cost', 0.0),
-                    'confidence_score': result.get('confidence_score', 0.0)
-                }
+                    'recommended_products': [(6, 0, [
+                        p.id for p in result.get('products', [])
+                    ])],
+                    'total_cost': result.get('total_cost', 0),
+                    'confidence_score': result.get('confidence_score', 0),
+                    'result_message': result_html
+                })
                 
-                # Add recommended products
-                products = result.get('products', [])
-                if products:
-                    update_vals['recommended_products'] = [(6, 0, [p.id for p in products])]
-                
-                self.write(update_vals)
-
-                # Return action to show results
+                # Return refreshed view
                 return {
                     'type': 'ir.actions.act_window',
-                    'name': 'Recommendation Results',
+                    'name': 'Gift Recommendation Results',
                     'res_model': 'ollama.recommendation.wizard',
                     'res_id': self.id,
                     'view_mode': 'form',
                     'target': 'new',
-                    'context': {'show_results': True},
+                    'context': {'show_results': True}
                 }
-
+            
             else:
-                # Handle failure
-                error_msg = result.get('error', 'Unknown error occurred')
-                self.write({
-                    'state': 'error',
-                    'error_message': error_msg,
-                    'result_message': result.get('message', 'Recommendation generation failed')
-                })
-                raise UserError(f"Recommendation failed: {result.get('message', error_msg)}")
-
+                raise UserError(_("Generation failed. Please try again."))
+                
         except Exception as e:
-            # Handle unexpected errors
             self.write({
                 'state': 'error',
-                'error_message': str(e)
+                'error_message': str(e),
+                'result_message': f"""
+                <div class="alert alert-danger">
+                    <h4>✗ Generation Failed</h4>
+                    <p>{str(e)}</p>
+                </div>
+                """
             })
-            _logger.exception("Recommendation wizard error: %s", e)
+            _logger.exception("Recommendation generation error")
             raise
-
+    
     def action_view_composition(self):
         """Open the generated composition"""
         self.ensure_one()
         if not self.composition_id:
-            raise UserError("No composition generated yet.")
+            raise UserError(_("No composition generated yet"))
         
         return {
             'type': 'ir.actions.act_window',
-            'name': f'Gift Composition for {self.partner_id.name or ""}',
+            'name': f'Gift Composition - {self.partner_id.name}',
             'res_model': 'gift.composition',
             'res_id': self.composition_id.id,
             'view_mode': 'form',
-            'target': 'current',
+            'target': 'current'
         }
-
+    
     def action_generate_another(self):
-        """Create a new wizard with same parameters"""
+        """Reset and generate another"""
         self.ensure_one()
         
+        # Create new wizard with same parameters
         new_wizard = self.create({
-            'currency_id': self.currency_id.id,
             'partner_id': self.partner_id.id,
+            'target_year': self.target_year,
             'target_budget': self.target_budget,
-            'client_notes': self.client_notes,
             'dietary_restrictions': self.dietary_restrictions,
-            'is_vegan': self.is_vegan,
-            'is_halal': self.is_halal,
-            'is_gluten_free': self.is_gluten_free,
-            'is_non_alcoholic': self.is_non_alcoholic,
+            'client_notes': self.client_notes,
+            'use_ollama': self.use_ollama,
             'recommender_id': self.recommender_id.id,
+            'engine_type': self.engine_type
         })
         
         return {
@@ -274,28 +369,25 @@ class OllamaRecommendationWizard(models.TransientModel):
             'res_model': 'ollama.recommendation.wizard',
             'res_id': new_wizard.id,
             'view_mode': 'form',
-            'target': 'new',
+            'target': 'new'
         }
-
-    def action_test_recommender_connection(self):
-        """Test the Ollama connection"""
+    
+    def action_test_connection(self):
+        """Test Ollama connection"""
         self.ensure_one()
         
         if not self.recommender_id:
-            raise UserError("Please select a recommender first.")
+            self.recommender_id = self._get_or_create_recommender()
         
         result = self.recommender_id.test_ollama_connection()
-        
-        title = 'Connection Test Successful' if result.get('success') else 'Connection Test Failed'
-        level = 'success' if result.get('success') else 'danger'
         
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': title,
+                'title': 'Connection Test',
                 'message': result.get('message', 'Test completed'),
-                'type': level,
-                'sticky': not result.get('success'),
+                'type': 'success' if result.get('success') else 'danger',
+                'sticky': False
             }
         }
