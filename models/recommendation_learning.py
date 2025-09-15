@@ -38,44 +38,140 @@ class RecommendationLearning(models.Model):
     
     @api.model
     def learn_from_sales(self):
-        """Analyze sales and update learning patterns"""
+        """Analyze sales and store actionable patterns"""
         
-        # Track which sales we're learning from
+        # Get successful sales
         sale_orders = self.env['sale.order'].search([
             ('state', 'in', ['sale', 'done']),
-            ('amount_total', '>', 0),
-            ('date_order', '>=', fields.Datetime.now() - timedelta(days=365))
+            ('amount_total', '>', 0)
+        ], limit=1000)  # Limit for performance
+        
+        # Get successful compositions
+        compositions = self.env['gift.composition'].search([
+            ('state', 'in', ['confirmed', 'approved', 'delivered']),
+            ('actual_cost', '>', 0)
         ])
         
-        _logger.info(f"Learning from {len(sale_orders)} sales orders")
+        _logger.info(f"Learning from {len(sale_orders)} sales and {len(compositions)} compositions")
         
         patterns = {
-            'category_frequency': {},
-            'price_patterns': {},
-            'product_combinations': [],
+            'products_used': {},
             'budget_patterns': {},
-            'source_sales': []
+            'category_frequency': {},
+            'successful_combinations': [],
+            'source_sales': [],
+            'source_compositions': [],
+            'stats': {
+                'total_sales_analyzed': len(sale_orders),
+                'total_compositions_analyzed': len(compositions),
+                'date_analyzed': str(fields.Datetime.now())
+            }
         }
         
-        for order in sale_orders:
-            # Record this sale as a source
+        # Analyze compositions (more relevant for gift recommendations)
+        for comp in compositions:
+            # Track source
+            patterns['source_compositions'].append({
+                'id': comp.id,
+                'name': comp.display_name,
+                'partner': comp.partner_id.name,
+                'budget': comp.target_budget,
+                'actual_cost': comp.actual_cost,
+                'product_count': len(comp.product_ids),
+                'products': [p.name for p in comp.product_ids]
+            })
+            
+            # Analyze budget patterns
+            budget_range = self._get_budget_range(comp.target_budget)
+            if budget_range not in patterns['budget_patterns']:
+                patterns['budget_patterns'][budget_range] = {
+                    'count': 0,
+                    'avg_products': 0,
+                    'avg_variance': 0,
+                    'product_counts': []
+                }
+            
+            patterns['budget_patterns'][budget_range]['count'] += 1
+            patterns['budget_patterns'][budget_range]['product_counts'].append(len(comp.product_ids))
+            
+            # Track product usage
+            for product in comp.product_ids:
+                if product.id not in patterns['products_used']:
+                    patterns['products_used'][product.id] = {
+                        'name': product.name,
+                        'price': product.list_price,
+                        'usage_count': 0,
+                        'in_successful_orders': []
+                    }
+                patterns['products_used'][product.id]['usage_count'] += 1
+                patterns['products_used'][product.id]['in_successful_orders'].append(comp.display_name)
+        
+        # Calculate averages for budget patterns
+        for budget_range, data in patterns['budget_patterns'].items():
+            if data['product_counts']:
+                data['avg_products'] = int(sum(data['product_counts']) / len(data['product_counts']))
+                data['optimal_product_count'] = data['avg_products']
+        
+        # Analyze sales orders
+        for order in sale_orders[:500]:  # Limit to first 500
             patterns['source_sales'].append({
-                'sale_id': order.id,
-                'sale_name': order.name,
+                'id': order.id,
+                'name': order.name,
                 'partner': order.partner_id.name,
                 'date': str(order.date_order),
                 'total': order.amount_total
             })
             
-            # Analyze product patterns
+            # Track products from sales
             for line in order.order_line:
-                if line.product_id:
+                if line.product_id and line.product_id.product_tmpl_id:
                     product = line.product_id.product_tmpl_id
-                    cat = getattr(product, 'lebiggot_category', 'general')
-                    patterns['category_frequency'][cat] = patterns['category_frequency'].get(cat, 0) + 1
+                    if product.id not in patterns['products_used']:
+                        patterns['products_used'][product.id] = {
+                            'name': product.name,
+                            'price': product.list_price,
+                            'usage_count': 0,
+                            'in_successful_orders': []
+                        }
+                    patterns['products_used'][product.id]['usage_count'] += 1
         
-        # Store learned patterns with source tracking
-        self._store_patterns_with_sources(patterns, sale_orders)
+        # Find most successful product combinations
+        for comp in compositions[:20]:  # Top 20 compositions
+            if comp.budget_variance > -10:  # Good budget match
+                patterns['successful_combinations'].append({
+                    'products': [p.name for p in comp.product_ids],
+                    'budget': comp.target_budget,
+                    'variance': comp.budget_variance,
+                    'confidence': comp.confidence_score
+                })
+        
+        # Store patterns
+        learning = self.search([('pattern_type', '=', 'general')], limit=1)
+        if not learning:
+            learning = self.create({'pattern_type': 'general'})
+        
+        # Calculate optimal product count from patterns
+        all_product_counts = []
+        for data in patterns['budget_patterns'].values():
+            all_product_counts.extend(data['product_counts'])
+        
+        optimal_count = int(sum(all_product_counts) / len(all_product_counts)) if all_product_counts else 4
+        
+        learning.write({
+            'pattern_data': json.dumps(patterns, default=str),
+            'optimal_product_count': optimal_count,
+            'source_sale_ids': [(6, 0, sale_orders[:100].ids)],  # Link first 100 sales
+            'source_composition_ids': [(6, 0, compositions[:50].ids)],  # Link first 50 compositions
+            'last_updated': fields.Datetime.now(),
+            'learning_notes': f"""
+            Learned from {len(sale_orders)} sales and {len(compositions)} compositions.
+            Found {len(patterns['products_used'])} unique products used.
+            Identified {len(patterns['successful_combinations'])} successful combinations.
+            Average products per composition: {optimal_count}
+            """
+        })
+        
+        _logger.info(f"Learning complete: {optimal_count} optimal products, {len(patterns['products_used'])} products tracked")
         
         return True
 

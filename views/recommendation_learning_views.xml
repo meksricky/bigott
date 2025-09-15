@@ -37,12 +37,28 @@
                     
                     <notebook>
                         <page string="Source Sales" name="sources">
+                            <group string="Learning Sources">
+                                <field name="learning_notes" readonly="1" colspan="2"/>
+                            </group>
+                            <separator string="Sales Orders Used for Learning"/>
                             <field name="source_sale_ids" readonly="1">
                                 <tree>
                                     <field name="name"/>
                                     <field name="partner_id"/>
                                     <field name="date_order"/>
-                                    <field name="amount_total"/>
+                                    <field name="amount_total" sum="Total"/>
+                                    <field name="state"/>
+                                </tree>
+                            </field>
+                            <separator string="Gift Compositions Used for Learning"/>
+                            <field name="source_composition_ids" readonly="1">
+                                <tree>
+                                    <field name="display_name"/>
+                                    <field name="partner_id"/>
+                                    <field name="target_budget"/>
+                                    <field name="actual_cost"/>
+                                    <field name="budget_variance" widget="percentage"/>
+                                    <field name="product_count"/>
                                 </tree>
                             </field>
                         </page>

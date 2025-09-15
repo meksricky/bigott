@@ -796,3 +796,20 @@ Return ONLY valid JSON with this exact structure:
                 'type': 'success',
             }
         }
+
+    def action_view_learning_analytics(self):
+        """View detailed learning analytics"""
+        self.ensure_one()
+        
+        learning = self.env['recommendation.learning'].search([('pattern_type', '=', 'general')], limit=1)
+        if not learning:
+            raise UserError("No learning data available. Please trigger learning first.")
+        
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Learning Analytics',
+            'res_model': 'recommendation.learning',
+            'res_id': learning.id,
+            'view_mode': 'form',
+            'target': 'current',
+        }
