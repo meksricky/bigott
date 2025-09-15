@@ -62,7 +62,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     
     client_notes = fields.Text(
         string='Special Requirements',
-        placeholder='Any special preferences, occasion details, or requirements...'
+        help='Any special preferences, occasion details, or requirements...'
     )
     
     # === ENGINE SELECTION ===
