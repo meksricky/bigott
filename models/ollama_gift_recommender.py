@@ -292,7 +292,7 @@ class OllamaGiftRecommender(models.Model):
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
                 'client_notes': notes,  # Use client_notes field
-                'reasoning': f"Generated exactly {len(selected)} products as requested in notes: {notes}"
+                'ai_reasoning': f"Generated exactly {len(selected)} products as requested in notes: {notes}"
             })
             
             return {
@@ -434,7 +434,7 @@ Return ONLY valid JSON:
                 'product_ids': [(6, 0, selected_products.ids)],
                 'state': 'draft',
                 'client_notes': client_notes,  # Use client_notes field
-                'reasoning': recommendation.get('reasoning', 'AI-generated selection')
+                'ai_reasoning': recommendation.get('ai_reasoning', 'AI-generated selection')
             })
             
             return {
@@ -519,7 +519,7 @@ Return ONLY valid JSON:
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
                 'client_notes': client_notes,  # Use client_notes field - THIS IS THE FIX
-                'reasoning': f"Rule-based selection: {len(selected)} products, €{total_cost:.2f}"
+                'ai_reasoning': f"Rule-based selection: {len(selected)} products, €{total_cost:.2f}"
             })
             
             return {

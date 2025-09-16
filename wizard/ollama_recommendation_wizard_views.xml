@@ -14,6 +14,9 @@
                     </header>
                     
                     <sheet>
+                        <!-- Hidden fields for experience options -->
+                        <field name="experience_option_ids" invisible="1"/>
+                        
                         <!-- Composition Type Display -->
                         <div class="alert alert-info" attrs="{'invisible': [('state', '!=', 'done')]}">
                             <h4 style="margin: 0;">
@@ -37,9 +40,9 @@
                             <group string="Composition Settings">
                                 <field name="engine_type" widget="radio" options="{'horizontal': true}"/>
                                 <field name="experience_category_filter" 
-                                       attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])],
-                                              'required': [('engine_type', 'in', ['experience', 'hybrid'])]}"/>
-                                <field name="selected_experience"
+                                       attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])]}"/>
+                                <field name="selected_experience_id"
+                                       options="{'no_create': True, 'no_open': True}"
                                        attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])],
                                               'required': [('engine_type', 'in', ['experience', 'hybrid'])]}"/>
                             </group>
@@ -98,7 +101,7 @@
                             </group>
                         </group>
                         
-                        <!-- Recommended Products with Categories -->
+                        <!-- Recommended Products -->
                         <notebook attrs="{'invisible': [('state', '!=', 'done')]}">
                             <page string="📦 All Products">
                                 <field name="recommended_products" readonly="1">
@@ -124,7 +127,7 @@
                             </div>
                         </group>
                         
-                        <!-- Advanced Settings (for administrators) -->
+                        <!-- Advanced Settings -->
                         <group string="Advanced Settings" groups="base.group_system" col="2">
                             <field name="recommender_id"/>
                         </group>
@@ -155,22 +158,6 @@
                 </form>
             </field>
         </record>
-        
-        <!-- Wizard Action -->
-        <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
-            <field name="name">Generate Gift Recommendation</field>
-            <field name="res_model">ollama.recommendation.wizard</field>
-            <field name="view_mode">form</field>
-            <field name="target">new</field>
-            <field name="context">{'default_engine_type': 'custom'}</field>
-        </record>
-        
-        <!-- Menu Item -->
-        <menuitem id="menu_ollama_recommendation_wizard"
-                  name="🎁 Generate Recommendation"
-                  action="action_ollama_recommendation_wizard"
-                  parent="sale.sale_order_menu"
-                  sequence="100"/>
         
     </data>
 </odoo>

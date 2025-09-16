@@ -36,23 +36,37 @@ EXPERIENCES_2024 = {
         'products': ['PEP-ATUN-EMP314', 'LB-ACEITU-140', 'LB-CHU-PIMAMA95'],
         'category': 'aperitif'
     },
+    'EXP_APERITIVO': {
+        'name': 'Aperitivo Experience',
+        'products': ['LB-MOU-BONPIPARRA120', 'ANC-CONS100', 'REGAÑA-CARBON'],
+        'category': 'aperitif'
+    },
     'EXP_HUERTA': {
         'name': 'Experience de la Huerta',
         'products': ['BON-ARRAIN212', 'LB-ENSA-NORM250', 'SAL-AÑA-ECO250'],
-        'category': 'seafood'
+        'category': 'seafood',
+        'variants': [
+            ['BON-ARRAIN212', 'LB-ENSA-NORM250', 'SAL-AÑA-ECO250', 'ACEI-ARAN250', 'VIN-VIND250']
+        ]
     },
     'EXP_PIMIENTO_RELLENO': {
         'name': 'Pimiento Relleno Experience',
         'products': ['PIQ-ABA250-DO-TAPAANCHA', 'BON-ARRO185', 'CREMA-OLAS-ATUN110'],
         'variants': [
             ['PIQ-ABA250-DO-TAPAANCHA', 'BON-ARRO185', 'CREMA-OLAS-ATUN110', 'LB-CHU-PIMAMA95'],
-            ['PIQ-ABA250-DO-TAPAANCHA', 'BON-ARRO185', 'CREMA-OLAS-ATUN110', 'ANC-CONS100']
+            ['PIQ-ABA250-DO-TAPAANCHA', 'BON-ARRO185', 'CREMA-OLAS-ATUN110', 'ANC-CONS100'],
+            ['PIQ-ABA250-DO-TAPAANCHA', 'BON-ARRO185', 'CREMA-OLAS-ATUN110', 'ANC-CONS100', 'LB-CHU-PIMAMA95']
         ],
         'category': 'seafood'
     },
     'EXP_PINTXO_NORTE_BONITO': {
         'name': 'Pintxo del Norte de Bonito',
         'products': ['BON-ARRO185', 'ALCA-ECO-ALI-EMP-212', 'PAN-DANVI-HERB130'],
+        'category': 'seafood'
+    },
+    'EXP_BONITO': {
+        'name': 'Bonito Experience',
+        'products': ['BON-ARRO185', 'CEBOLLITA-BORETANA', 'CREMA-PIQUILLO'],
         'category': 'seafood'
     },
     'EXP_BONITO_CONFITADO': {
@@ -98,6 +112,14 @@ EXPERIENCES_2024 = {
         ],
         'category': 'seafood'
     },
+    'EXP_PINTXO_SALMON': {
+        'name': 'Pintxo de Salmón',
+        'products': ['SALM-CV200', 'SALSA-MOSMIEL212', 'REGAÑA-CARBON'],
+        'variants': [
+            ['SALM-CV200', 'PATE-CV-SALM100', 'SALSA-MOSMIEL212', 'REGAÑA-CARBON']
+        ],
+        'category': 'seafood'
+    },
     'EXP_DEL_SELLA': {
         'name': 'Experience del Sella',
         'products': ['SALM-CV200', 'PASTEL-SELLA145'],
@@ -111,7 +133,7 @@ EXPERIENCES_2024 = {
     },
     'EXP_TXULETON': {
         'name': 'Txuletón Experience',
-        'products': ['PAT-ETX-TXU130', 'QUESO-TORTA-CASAR', 'PIQ-ABA250-DO-TAPAANCHA'],
+        'products': ['PAT-ETX-TXU130', 'QUESO-TORTA-CASAR-70', 'PIQ-ABA250-DO-TAPAANCHA'],
         'category': 'meat'
     },
     'EXP_BACALAO_VIZCAINA': {
@@ -202,7 +224,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
 
-    # Keep all existing fields from the original file
+    # --- Currency for Monetary fields ---
     currency_id = fields.Many2one(
         'res.currency',
         default=lambda self: self.env.company.currency_id,
@@ -255,9 +277,17 @@ class OllamaRecommendationWizard(models.TransientModel):
     ], string="Composition Type", default='custom', required=True,
        help="Choose between pre-configured experiences or custom product selection")
 
-    selected_experience = fields.Selection(
-        selection='_get_experience_selection',
+    # Experience selection using Many2one to transient model
+    experience_option_ids = fields.One2many(
+        'experience.option',
+        'wizard_id',
+        string="Available Experiences"
+    )
+    
+    selected_experience_id = fields.Many2one(
+        'experience.option',
         string="Select Experience",
+        domain="[('id', 'in', experience_option_ids)]",
         help="Choose a pre-configured experience package"
     )
     
@@ -315,7 +345,50 @@ class OllamaRecommendationWizard(models.TransientModel):
     is_gluten_free = fields.Boolean(string="Gluten Free")
     is_non_alcoholic = fields.Boolean(string="Non-Alcoholic")
 
-    # ========== NEW COMPUTED METHODS ==========
+    # ========== MODEL INITIALIZATION ==========
+    
+    @api.model
+    def default_get(self, fields_list):
+        """Override default_get to populate experience options"""
+        defaults = super().default_get(fields_list)
+        
+        # Create experience options
+        if 'experience_option_ids' in fields_list:
+            defaults['experience_option_ids'] = self._prepare_experience_options()
+        
+        return defaults
+    
+    def _prepare_experience_options(self):
+        """Prepare experience option records"""
+        options = []
+        for code, exp_data in EXPERIENCES_2024.items():
+            # Calculate estimated cost
+            products = exp_data.get('products', [])
+            estimated_cost = 0.0
+            for product_code in products:
+                product = self.env['product.template'].search([
+                    ('default_code', '=', product_code)
+                ], limit=1)
+                if product:
+                    estimated_cost += product.list_price
+            
+            # Prepare dietary info
+            dietary_info = ', '.join(exp_data.get('dietary', [])) if exp_data.get('dietary') else ''
+            
+            option_vals = {
+                'code': code,
+                'name': exp_data['name'],
+                'category': exp_data.get('category', 'other'),
+                'products': ', '.join(products),
+                'products_count': len(products),
+                'estimated_cost': estimated_cost,
+                'dietary_info': dietary_info,
+            }
+            options.append((0, 0, option_vals))
+        
+        return options
+
+    # ========== COMPUTED METHODS ==========
     
     @api.depends('composition_id', 'engine_type')
     def _compute_composition_display_type(self):
@@ -331,23 +404,29 @@ class OllamaRecommendationWizard(models.TransientModel):
             else:
                 record.composition_display_type = ""
 
-    @api.depends('selected_experience')
+    @api.depends('selected_experience_id')
     def _compute_experience_preview(self):
         """Preview the selected experience details"""
         for record in self:
-            if record.selected_experience and record.selected_experience in EXPERIENCES_2024:
-                exp = EXPERIENCES_2024[record.selected_experience]
+            if record.selected_experience_id:
+                exp_option = record.selected_experience_id
                 html = f"""
                 <div style="padding: 10px; background: #f8f9fa; border-radius: 8px; margin: 10px 0;">
                     <h4 style="color: #2c3e50; margin-bottom: 10px;">
-                        <i class="fa fa-gift"></i> {exp['name']}
+                        <i class="fa fa-gift"></i> {exp_option.name}
                     </h4>
-                    <p><strong>Category:</strong> {exp['category'].title()}</p>
-                    <p><strong>Products Included:</strong></p>
-                    <ul>
+                    <p><strong>Category:</strong> {exp_option.category.title() if exp_option.category else 'Other'}</p>
+                    <p><strong>Estimated Cost:</strong> €{exp_option.estimated_cost:.2f}</p>
+                    <p><strong>Number of Products:</strong> {exp_option.products_count}</p>
                 """
                 
-                for product_ref in exp['products']:
+                if exp_option.dietary_info:
+                    html += f"<p><strong>Dietary:</strong> {exp_option.dietary_info}</p>"
+                
+                # Show products
+                html += "<p><strong>Products Included:</strong></p><ul>"
+                
+                for product_ref in exp_option.get_product_list():
                     product = record.env['product.template'].search([
                         ('default_code', '=', product_ref)
                     ], limit=1)
@@ -383,21 +462,44 @@ class OllamaRecommendationWizard(models.TransientModel):
             else:
                 record.client_dietary_history = ""
 
-    # ========== SELECTION METHODS ==========
-    
-    @api.model
-    def _get_experience_selection(self):
-        """Get available experiences for selection"""
-        selections = []
-        
-        # Filter by category if specified
-        category_filter = self.experience_category_filter if hasattr(self, 'experience_category_filter') else 'all'
-        
-        for key, exp in EXPERIENCES_2024.items():
-            if category_filter == 'all' or exp.get('category') == category_filter:
-                selections.append((key, exp['name']))
-        
-        return selections
+    @api.depends('partner_id')
+    def _compute_client_info(self):
+        """Compute comprehensive client information display"""
+        for record in self:
+            if record.partner_id:
+                partner = record.partner_id
+                html_parts = []
+                
+                html_parts.append(f"<h4>{partner.name}</h4>")
+                
+                if partner.email:
+                    html_parts.append(f"<p><i class='fa fa-envelope'></i> {partner.email}</p>")
+                if partner.phone:
+                    html_parts.append(f"<p><i class='fa fa-phone'></i> {partner.phone}</p>")
+                
+                if partner.parent_id:
+                    html_parts.append(f"<p><strong>Company:</strong> {partner.parent_id.name}</p>")
+                
+                past_compositions = self.env['gift.composition'].search([
+                    ('partner_id', '=', partner.id)
+                ], order='create_date desc', limit=3)
+                
+                if past_compositions:
+                    html_parts.append("<h5>Recent Gift History:</h5>")
+                    html_parts.append("<ul>")
+                    for comp in past_compositions:
+                        date_str = comp.create_date.strftime('%Y-%m-%d') if comp.create_date else 'N/A'
+                        comp_type = getattr(comp, 'composition_type', 'custom').title()
+                        budget = getattr(comp, 'target_budget', 0)
+                        product_count = len(comp.product_ids) if hasattr(comp, 'product_ids') else 0
+                        html_parts.append(
+                            f"<li>{date_str} - €{budget:.2f} - {product_count} products - {comp_type}</li>"
+                        )
+                    html_parts.append("</ul>")
+                
+                record.client_info = ''.join(html_parts) if html_parts else '<p>No client information available.</p>'
+            else:
+                record.client_info = '<p>Please select a client to view their information.</p>'
 
     # ========== ONCHANGE METHODS ==========
     
@@ -405,17 +507,26 @@ class OllamaRecommendationWizard(models.TransientModel):
     def _onchange_engine_type(self):
         """Clear experience selection when switching to custom"""
         if self.engine_type == 'custom':
-            self.selected_experience = False
+            self.selected_experience_id = False
             self.experience_category_filter = 'all'
 
     @api.onchange('experience_category_filter')
     def _onchange_experience_category(self):
         """Filter experiences when category changes"""
+        # Update domain for the selected_experience_id field
+        domain = []
         if self.experience_category_filter and self.experience_category_filter != 'all':
-            if self.selected_experience:
-                exp = EXPERIENCES_2024.get(self.selected_experience, {})
-                if exp.get('category') != self.experience_category_filter:
-                    self.selected_experience = False
+            domain = [('category', '=', self.experience_category_filter)]
+            
+            # Clear selection if it doesn't match the new category
+            if self.selected_experience_id and self.selected_experience_id.category != self.experience_category_filter:
+                self.selected_experience_id = False
+        
+        return {
+            'domain': {
+                'selected_experience_id': domain
+            }
+        }
 
     @api.onchange('partner_id')
     def _onchange_partner_id(self):
@@ -437,7 +548,35 @@ class OllamaRecommendationWizard(models.TransientModel):
             self.is_gluten_free = (self.dietary_restrictions == 'gluten_free')
             self.is_non_alcoholic = (self.dietary_restrictions == 'non_alcoholic')
 
-    # ========== MAIN ACTION METHOD (ENHANCED) ==========
+    @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
+    def _onchange_dietary_checkboxes(self):
+        """Keep existing implementation for backward compatibility"""
+        toggles = []
+        if self.is_vegan:
+            toggles.append('vegan')
+        if self.is_halal:
+            toggles.append('halal')
+        if self.is_gluten_free:
+            toggles.append('gluten_free')
+        if self.is_non_alcoholic:
+            toggles.append('non_alcoholic')
+
+        if toggles:
+            if len(toggles) > 1:
+                self.dietary_restrictions = 'multiple'
+                self.dietary_restrictions_text = ', '.join(toggles)
+            else:
+                self.dietary_restrictions = toggles[0]
+
+    @api.constrains('target_budget')
+    def _check_target_budget(self):
+        for rec in self:
+            if rec.target_budget <= 0:
+                raise ValidationError("Target budget must be greater than 0.")
+            if rec.target_budget > 1_000_000:
+                raise ValidationError("Target budget seems unusually high. Please confirm.")
+
+    # ========== MAIN ACTION METHOD ==========
     
     def action_generate_recommendation(self):
         """Generate gift recommendation based on selected type"""
@@ -447,7 +586,7 @@ class OllamaRecommendationWizard(models.TransientModel):
         if not self.partner_id:
             raise UserError("Please select a client.")
         
-        if self.engine_type in ['experience', 'hybrid'] and not self.selected_experience:
+        if self.engine_type in ['experience', 'hybrid'] and not self.selected_experience_id:
             raise UserError("Please select an experience for this composition type.")
         
         if not self.recommender_id:
@@ -480,10 +619,14 @@ class OllamaRecommendationWizard(models.TransientModel):
                 # Update composition with type information
                 if result.get('composition_id'):
                     composition = self.env['gift.composition'].browse(result['composition_id'])
+                    exp_code = self.selected_experience_id.code if self.selected_experience_id else False
+                    exp_name = self.selected_experience_id.name if self.selected_experience_id else False
+                    
                     composition.write({
                         'composition_type': self.engine_type,
-                        'experience_code': self.selected_experience if self.engine_type in ['experience', 'hybrid'] else False,
-                        'experience_name': EXPERIENCES_2024.get(self.selected_experience, {}).get('name') if self.selected_experience else False,
+                        'experience_code': exp_code,
+                        'experience_name': exp_name,
+                        'experience_category': self.selected_experience_id.category if self.selected_experience_id else False,
                     })
                 
                 self.write({
@@ -521,7 +664,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             _logger.exception(f"Recommendation wizard error: {e}")
             raise
 
-    # ========== NEW GENERATION METHODS ==========
+    # ========== GENERATION METHODS ==========
     
     def _prepare_dietary_restrictions(self):
         """Prepare dietary restrictions list"""
@@ -548,10 +691,14 @@ class OllamaRecommendationWizard(models.TransientModel):
 
     def _generate_experience_based(self):
         """Generate recommendation using selected experience"""
-        if not self.selected_experience:
+        if not self.selected_experience_id:
             return {'success': False, 'error': 'No experience selected'}
         
-        exp = EXPERIENCES_2024.get(self.selected_experience, {})
+        exp_option = self.selected_experience_id
+        exp_code = exp_option.code
+        
+        # Get full experience data
+        exp = EXPERIENCES_2024.get(exp_code, {})
         if not exp:
             return {'success': False, 'error': 'Invalid experience selected'}
         
@@ -602,7 +749,7 @@ class OllamaRecommendationWizard(models.TransientModel):
                     missing_products.append(product_ref)
         
         if missing_products:
-            _logger.warning(f"Missing products for experience {self.selected_experience}: {missing_products}")
+            _logger.warning(f"Missing products for experience {exp_code}: {missing_products}")
         
         # Create composition
         try:
@@ -615,11 +762,11 @@ class OllamaRecommendationWizard(models.TransientModel):
                 'client_notes': self.client_notes,
                 'generation_method': 'experience',
                 'composition_type': 'experience',
-                'experience_code': self.selected_experience,
+                'experience_code': exp_code,
                 'experience_name': exp['name'],
                 'experience_category': exp.get('category', 'other'),
                 'confidence_score': 0.95,
-                'ai_reasoning': f"Experience-based composition: {exp['name']}"
+                'ai_reasoning': f"Experience-based composition: {exp['name']}"  # FIXED: Using ai_reasoning
             })
             
             return {
@@ -654,7 +801,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             custom_result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
                 target_budget=remaining_budget,
-                client_notes=f"Complement to {self.selected_experience}",
+                client_notes=f"Complement to {self.selected_experience_id.name}",
                 dietary_restrictions=self._prepare_dietary_restrictions()
             )
             
@@ -690,9 +837,8 @@ class OllamaRecommendationWizard(models.TransientModel):
             f"<h4>✅ {self.composition_display_type} Generated Successfully!</h4>"
         ]
         
-        if self.selected_experience and self.engine_type in ['experience', 'hybrid']:
-            exp_name = EXPERIENCES_2024.get(self.selected_experience, {}).get('name', 'Unknown')
-            message_parts.append(f"<p><strong>Experience:</strong> {exp_name}</p>")
+        if self.selected_experience_id:
+            message_parts.append(f"<p><strong>Experience:</strong> {self.selected_experience_id.name}</p>")
         
         message_parts.extend([
             f"<p><strong>Products Selected:</strong> {result.get('product_count', 0)}</p>",
@@ -707,7 +853,8 @@ class OllamaRecommendationWizard(models.TransientModel):
         message_parts.append("</div>")
         return '\n'.join(message_parts)
 
-    # Keep all existing methods from the original file
+    # ========== SUPPORTING METHODS ==========
+    
     @api.model
     def _default_recommender(self):
         rec = self.env['ollama.gift.recommender'].search([('active', '=', True)], limit=1)
@@ -715,76 +862,8 @@ class OllamaRecommendationWizard(models.TransientModel):
             rec = self.env['ollama.gift.recommender'].create({'name': 'Default Ollama Recommender'})
         return rec
 
-    @api.depends('partner_id')
-    def _compute_client_info(self):
-        """Keep existing implementation"""
-        for record in self:
-            if record.partner_id:
-                partner = record.partner_id
-                html_parts = []
-                
-                html_parts.append(f"<h4>{partner.name}</h4>")
-                
-                if partner.email:
-                    html_parts.append(f"<p><i class='fa fa-envelope'></i> {partner.email}</p>")
-                if partner.phone:
-                    html_parts.append(f"<p><i class='fa fa-phone'></i> {partner.phone}</p>")
-                
-                if partner.parent_id:
-                    html_parts.append(f"<p><strong>Company:</strong> {partner.parent_id.name}</p>")
-                
-                past_compositions = self.env['gift.composition'].search([
-                    ('partner_id', '=', partner.id)
-                ], order='create_date desc', limit=3)
-                
-                if past_compositions:
-                    html_parts.append("<h5>Recent Gift History:</h5>")
-                    html_parts.append("<ul>")
-                    for comp in past_compositions:
-                        date_str = comp.create_date.strftime('%Y-%m-%d') if comp.create_date else 'N/A'
-                        comp_type = getattr(comp, 'composition_type', 'custom').title()
-                        budget = getattr(comp, 'target_budget', 0)
-                        product_count = len(comp.product_ids) if hasattr(comp, 'product_ids') else 0
-                        html_parts.append(
-                            f"<li>{date_str} - €{budget:.2f} - {product_count} products - {comp_type}</li>"
-                        )
-                    html_parts.append("</ul>")
-                
-                record.client_info = ''.join(html_parts) if html_parts else '<p>No client information available.</p>'
-            else:
-                record.client_info = '<p>Please select a client to view their information.</p>'
-
-    # Keep all other existing methods...
-    @api.onchange('is_vegan', 'is_halal', 'is_gluten_free', 'is_non_alcoholic')
-    def _onchange_dietary_checkboxes(self):
-        """Keep existing implementation"""
-        toggles = []
-        if self.is_vegan:
-            toggles.append('vegan')
-        if self.is_halal:
-            toggles.append('halal')
-        if self.is_gluten_free:
-            toggles.append('gluten_free')
-        if self.is_non_alcoholic:
-            toggles.append('non_alcoholic')
-
-        if toggles:
-            if len(toggles) > 1:
-                self.dietary_restrictions = 'multiple'
-                self.dietary_restrictions_text = ', '.join(toggles)
-            else:
-                self.dietary_restrictions = toggles[0]
-
-    @api.constrains('target_budget')
-    def _check_target_budget(self):
-        for rec in self:
-            if rec.target_budget <= 0:
-                raise ValidationError("Target budget must be greater than 0.")
-            if rec.target_budget > 1_000_000:
-                raise ValidationError("Target budget seems unusually high. Please confirm.")
-
     def action_view_composition(self):
-        """Keep existing implementation"""
+        """View the generated composition"""
         self.ensure_one()
         if not self.composition_id:
             raise UserError("No composition generated yet.")
@@ -799,7 +878,7 @@ class OllamaRecommendationWizard(models.TransientModel):
         }
 
     def action_generate_another(self):
-        """Keep existing implementation"""
+        """Generate another recommendation with same settings"""
         self.ensure_one()
         
         new_wizard = self.create({
@@ -816,7 +895,6 @@ class OllamaRecommendationWizard(models.TransientModel):
             'is_non_alcoholic': self.is_non_alcoholic,
             'recommender_id': self.recommender_id.id,
             'engine_type': self.engine_type,
-            'selected_experience': self.selected_experience,
             'experience_category_filter': self.experience_category_filter,
         })
         
@@ -830,7 +908,7 @@ class OllamaRecommendationWizard(models.TransientModel):
         }
 
     def action_test_connection(self):
-        """Keep existing implementation"""
+        """Test Ollama connection"""
         self.ensure_one()
         
         if not self.recommender_id:
@@ -859,3 +937,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     def _format_success_message(self, result):
         """Keep for backward compatibility"""
         return self._format_enhanced_success_message(result)
+
+
+# Add the transient model reference field
+ExperienceOption._fields['wizard_id'] = fields.Many2one('ollama.recommendation.wizard', string='Wizard')
