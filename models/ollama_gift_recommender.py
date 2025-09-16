@@ -288,7 +288,7 @@ class OllamaGiftRecommender(models.Model):
                 'partner_id': partner_id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
-                'composition_type': 'ai_generated',
+                'composition_type': 'custom',
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
                 'client_notes': notes,  # Use client_notes field
@@ -430,7 +430,7 @@ Return ONLY valid JSON:
                 'partner_id': partner.id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
-                'composition_type': 'ai_generated',
+                'composition_type': 'custom',
                 'product_ids': [(6, 0, selected_products.ids)],
                 'state': 'draft',
                 'client_notes': client_notes,  # Use client_notes field
@@ -515,7 +515,7 @@ Return ONLY valid JSON:
                 'partner_id': partner.id,
                 'target_budget': target_budget,
                 'target_year': fields.Date.today().year,
-                'composition_type': 'ai_generated',
+                'composition_type': 'custom',
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
                 'client_notes': client_notes,  # Use client_notes field - THIS IS THE FIX
@@ -668,7 +668,7 @@ Return ONLY valid JSON:
             'name': 'All Recommendations',
             'res_model': 'gift.composition',
             'view_mode': 'tree,form',
-            'domain': [('composition_type', '=', 'ai_generated')],
+            'domain': [('composition_type', '=', 'custom')],
             'context': {'search_default_partner_id': True}
         }
     
@@ -680,7 +680,7 @@ Return ONLY valid JSON:
             'res_model': 'gift.composition',
             'view_mode': 'tree,form',
             'domain': [
-                ('composition_type', '=', 'ai_generated'),
+                ('composition_type', '=', 'custom'),
                 ('state', 'in', ['confirmed', 'approved', 'delivered'])
             ]
         }
