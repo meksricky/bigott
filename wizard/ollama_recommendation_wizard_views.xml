@@ -1,170 +1,176 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- wizard/ollama_recommendation_wizard_views.xml -->
 <odoo>
-    <!-- Hybrid Ollama Wizard Form View -->
-    <record id="view_ollama_recommendation_wizard_form" model="ir.ui.view">
-        <field name="name">ollama.recommendation.wizard.form</field>
-        <field name="model">ollama.recommendation.wizard</field>
-        <field name="arch" type="xml">
-            <form string="AI-Powered Gift Recommendation">
-                <!-- Hidden fields needed for attrs conditions -->
-                <field name="state" invisible="1"/>
-                <field name="composition_id" invisible="1"/>
-                <field name="use_ollama" invisible="1"/>
-                <field name="recommended_products" invisible="1"/>
-                
-                <sheet>
-                    <!-- Header based on state -->
-                    <div attrs="{'invisible': [('state', '!=', 'generating')]}" class="alert alert-info">
-                        <h4>⏳ Generating recommendations...</h4>
-                        <p>Please wait while AI analyzes client preferences and creates the perfect gift composition.</p>
-                    </div>
+    <data>
+        
+        <!-- Enhanced Wizard Form View -->
+        <record id="view_ollama_recommendation_wizard_form" model="ir.ui.view">
+            <field name="name">ollama.recommendation.wizard.form.enhanced</field>
+            <field name="model">ollama.recommendation.wizard</field>
+            <field name="arch" type="xml">
+                <form string="🎁 Gift Recommendation Generator">
+                    <header>
+                        <field name="state" widget="statusbar" statusbar_visible="draft,generating,done"/>
+                    </header>
                     
-                    <div attrs="{'invisible': [('state', '!=', 'done')]}">
-                        <field name="result_message" widget="html" nolabel="1"/>
-                    </div>
-                    
-                    <div attrs="{'invisible': [('state', '!=', 'error')]}" class="alert alert-danger">
-                        <field name="error_message" nolabel="1"/>
-                    </div>
-                    
-                    <!-- Main Form -->
-                    <div class="oe_title">
-                        <h1>Generate Gift Recommendation</h1>
-                    </div>
-                    
-                    <group>
-                        <group string="Client Information">
-                            <field name="partner_id" 
-                                   options="{'no_create': True}" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                            <field name="target_year" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                            <field name="target_budget" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                        </group>
-                        <group string="Configuration">
-                            <field name="dietary_restrictions" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                            <field name="engine_type" 
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                        </group>
-                    </group>
-                    
-                    <group string="Special Requirements">
-                        <field name="client_notes" 
-                               nolabel="1" 
-                               placeholder="Any special preferences, occasion details, or requirements..." 
-                               attrs="{'readonly': [('state', '!=', 'draft')]}"/>
-                    </group>
-                    
-                    <!-- Client Intelligence -->
-                    <group string="Client Intelligence" 
-                           attrs="{'invisible': [('partner_id', '=', False)]}">
-                        <field name="client_info" widget="html" nolabel="1"/>
-                    </group>
-                    
-                    <!-- Results Section -->
-                    <notebook attrs="{'invisible': [('state', '!=', 'done')]}">
-                        <page string="Recommended Products">
-                            <field name="recommended_products" mode="tree">
-                                <tree>
-                                    <field name="name"/>
-                                    <field name="default_code"/>
-                                    <field name="list_price"/>
-                                </tree>
-                            </field>
-                            <group>
-                                <group>
-                                    <field name="total_cost"/>
-                                </group>
-                                <group>
-                                    <field name="confidence_score" widget="percentage"/>
-                                </group>
+                    <sheet>
+                        <!-- Composition Type Display -->
+                        <div class="alert alert-info" attrs="{'invisible': [('state', '!=', 'done')]}">
+                            <h4 style="margin: 0;">
+                                <field name="composition_display_type" readonly="1" nolabel="1" style="font-weight: bold;"/>
+                                <span attrs="{'invisible': [('composition_id', '=', False)]}">
+                                    - Composition Generated Successfully!
+                                </span>
+                            </h4>
+                        </div>
+                        
+                        <group col="2">
+                            <!-- Left Column: Client Information -->
+                            <group string="Client Information">
+                                <field name="partner_id" options="{'no_create': True, 'no_open': False}"/>
+                                <field name="currency_id" invisible="1"/>
+                                <field name="target_budget" widget="monetary"/>
+                                <field name="target_year"/>
                             </group>
-                        </page>
-                    </notebook>
-                </sheet>
-                
-                <footer>
-                    <!-- Draft State Actions -->
-                    <button string="Generate Recommendation" 
-                            name="action_generate_recommendation" 
-                            type="object" 
-                            class="btn-primary"
-                            attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                            
+                            <!-- Right Column: Composition Settings -->
+                            <group string="Composition Settings">
+                                <field name="engine_type" widget="radio" options="{'horizontal': true}"/>
+                                <field name="experience_category_filter" 
+                                       attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])],
+                                              'required': [('engine_type', 'in', ['experience', 'hybrid'])]}"/>
+                                <field name="selected_experience"
+                                       attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])],
+                                              'required': [('engine_type', 'in', ['experience', 'hybrid'])]}"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Experience Preview -->
+                        <group attrs="{'invisible': [('experience_preview', '=', False)]}" col="1">
+                            <separator string="📦 Experience Details"/>
+                            <field name="experience_preview" widget="html" nolabel="1" readonly="1"/>
+                        </group>
+                        
+                        <!-- Dietary Restrictions Section -->
+                        <group string="Dietary Restrictions &amp; Notes" col="2">
+                            <group>
+                                <field name="dietary_restrictions" widget="selection"/>
+                                <field name="dietary_restrictions_text" 
+                                       placeholder="Enter multiple restrictions separated by commas..."
+                                       attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')],
+                                              'required': [('dietary_restrictions', '=', 'multiple')]}"/>
+                                <field name="client_dietary_history" 
+                                       attrs="{'invisible': [('partner_id', '=', False)]}"
+                                       readonly="1"
+                                       style="font-style: italic; color: #666;"/>
+                            </group>
+                            <group>
+                                <field name="client_notes" 
+                                       placeholder="Any special requests or preferences..."
+                                       widget="text"/>
+                                <!-- Legacy checkboxes (hidden but functional) -->
+                                <field name="is_vegan" invisible="1"/>
+                                <field name="is_halal" invisible="1"/>
+                                <field name="is_gluten_free" invisible="1"/>
+                                <field name="is_non_alcoholic" invisible="1"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Client Profile Display -->
+                        <group string="Client Profile" attrs="{'invisible': [('partner_id', '=', False)]}" col="1">
+                            <field name="client_info" widget="html" nolabel="1" readonly="1"/>
+                        </group>
+                        
+                        <!-- Results Section -->
+                        <group string="Generation Results" attrs="{'invisible': [('state', '!=', 'done')]}" col="1">
+                            <field name="result_message" widget="html" nolabel="1" readonly="1"/>
+                            
+                            <group col="4">
+                                <field name="total_cost" widget="monetary" readonly="1"/>
+                                <field name="confidence_score" widget="percentage" readonly="1"/>
+                                <field name="composition_id" readonly="1" invisible="1"/>
+                                <newline/>
+                                <button name="action_view_composition" 
+                                        type="object" 
+                                        string="📄 View Full Composition" 
+                                        class="btn-primary"
+                                        attrs="{'invisible': [('composition_id', '=', False)]}"/>
+                            </group>
+                        </group>
+                        
+                        <!-- Recommended Products with Categories -->
+                        <notebook attrs="{'invisible': [('state', '!=', 'done')]}">
+                            <page string="📦 All Products">
+                                <field name="recommended_products" readonly="1">
+                                    <tree string="Recommended Products" create="false" delete="false">
+                                        <field name="name"/>
+                                        <field name="default_code" string="Reference"/>
+                                        <field name="categ_id" string="Category"/>
+                                        <field name="list_price" widget="monetary" string="Price"/>
+                                        <field name="qty_available" string="Stock"/>
+                                    </tree>
+                                </field>
+                                <group class="oe_subtotal_footer">
+                                    <field name="total_cost" widget="monetary" class="oe_subtotal_footer_separator"/>
+                                </group>
+                            </page>
+                        </notebook>
+                        
+                        <!-- Error Display -->
+                        <group attrs="{'invisible': [('state', '!=', 'error')]}" col="1">
+                            <div class="alert alert-danger">
+                                <strong>⚠️ Error:</strong>
+                                <field name="error_message" readonly="1" nolabel="1"/>
+                            </div>
+                        </group>
+                        
+                        <!-- Advanced Settings (for administrators) -->
+                        <group string="Advanced Settings" groups="base.group_system" col="2">
+                            <field name="recommender_id"/>
+                        </group>
+                    </sheet>
                     
-                    <button string="Test AI Connection" 
-                            name="action_test_connection" 
-                            type="object" 
-                            class="btn-secondary"
-                            attrs="{'invisible': [('state', '!=', 'draft')]}"/>
-                    
-                    <!-- Done State Actions -->
-                    <button string="View Composition" 
-                            name="action_view_composition" 
-                            type="object" 
-                            class="btn-primary"
-                            attrs="{'invisible': ['|', ('state', '!=', 'done'), ('composition_id', '=', False)]}"/>
-                    
-                    <button string="Generate Another" 
-                            name="action_generate_another" 
-                            type="object" 
-                            class="btn-secondary"
-                            attrs="{'invisible': [('state', '!=', 'done')]}"/>
-                    
-                    <!-- Always visible -->
-                    <button string="Close" 
-                            special="cancel" 
-                            class="btn-secondary"
-                            attrs="{'invisible': [('state', '=', 'generating')]}"/>
-                </footer>
-            </form>
-        </field>
-    </record>
-
-    <!-- Main Action -->
-    <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
-        <field name="name">AI Gift Recommendation</field>
-        <field name="res_model">ollama.recommendation.wizard</field>
-        <field name="view_mode">form</field>
-        <field name="target">new</field>
-        <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
-    </record>
-
-    <!-- Action from Partner -->
-    <record id="action_ollama_wizard_from_partner" model="ir.actions.act_window">
-        <field name="name">Generate AI Gift</field>
-        <field name="res_model">ollama.recommendation.wizard</field>
-        <field name="view_mode">form</field>
-        <field name="target">new</field>
-        <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
-        <field name="context">{'default_partner_id': active_id}</field>
-        <field name="binding_model_id" ref="base.model_res_partner"/>
-        <field name="binding_view_types">form</field>
-    </record>
-
-    <!-- Main Menu -->
-    <menuitem id="menu_ai_gift_root"
-              name="AI Gifts"
-              web_icon="senor_bigott_recommender,static/description/icon.png"
-              sequence="5"/>
-    
-    <menuitem id="menu_ai_operations"
-              name="Operations"
-              parent="menu_ai_gift_root"
-              sequence="1"/>
-    
-    <menuitem id="menu_generate_ai_gift"
-              name="Generate AI Gift"
-              parent="menu_ai_operations"
-              action="action_ollama_recommendation_wizard"
-              sequence="1"/>
-    
-    <!-- Quick Access under Sales -->
-    <menuitem id="menu_ai_gift_sales"
-              name="AI Gift Generator"
-              parent="sale.sale_menu_root"
-              action="action_ollama_recommendation_wizard"
-              sequence="99"/>
-
+                    <footer>
+                        <button name="action_generate_recommendation" 
+                                type="object" 
+                                string="🎯 Generate Recommendation" 
+                                class="btn-primary"
+                                attrs="{'invisible': ['|', ('state', '=', 'generating'), ('state', '=', 'done')]}"/>
+                        
+                        <button name="action_generate_another" 
+                                type="object" 
+                                string="🔄 Generate Another" 
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                        
+                        <button name="action_test_connection" 
+                                type="object" 
+                                string="🔌 Test Connection" 
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', '!=', 'draft')]}"
+                                groups="base.group_system"/>
+                        
+                        <button string="Cancel" class="btn-secondary" special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Wizard Action -->
+        <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
+            <field name="name">Generate Gift Recommendation</field>
+            <field name="res_model">ollama.recommendation.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="context">{'default_engine_type': 'custom'}</field>
+        </record>
+        
+        <!-- Menu Item -->
+        <menuitem id="menu_ollama_recommendation_wizard"
+                  name="🎁 Generate Recommendation"
+                  action="action_ollama_recommendation_wizard"
+                  parent="sale.sale_order_menu"
+                  sequence="100"/>
+        
+    </data>
 </odoo>
