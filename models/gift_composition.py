@@ -429,53 +429,87 @@ class GiftComposition(models.Model):
         return categories
     
     def auto_categorize_products(self):
-        """Automatically categorize products based on their categories or names"""
+        """Enhanced auto-categorization based on product attributes and category hierarchy"""
         self.ensure_one()
         
-        beverages = []
-        aperitifs = []
-        foie = []
-        canned = []
-        charcuterie = []
-        sweets = []
+        # Define comprehensive keyword mappings
+        category_keywords = {
+            'beverage': {
+                'keywords': ['cava', 'champagne', 'wine', 'vino', 'rosé', 'tinto', 'blanco', 
+                            'rioja', 'ribera', 'verdejo', 'albariño', 'tempranillo'],
+                'categories': ['BEBIDA/CAVA', 'BEBIDA/CHAMPAGNE', 'BEBIDA/VINO']
+            },
+            'aperitif': {
+                'keywords': ['vermouth', 'vermut', 'tokaji', 'beer', 'cerveza', 'whisky', 
+                            'gin', 'vodka', 'brandy', 'cognac', 'licor'],
+                'categories': ['BEBIDA/ALCOHOL ALTA GRADUACIÓN', 'BEBIDA/VERMUT']
+            },
+            'foie': {
+                'keywords': ['foie', 'pato', 'oca', 'duck', 'goose', 'micuit', 'mi-cuit'],
+                'categories': ['COMIDA/FOIE']
+            },
+            'canned': {
+                'keywords': ['conserva', 'lata', 'anchoa', 'atún', 'bonito', 'sardina',
+                            'mejillón', 'berberecho', 'ventresca', 'melva'],
+                'categories': ['COMIDA/CONSERVAS', 'COMIDA/PESCADO']
+            },
+            'charcuterie': {
+                'keywords': ['jamón', 'chorizo', 'salchichón', 'lomo', 'cecina', 'queso',
+                            'cheese', 'paletilla', 'ibérico', 'bellota', 'cebo'],
+                'categories': ['COMIDA/IBERICOS', 'COMIDA/QUESOS']
+            },
+            'sweet': {
+                'keywords': ['turrón', 'chocolate', 'dulce', 'sweet', 'trufa', 'lingote',
+                            'bombón', 'mazapán', 'polvorón', 'mantecado'],
+                'categories': ['COMIDA/DULCES', 'COMIDA/TURRON']
+            }
+        }
+        
+        # Clear existing categorizations
+        categorized = {
+            'beverage': [],
+            'aperitif': [],
+            'foie': [],
+            'canned': [],
+            'charcuterie': [],
+            'sweet': []
+        }
         
         for product in self.product_ids:
-            name_lower = product.name.lower()
-            categ_name = product.categ_id.name.lower() if product.categ_id else ''
+            name_lower = product.name.lower() if product.name else ''
+            categ_name = product.categ_id.complete_name.lower() if product.categ_id else ''
             
-            # Check categories based on keywords
-            if any(word in name_lower or word in categ_name for word in 
-                   ['cava', 'champagne', 'wine', 'vino', 'rosé', 'tinto', 'blanco']):
-                beverages.append(product.id)
-            elif any(word in name_lower or word in categ_name for word in 
-                     ['vermouth', 'vermut', 'tokaji', 'beer', 'cerveza', 'alcohol', 'whisky', 'gin']):
-                aperitifs.append(product.id)
-            elif any(word in name_lower or word in categ_name for word in 
-                     ['foie', 'pato', 'oca', 'duck', 'goose']):
-                foie.append(product.id)
-            elif any(word in name_lower or word in categ_name for word in 
-                     ['conserva', 'canned', 'lata', 'anchoa', 'atún', 'bonito']):
-                canned.append(product.id)
-            elif any(word in name_lower or word in categ_name for word in 
-                     ['jamón', 'chorizo', 'salchichón', 'queso', 'cheese', 'paletilla', 'ibérico']):
-                charcuterie.append(product.id)
-            elif any(word in name_lower or word in categ_name for word in 
-                     ['turrón', 'chocolate', 'dulce', 'sweet', 'trufa', 'lingote']):
-                sweets.append(product.id)
+            categorized_flag = False
+            
+            # Check each category
+            for cat_type, cat_data in category_keywords.items():
+                # Check category path first (most reliable)
+                for cat_path in cat_data['categories']:
+                    if cat_path.lower() in categ_name:
+                        categorized[cat_type].append(product.id)
+                        categorized_flag = True
+                        break
+                
+                # If not categorized yet, check keywords
+                if not categorized_flag:
+                    for keyword in cat_data['keywords']:
+                        if keyword in name_lower:
+                            categorized[cat_type].append(product.id)
+                            categorized_flag = True
+                            break
+                
+                if categorized_flag:
+                    break
         
-        # Update categorized fields
-        if beverages:
-            self.beverage_product_ids = [(6, 0, beverages)]
-        if aperitifs:
-            self.aperitif_product_ids = [(6, 0, aperitifs)]
-        if foie:
-            self.foie_product_ids = [(6, 0, foie)]
-        if canned:
-            self.canned_product_ids = [(6, 0, canned)]
-        if charcuterie:
-            self.charcuterie_product_ids = [(6, 0, charcuterie)]
-        if sweets:
-            self.sweet_product_ids = [(6, 0, sweets)]
+        # Update the categorized fields
+        self.write({
+            'beverage_product_ids': [(6, 0, categorized['beverage'])],
+            'aperitif_product_ids': [(6, 0, categorized['aperitif'])],
+            'foie_product_ids': [(6, 0, categorized['foie'])],
+            'canned_product_ids': [(6, 0, categorized['canned'])],
+            'charcuterie_product_ids': [(6, 0, categorized['charcuterie'])],
+            'sweet_product_ids': [(6, 0, categorized['sweet'])],
+        })
         
         return True
     
