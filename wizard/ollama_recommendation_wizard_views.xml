@@ -14,9 +14,6 @@
                     </header>
                     
                     <sheet>
-                        <!-- Hidden fields for experience options -->
-                        <field name="experience_option_ids" invisible="1"/>
-                        
                         <!-- Composition Type Display -->
                         <div class="alert alert-info" attrs="{'invisible': [('state', '!=', 'done')]}">
                             <h4 style="margin: 0;">
@@ -41,8 +38,8 @@
                                 <field name="engine_type" widget="radio" options="{'horizontal': true}"/>
                                 <field name="experience_category_filter" 
                                        attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])]}"/>
-                                <field name="selected_experience_id"
-                                       options="{'no_create': True, 'no_open': True}"
+                                <field name="selected_experience"
+                                       widget="selection"
                                        attrs="{'invisible': [('engine_type', 'not in', ['experience', 'hybrid'])],
                                               'required': [('engine_type', 'in', ['experience', 'hybrid'])]}"/>
                             </group>
@@ -158,6 +155,23 @@
                 </form>
             </field>
         </record>
+        
+        <!-- Wizard Action -->
+        <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
+            <field name="name">Generate Gift Recommendation</field>
+            <field name="res_model">ollama.recommendation.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="context">{'default_engine_type': 'custom'}</field>
+        </record>
+        
+        <!-- Menu Item (optional - add if you want it in menu) -->
+        <menuitem id="menu_ollama_recommendation_wizard"
+                  name="🎁 Generate Recommendation"
+                  action="action_ollama_recommendation_wizard"
+                  parent="sale.sale_order_menu"
+                  sequence="100"
+                  groups="base.group_user"/>
         
     </data>
 </odoo>
