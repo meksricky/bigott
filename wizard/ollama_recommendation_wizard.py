@@ -7,6 +7,8 @@ import logging
 from datetime import datetime
 import json
 
+from wizard.experience_option import ExperienceOption
+
 _logger = logging.getLogger(__name__)
 
 # Define the experiences from your data
