@@ -107,68 +107,6 @@ class OllamaGiftRecommender(models.Model):
                 'message': f'Error: {str(e)}'
             }
     
-    def _parse_notes_inline(self, notes):
-        """Parse notes to extract mandatory requirements"""
-        if not notes:
-            return {'use_default': True}
-        
-        parsed = {
-            'use_default': False,
-            'mandatory_count': None,
-            'categories_required': {},
-            'categories_excluded': [],
-            'budget_flexibility': 0.05,
-            'preferences': {}
-        }
-        
-        notes_lower = notes.lower()
-        
-        # Extract mandatory product count
-        count_patterns = [
-            r'want\s+(\d+)\s+products?',
-            r'exactly\s+(\d+)\s+items?',
-            r'only\s+(\d+)\s+products?',
-            r'give\s+me\s+(\d+)',
-            r'(\d+)\s+products?\s+only',
-            r'need\s+(\d+)\s+items?'
-        ]
-        
-        for pattern in count_patterns:
-            match = re.search(pattern, notes_lower)
-            if match:
-                parsed['mandatory_count'] = int(match.group(1))
-                break
-        
-        # Extract category requirements
-        category_patterns = {
-            'wines': r'(\d+)\s+wines?|wines?\s*:\s*(\d+)',
-            'champagne': r'(\d+)\s+champagnes?|champagnes?\s*:\s*(\d+)',
-            'sweets': r'(\d+)\s+sweets?|sweets?\s*:\s*(\d+)',
-            'cheese': r'(\d+)\s+cheese?|cheese?\s*:\s*(\d+)',
-            'ibericos': r'(\d+)\s+ibericos?|ibericos?\s*:\s*(\d+)',
-        }
-        
-        for category, pattern in category_patterns.items():
-            match = re.search(pattern, notes_lower)
-            if match:
-                count = int(match.group(1) or match.group(2))
-                parsed['categories_required'][category] = count
-        
-        # Budget flexibility
-        if 'flexible budget' in notes_lower:
-            parsed['budget_flexibility'] = 0.20
-        elif 'strict budget' in notes_lower:
-            parsed['budget_flexibility'] = 0.05
-        
-        # Preferences
-        parsed['preferences'] = {
-            'loves_sweets': 'loves sweet' in notes_lower or 'sweet tooth' in notes_lower,
-            'premium': 'premium' in notes_lower or 'luxury' in notes_lower,
-            'traditional': 'traditional' in notes_lower or 'classic' in notes_lower
-        }
-        
-        return parsed
-    
     def generate_gift_recommendations(self, partner_id, target_budget, 
                                     client_notes='', dietary_restrictions=None):
         """Generate recommendations with intelligent notes parsing and history learning"""
@@ -177,24 +115,19 @@ class OllamaGiftRecommender(models.Model):
         if not partner:
             return {'success': False, 'error': 'Partner not found'}
         
-        # 1. PARSE NOTES FIRST (HIGHEST PRIORITY)
-        # Create form data context for the parser
-        form_data = {
-            'budget': target_budget,
-            'dietary': dietary_restrictions or []
-        }
-        
-        parser = NotesParser(client_notes, form_data)
-        requirements = parser.parse()
+        # 1. PARSE NOTES FIRST (HIGHEST PRIORITY) - CORRECTED TO USE ODOO MODEL
+        parser = self.env['notes.parser']
+        requirements = parser.parse_client_notes(client_notes)
         
         _logger.info(f"Parsed requirements from notes: {requirements}")
         
         # 2. OVERRIDE FORM VALUES WITH PARSED REQUIREMENTS
-        if requirements.get('override_form', {}).get('budget'):
-            target_budget = requirements['budget']
-            _logger.info(f"Overriding budget from notes: €{target_budget}")
+        if requirements.get('budget_override'):
+            original_budget = target_budget
+            target_budget = requirements['budget_override']
+            _logger.info(f"Overriding budget from notes: €{original_budget} → €{target_budget}")
         
-        if requirements.get('override_form', {}).get('dietary'):
+        if requirements.get('dietary'):
             dietary_restrictions = requirements['dietary']
             _logger.info(f"Overriding dietary from notes: {dietary_restrictions}")
         
@@ -202,18 +135,13 @@ class OllamaGiftRecommender(models.Model):
         previous_data = self._get_previous_order_data(partner_id)
         
         # 4. DETERMINE GENERATION STRATEGY
-        # Priority order:
-        # a) Explicit instructions in notes (highest priority)
-        # b) History-based if requested or available
-        # c) Standard generation
-        
         # Update tracking
         self.total_recommendations += 1
         self.last_recommendation_date = fields.Datetime.now()
         
         # Check for explicit product count requirement
-        if requirements.get('product_count'):
-            _logger.info(f"Strict product count requirement: {requirements['product_count']}")
+        if requirements.get('mandatory_count'):
+            _logger.info(f"Strict product count requirement: {requirements['mandatory_count']}")
             result = self._generate_with_strict_requirements(
                 partner, target_budget, requirements, 
                 dietary_restrictions, client_notes, previous_data
@@ -234,7 +162,7 @@ class OllamaGiftRecommender(models.Model):
         elif previous_data and not requirements.get('special_instructions'):
             _logger.info("Using history-based generation (70/30 rule)")
             # If no specific budget in notes, use previous order budget
-            if not requirements.get('override_form', {}).get('budget'):
+            if not requirements.get('budget_override'):
                 target_budget = previous_data['budget']
                 _logger.info(f"Using budget from previous order: €{target_budget:.2f}")
             
@@ -254,7 +182,7 @@ class OllamaGiftRecommender(models.Model):
             # Fallback if Ollama fails
             if not result or not result.get('success'):
                 _logger.warning("Ollama failed, using fallback")
-                result = self._generate_fallback_recommendation(
+                result = self._generate_fallback_recommendation_enhanced(
                     partner, target_budget, client_notes, 
                     dietary_restrictions, requirements
                 )
@@ -262,7 +190,7 @@ class OllamaGiftRecommender(models.Model):
         # Standard fallback generation
         else:
             _logger.info("Using fallback generation")
-            result = self._generate_fallback_recommendation(
+            result = self._generate_fallback_recommendation_enhanced(
                 partner, target_budget, client_notes, 
                 dietary_restrictions, requirements
             )
@@ -270,8 +198,6 @@ class OllamaGiftRecommender(models.Model):
         # Update success tracking
         if result and result.get('success'):
             self.successful_recommendations += 1
-            
-            # Log the generation method used
             _logger.info(f"Successfully generated composition using method: {result.get('method', 'unknown')}")
         
         return result
@@ -280,8 +206,8 @@ class OllamaGiftRecommender(models.Model):
                                         dietary, notes, previous_data=None):
         """Generate with strict adherence to parsed requirements"""
         
-        product_count = requirements['product_count']
-        budget_flexibility = requirements.get('budget_flexibility', 5)
+        product_count = requirements.get('mandatory_count', requirements.get('product_count', 12))
+        budget_flexibility = requirements.get('budget_flexibility', 10)
         
         # Start with previous products if available (for continuity)
         base_products = []
@@ -309,8 +235,8 @@ class OllamaGiftRecommender(models.Model):
             specific = self._get_specific_products(requirements['specific_products'])
             unique_products = specific + unique_products
         
-        if requirements.get('exclude_products'):
-            unique_products = self._filter_exclusions(unique_products, requirements['exclude_products'])
+        if requirements.get('categories_excluded'):
+            unique_products = self._filter_exclusions(unique_products, requirements['categories_excluded'])
         
         # Select products
         if requirements.get('categories_required'):
@@ -379,7 +305,9 @@ class OllamaGiftRecommender(models.Model):
         total_count = len(previous_products)
         
         # Check if requirements override the count
-        if requirements and requirements.get('product_count'):
+        if requirements and requirements.get('mandatory_count'):
+            total_count = requirements['mandatory_count']
+        elif requirements and requirements.get('product_count'):
             total_count = requirements['product_count']
         
         # Calculate split (70% keep, 30% change)
@@ -448,118 +376,18 @@ class OllamaGiftRecommender(models.Model):
             _logger.error(f"Failed to create composition: {e}")
             return {'success': False, 'error': str(e)}
     
-    def _generate_with_mandatory_count(self, partner_id, target_budget, 
-                                       notes_requirements, dietary_restrictions, notes):
-        """Generate EXACTLY the number of products specified in notes"""
-        
-        mandatory_count = notes_requirements['mandatory_count']
-        _logger.info(f"Generating EXACTLY {mandatory_count} products as specified")
-        
-        # Get available products
-        products = self._get_available_products(target_budget, dietary_restrictions)
-        if not products:
-            return {
-                'success': False,
-                'error': 'No products available matching criteria'
-            }
-        
-        # Calculate target price per item
-        avg_price_per_item = target_budget / mandatory_count
-        
-        selected = []
-        
-        # First, fulfill specific category requirements
-        for category, count in notes_requirements.get('categories_required', {}).items():
-            cat_products = [
-                p for p in products 
-                if category.lower() in p.name.lower()
-            ]
-            
-            # Sort by how close they are to ideal price
-            cat_products.sort(key=lambda p: abs(p.list_price - avg_price_per_item))
-            
-            # Take exactly the required count
-            for i in range(min(count, len(cat_products))):
-                if cat_products[i] not in selected:
-                    selected.append(cat_products[i])
-        
-        # Fill remaining slots
-        remaining_count = mandatory_count - len(selected)
-        
-        if remaining_count > 0:
-            # Get products not yet selected
-            available = [p for p in products if p not in selected]
-            
-            # If user loves sweets, prioritize them
-            if notes_requirements.get('preferences', {}).get('loves_sweets'):
-                sweet_products = [
-                    p for p in available 
-                    if 'sweet' in p.name.lower() or 'chocolate' in p.name.lower()
-                ]
-                available = sweet_products + [p for p in available if p not in sweet_products]
-            
-            # Sort by price proximity to ideal
-            available.sort(key=lambda p: abs(p.list_price - avg_price_per_item))
-            
-            # Add products to reach exact count
-            selected.extend(available[:remaining_count])
-        
-        # CRITICAL: Ensure EXACTLY the right count
-        if len(selected) > mandatory_count:
-            selected = selected[:mandatory_count]
-        elif len(selected) < mandatory_count:
-            # Add any products to reach count
-            for p in products:
-                if p not in selected:
-                    selected.append(p)
-                    if len(selected) >= mandatory_count:
-                        break
-        
-        # Create composition
-        total_cost = sum(p.list_price for p in selected)
-        
-        try:
-            composition = self.env['gift.composition'].sudo().create({
-                'partner_id': partner_id,
-                'target_budget': target_budget,
-                'target_year': fields.Date.today().year,
-                'composition_type': 'custom',
-                'product_ids': [(6, 0, [p.id for p in selected])],
-                'state': 'draft',
-                'client_notes': notes,  # Use client_notes field
-                'ai_reasoning': f"Generated exactly {len(selected)} products as requested in notes: {notes}"
-            })
-            
-            return {
-                'success': True,
-                'composition_id': composition.id,
-                'products': selected,
-                'total_cost': total_cost,
-                'product_count': len(selected),
-                'confidence_score': 0.8,
-                'message': f'Generated exactly {len(selected)} products as requested'
-            }
-        except Exception as e:
-            _logger.error(f"Failed to create composition: {e}")
-            return {
-                'success': False,
-                'error': f'Failed to create composition: {str(e)}'
-            }
-    
-    def _generate_with_ollama(self, partner, target_budget, client_notes, dietary_restrictions):
-        """Generate using Ollama with proper notes enforcement"""
-        
-        # Parse notes
-        notes_requirements = self._parse_notes_inline(client_notes)
+    def _generate_with_ollama_enhanced(self, partner, target_budget, client_notes, 
+                                      dietary_restrictions, requirements):
+        """Generate using Ollama with enhanced requirements"""
         
         # Get products
         products = self._get_available_products(target_budget, dietary_restrictions)
         if not products:
             return None
         
-        # Build prompt with notes enforcement
-        prompt = self._build_ollama_prompt_with_notes(
-            partner, target_budget, client_notes, notes_requirements,
+        # Build prompt with requirements enforcement
+        prompt = self._build_ollama_prompt_enhanced(
+            partner, target_budget, client_notes, requirements,
             dietary_restrictions, products
         )
         
@@ -569,14 +397,14 @@ class OllamaGiftRecommender(models.Model):
             return None
         
         # Parse response
-        return self._process_ollama_response(
+        return self._process_ollama_response_enhanced(
             response, partner, target_budget, client_notes, 
-            dietary_restrictions, notes_requirements
+            dietary_restrictions, requirements
         )
     
-    def _build_ollama_prompt_with_notes(self, partner, target_budget, client_notes, 
-                                        notes_requirements, dietary_restrictions, products):
-        """Build Ollama prompt that enforces notes requirements"""
+    def _build_ollama_prompt_enhanced(self, partner, target_budget, client_notes, 
+                                     requirements, dietary_restrictions, products):
+        """Build enhanced Ollama prompt with all requirements"""
         
         dietary_str = ', '.join(dietary_restrictions) if dietary_restrictions else 'None'
         
@@ -592,11 +420,16 @@ BUDGET: €{target_budget} (MUST be within 95-105% = €{target_budget*0.95:.2f}
 
 MANDATORY REQUIREMENTS FROM NOTES:"""
         
-        if notes_requirements.get('mandatory_count'):
-            prompt += f"\n- EXACTLY {notes_requirements['mandatory_count']} products (no more, no less)"
+        if requirements.get('mandatory_count'):
+            prompt += f"\n- EXACTLY {requirements['mandatory_count']} products (no more, no less)"
+        elif requirements.get('product_count'):
+            prompt += f"\n- EXACTLY {requirements['product_count']} products"
         
-        for category, count in notes_requirements.get('categories_required', {}).items():
+        for category, count in requirements.get('categories_required', {}).items():
             prompt += f"\n- {category}: EXACTLY {count} items"
+        
+        if requirements.get('categories_excluded'):
+            prompt += f"\n- EXCLUDE: {', '.join(requirements['categories_excluded'])}"
         
         prompt += f"""
 
@@ -607,7 +440,7 @@ AVAILABLE PRODUCTS (select from these ONLY):
 {product_list}
 
 CRITICAL RULES:
-1. {"Select EXACTLY " + str(notes_requirements['mandatory_count']) + " products" if notes_requirements.get('mandatory_count') else "Select 10-15 products"}
+1. {"Select EXACTLY " + str(requirements.get('mandatory_count', requirements.get('product_count', '10-15'))) + " products"}
 2. Total must be €{target_budget*0.95:.2f} to €{target_budget*1.05:.2f}
 3. Honor all dietary restrictions
 4. Follow category requirements from notes
@@ -625,9 +458,9 @@ Return ONLY valid JSON:
         
         return prompt
     
-    def _process_ollama_response(self, response, partner, target_budget, client_notes, 
-                                 dietary_restrictions, notes_requirements):
-        """Process Ollama response with notes validation"""
+    def _process_ollama_response_enhanced(self, response, partner, target_budget, client_notes, 
+                                         dietary_restrictions, requirements):
+        """Process Ollama response with enhanced validation"""
         
         try:
             # Parse JSON
@@ -647,10 +480,11 @@ Return ONLY valid JSON:
                     product_ids.append(p['id'])
             
             # Validate count if mandatory
-            if notes_requirements.get('mandatory_count'):
-                if len(product_ids) != notes_requirements['mandatory_count']:
-                    _logger.warning(f"Ollama returned {len(product_ids)} products, expected {notes_requirements['mandatory_count']}")
-                    product_ids = product_ids[:notes_requirements['mandatory_count']]
+            target_count = requirements.get('mandatory_count', requirements.get('product_count'))
+            if target_count:
+                if len(product_ids) != target_count:
+                    _logger.warning(f"Ollama returned {len(product_ids)} products, expected {target_count}")
+                    product_ids = product_ids[:target_count]
             
             # Get products
             selected_products = self.env['product.template'].sudo().browse(product_ids).exists()
@@ -668,8 +502,8 @@ Return ONLY valid JSON:
                 'composition_type': 'custom',
                 'product_ids': [(6, 0, selected_products.ids)],
                 'state': 'draft',
-                'client_notes': client_notes,  # Use client_notes field
-                'ai_reasoning': recommendation.get('ai_reasoning', 'AI-generated selection')
+                'client_notes': client_notes,
+                'ai_reasoning': recommendation.get('reasoning', 'AI-generated selection')
             })
             
             return {
@@ -678,7 +512,8 @@ Return ONLY valid JSON:
                 'products': selected_products,
                 'total_cost': total_cost,
                 'confidence_score': 0.9,
-                'message': f'AI generated {len(selected_products)} products'
+                'message': f'AI generated {len(selected_products)} products',
+                'method': 'ollama_ai'
             }
             
         except Exception as e:
@@ -720,21 +555,23 @@ Return ONLY valid JSON:
             _logger.error(f"Ollama request failed: {str(e)}")
             return None
     
-    def _generate_fallback_recommendation(self, partner, target_budget, client_notes, dietary_restrictions):
-        """Fallback with proper budget compliance and notes enforcement"""
-        
-        # Parse notes
-        notes_requirements = self._parse_notes_inline(client_notes)
+    def _generate_fallback_recommendation_enhanced(self, partner, target_budget, client_notes, 
+                                                  dietary_restrictions, requirements):
+        """Enhanced fallback with requirements support"""
         
         # Get products
         products = self._get_available_products(target_budget, dietary_restrictions)
         if not products:
             return {'success': False, 'error': 'No products available'}
         
-        # Select products
-        if notes_requirements.get('mandatory_count'):
+        # Select products based on requirements
+        if requirements.get('mandatory_count'):
             selected = self._select_exact_count(
-                products, notes_requirements['mandatory_count'], target_budget
+                products, requirements['mandatory_count'], target_budget
+            )
+        elif requirements.get('product_count'):
+            selected = self._select_exact_count(
+                products, requirements['product_count'], target_budget
             )
         else:
             selected = self._select_products_intelligently(products, target_budget)
@@ -753,7 +590,7 @@ Return ONLY valid JSON:
                 'composition_type': 'custom',
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'state': 'draft',
-                'client_notes': client_notes,  # Use client_notes field - THIS IS THE FIX
+                'client_notes': client_notes,
                 'ai_reasoning': f"Rule-based selection: {len(selected)} products, €{total_cost:.2f}"
             })
             
@@ -763,7 +600,8 @@ Return ONLY valid JSON:
                 'products': selected,
                 'total_cost': total_cost,
                 'confidence_score': 0.7,
-                'message': f'Generated {len(selected)} products (€{total_cost:.2f})'
+                'message': f'Generated {len(selected)} products (€{total_cost:.2f})',
+                'method': 'fallback'
             }
         except Exception as e:
             _logger.error(f"Failed to create composition: {e}")
@@ -772,6 +610,7 @@ Return ONLY valid JSON:
                 'error': f'Failed to create composition: {str(e)}'
             }
     
+    # Helper Methods
     def _select_exact_count(self, products, count, target_budget):
         """Select exactly 'count' products optimizing for budget"""
         
@@ -934,84 +773,11 @@ Return ONLY valid JSON:
                 total_amount += line.price_subtotal
         
         return {
-            'budget': total_amount,  # Use untaxed total as budget
+            'budget': total_amount,
             'products': previous_products,
             'order_date': last_order.date_order,
             'order_name': last_order.name
         }
-
-    # def _generate_from_history(self, partner, target_budget, previous_data, notes, dietary):
-    #     """Generate recommendation based on previous orders (70% same, 30% variation)"""
-        
-    #     previous_products = previous_data['products']
-    #     total_count = len(previous_products)
-        
-    #     if total_count == 0:
-    #         # Fallback to normal generation
-    #         return self._generate_with_ollama(partner, target_budget, notes, dietary)
-        
-    #     # Calculate split
-    #     keep_count = int(total_count * 0.7)  # 70% to keep
-    #     change_count = total_count - keep_count  # 30% to change
-        
-    #     # Select products to keep (prioritize by quantity/frequency)
-    #     products_to_keep = []
-    #     products_sorted = sorted(previous_products, key=lambda x: x['qty'], reverse=True)
-        
-    #     for i, item in enumerate(products_sorted[:keep_count]):
-    #         product = item['product']
-    #         # Check if product is still available and matches dietary restrictions
-    #         if self._check_dietary_compliance(product, dietary):
-    #             # Check stock
-    #             if self._has_stock(product):
-    #                 products_to_keep.append(product)
-        
-    #     # Find new products for variation
-    #     new_products = self._find_replacement_products(
-    #         change_count, 
-    #         target_budget - sum(p.list_price for p in products_to_keep),
-    #         dietary,
-    #         exclude_products=products_to_keep
-    #     )
-        
-    #     # Combine all products
-    #     final_products = products_to_keep + new_products
-    #     total_cost = sum(p.list_price for p in final_products)
-        
-    #     # Create composition
-    #     try:
-    #         composition = self.env['gift.composition'].create({
-    #             'partner_id': partner.id,
-    #             'target_budget': target_budget,
-    #             'target_year': fields.Date.today().year,
-    #             'product_ids': [(6, 0, [p.id for p in final_products])],
-    #             'dietary_restrictions': ', '.join(dietary) if dietary else '',
-    #             'client_notes': notes,
-    #             'generation_method': 'ollama',
-    #             'composition_type': 'custom',
-    #             'confidence_score': 0.95,
-    #             'ai_reasoning': f"""Based on previous order {previous_data['order_name']}:
-    #             - Kept {len(products_to_keep)} favorite products (70%)
-    #             - Added {len(new_products)} new products for variety (30%)
-    #             - Total: {len(final_products)} products, €{total_cost:.2f}
-    #             - Previous budget was €{previous_data['budget']:.2f}"""
-    #         })
-            
-    #         # Auto-categorize the products
-    #         composition.auto_categorize_products()
-            
-    #         return {
-    #             'success': True,
-    #             'composition_id': composition.id,
-    #             'products': final_products,
-    #             'total_cost': total_cost,
-    #             'product_count': len(final_products),
-    #             'confidence_score': 0.95,
-    #             'message': f'Generated based on history: {len(products_to_keep)} repeated + {len(new_products)} new'
-    #         }
-    #     except Exception as e:
-    #         _logger.error(f"Failed to create composition: {e}")
-    #         return {'success': False, 'error': str(e)}
 
     def _find_replacement_products(self, count, budget, dietary, exclude_products=None):
         """Find new products similar to excluded ones"""
@@ -1037,9 +803,23 @@ Return ONLY valid JSON:
         products_sorted = sorted(products, key=lambda p: abs(p.list_price - avg_price))
         
         return products_sorted[:count]
+    
+    def _get_available_products_with_stock(self, domain):
+        """Get products with stock available"""
+        products = self.env['product.template'].sudo().search(domain, limit=500)
+        available = []
+        
+        for product in products:
+            if self._has_stock(product):
+                available.append(product)
+        
+        return available
 
     def _has_stock(self, product):
         """Check if product has stock"""
+        if hasattr(product, 'qty_available') and product.qty_available > 0:
+            return True
+            
         for variant in product.product_variant_ids:
             stock_quants = self.env['stock.quant'].search([
                 ('product_id', '=', variant.id),
@@ -1048,6 +828,140 @@ Return ONLY valid JSON:
             if sum(stock_quants.mapped('available_quantity')) > 0:
                 return True
         return False
+    
+    def _check_dietary_compliance(self, product, dietary_restrictions):
+        """Check if product complies with dietary restrictions"""
+        if not dietary_restrictions:
+            return True
+        
+        for restriction in dietary_restrictions:
+            if restriction == 'halal':
+                if hasattr(product, 'contains_pork') and product.contains_pork:
+                    return False
+                if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
+                    return False
+            elif restriction == 'vegan':
+                if hasattr(product, 'is_vegan') and not product.is_vegan:
+                    return False
+            elif restriction == 'gluten_free':
+                if hasattr(product, 'contains_gluten') and product.contains_gluten:
+                    return False
+        
+        return True
+    
+    def _get_specific_products(self, product_list):
+        """Get specific products by name or code"""
+        products = []
+        for item in product_list:
+            # Search by name or internal reference
+            domain = ['|', 
+                     ('name', 'ilike', item),
+                     ('default_code', 'ilike', item)]
+            found = self.env['product.template'].search(domain, limit=5)
+            products.extend(found)
+        return products
+    
+    def _filter_exclusions(self, products, exclusions):
+        """Filter out excluded products"""
+        filtered = []
+        for product in products:
+            exclude = False
+            for exclusion in exclusions:
+                if exclusion.lower() in product.name.lower():
+                    exclude = True
+                    break
+            if not exclude:
+                filtered.append(product)
+        return filtered
+    
+    def _select_by_categories(self, products, categories_required, total_count, budget):
+        """Select products by category requirements"""
+        selected = []
+        
+        # First fulfill category requirements
+        for category, count in categories_required.items():
+            cat_products = [p for p in products if category.lower() in p.name.lower()]
+            selected.extend(cat_products[:count])
+        
+        # Fill remaining slots
+        remaining_count = total_count - len(selected)
+        if remaining_count > 0:
+            unused = [p for p in products if p not in selected]
+            selected.extend(unused[:remaining_count])
+        
+        return selected
+    
+    def _optimize_selection(self, products, target_count, target_budget, flexibility):
+        """Optimize product selection to match count and budget"""
+        
+        # Calculate target average price
+        avg_price = target_budget / target_count if target_count > 0 else 0
+        
+        # Score and sort products
+        scored_products = []
+        for product in products:
+            # Score based on price proximity to average
+            price_score = 1 / (1 + abs(product.list_price - avg_price))
+            
+            # Add variety score
+            variety_score = random.uniform(0.8, 1.2)
+            
+            total_score = price_score * variety_score
+            scored_products.append((product, total_score))
+        
+        # Sort by score
+        scored_products.sort(key=lambda x: x[1], reverse=True)
+        
+        # Select products
+        selected = []
+        current_total = 0
+        budget_min = target_budget * (1 - flexibility/100)
+        budget_max = target_budget * (1 + flexibility/100)
+        
+        for product, score in scored_products:
+            if len(selected) < target_count:
+                future_total = current_total + product.list_price
+                remaining_slots = target_count - len(selected) - 1
+                
+                if remaining_slots > 0:
+                    # Check if we can still reach target with remaining slots
+                    min_possible = future_total + (remaining_slots * 10)
+                    max_possible = future_total + (remaining_slots * 500)
+                    
+                    if min_possible <= budget_max and max_possible >= budget_min:
+                        selected.append(product)
+                        current_total = future_total
+                else:
+                    # Last product - try to hit target
+                    if budget_min <= future_total <= budget_max:
+                        selected.append(product)
+                        current_total = future_total
+        
+        return selected
+    
+    def _build_reasoning(self, requirements, products, total_cost, target_budget):
+        """Build detailed reasoning for the composition"""
+        
+        reasoning_parts = []
+        
+        if requirements.get('mandatory_count') or requirements.get('product_count'):
+            count = requirements.get('mandatory_count', requirements.get('product_count'))
+            reasoning_parts.append(f"✓ Matched requested count: {count} products")
+        
+        if requirements.get('budget_override'):
+            variance = ((total_cost - target_budget) / target_budget * 100)
+            reasoning_parts.append(f"✓ Budget adherence: €{total_cost:.2f} ({variance:+.1f}% from target)")
+        
+        if requirements.get('dietary'):
+            reasoning_parts.append(f"✓ Dietary compliance: {', '.join(requirements['dietary'])}")
+        
+        if requirements.get('categories_required'):
+            reasoning_parts.append(f"✓ Category requirements met: {requirements['categories_required']}")
+        
+        if requirements.get('special_instructions'):
+            reasoning_parts.append(f"✓ Special instructions followed")
+        
+        return "\n".join(reasoning_parts)
     
     def action_view_recommendations(self):
         """View all recommendations"""
@@ -1077,7 +991,6 @@ Return ONLY valid JSON:
         """Placeholder for future machine learning functionality"""
         self.ensure_one()
         
-        # For now, just show a notification that this feature is coming soon
         return {
             'type': 'ir.actions.client',
             'tag': 'display_notification',
