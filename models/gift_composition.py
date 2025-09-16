@@ -8,14 +8,15 @@ _logger = logging.getLogger(__name__)
 class GiftComposition(models.Model):
     _name = 'gift.composition'
     _description = 'Gift Composition'
+    _inherit = ['mail.thread', 'mail.activity.mixin']  # ADD THIS LINE for chatter support
     _order = 'create_date desc'
     _rec_name = 'display_name'
 
     # Keep all existing fields
-    name = fields.Char(string='Reference', default='New', copy=False)
+    name = fields.Char(string='Reference', default='New', copy=False, tracking=True)
     display_name = fields.Char(string='Display Name', compute='_compute_display_name', store=True)
     
-    partner_id = fields.Many2one('res.partner', string='Client', required=True, ondelete='cascade')
+    partner_id = fields.Many2one('res.partner', string='Client', required=True, ondelete='cascade', tracking=True)
     partner_email = fields.Char(related='partner_id.email', string='Email', readonly=True)
     partner_phone = fields.Char(related='partner_id.phone', string='Phone', readonly=True)
     
@@ -24,7 +25,7 @@ class GiftComposition(models.Model):
         ('experience', 'Experience'),
         ('custom', 'Custom Made'),
         ('hybrid', 'Hybrid')
-    ], string='Type', default='custom', required=True,
+    ], string='Type', default='custom', required=True, tracking=True,
        help="Experience: Pre-configured package | Custom: AI-generated | Hybrid: Experience + Custom")
     
     experience_code = fields.Char(string='Experience Code', help="Internal code for the experience")
@@ -42,7 +43,7 @@ class GiftComposition(models.Model):
     
     # Budget Information (keep existing)
     currency_id = fields.Many2one('res.currency', default=lambda self: self.env.company.currency_id)
-    target_budget = fields.Monetary(string='Target Budget', currency_field='currency_id', required=True)
+    target_budget = fields.Monetary(string='Target Budget', currency_field='currency_id', required=True, tracking=True)
     actual_cost = fields.Monetary(string='Actual Cost', currency_field='currency_id', compute='_compute_actual_cost', store=True)
     budget_variance = fields.Float(string='Budget Variance %', compute='_compute_budget_variance', store=True)
     
@@ -140,17 +141,13 @@ class GiftComposition(models.Model):
         ('cancelled', 'Cancelled')
     ], string='State', default='draft', tracking=True)
     
-    # Tracking (keep existing)
-    create_date = fields.Datetime(string='Creation Date', readonly=True)
-    create_uid = fields.Many2one('res.users', string='Created By', readonly=True)
-    
     # Statistics
     product_count = fields.Integer(string='Product Count', compute='_compute_product_count', store=True)
     
     # NEW: Category distribution
     category_distribution = fields.Text(string='Category Distribution', compute='_compute_category_distribution')
     
-    # ----------------- Computed Fields -----------------
+    # Rest of the methods remain the same...
     
     @api.depends('name', 'partner_id', 'composition_type', 'experience_name')
     def _compute_display_name(self):
@@ -253,8 +250,6 @@ class GiftComposition(models.Model):
             
             record.category_distribution = " | ".join(distribution) if distribution else "No categorized products"
     
-    # ----------------- CRUD Methods -----------------
-    
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
@@ -267,66 +262,54 @@ class GiftComposition(models.Model):
                     'custom': 'CST'
                 }.get(comp_type, 'GFT')
                 
-                # Generate sequence
-                sequence_code = 'gift.composition'
-                if self.env['ir.sequence'].search([('code', '=', sequence_code)]):
-                    seq_number = self.env['ir.sequence'].next_by_code(sequence_code)
-                else:
-                    # Create sequence if it doesn't exist
-                    self.env['ir.sequence'].create({
-                        'name': 'Gift Composition Sequence',
-                        'code': sequence_code,
-                        'prefix': 'GFT/',
-                        'padding': 4,
-                        'number_increment': 1,
-                    })
-                    seq_number = self.env['ir.sequence'].next_by_code(sequence_code)
-                
-                vals['name'] = f"{prefix}/{seq_number}" if seq_number else f'{prefix}/001'
+                # Generate sequence - simpler approach
+                vals['name'] = self.env['ir.sequence'].next_by_code('gift.composition') or f'{prefix}/001'
         
         return super().create(vals_list)
     
-    # ----------------- Business Methods -----------------
-    
     def action_confirm(self):
         """Confirm the composition"""
-        self.ensure_one()
-        self.state = 'confirmed'
+        for record in self:
+            record.state = 'confirmed'
+            
+            # Log the confirmation using mail thread
+            body = f"""
+            <p><strong>Composition Confirmed</strong></p>
+            <ul>
+                <li>Type: {record.composition_type}</li>
+                <li>Budget: €{record.target_budget:.2f}</li>
+                <li>Actual Cost: €{record.actual_cost:.2f}</li>
+                <li>Products: {record.product_count}</li>
+            </ul>
+            """
+            
+            if record.experience_name:
+                body += f"<p>Experience: {record.experience_name}</p>"
+            
+            record.message_post(body=body, subject="Composition Confirmed")
         
-        # Log the confirmation
-        body = f"""
-        <p><strong>Composition Confirmed</strong></p>
-        <ul>
-            <li>Type: {self.composition_type}</li>
-            <li>Budget: €{self.target_budget:.2f}</li>
-            <li>Actual Cost: €{self.actual_cost:.2f}</li>
-            <li>Products: {self.product_count}</li>
-        </ul>
-        """
-        
-        if self.experience_name:
-            body += f"<p>Experience: {self.experience_name}</p>"
-        
-        self.message_post(body=body, subject="Composition Confirmed")
+        return True
     
     def action_cancel(self):
         """Cancel the composition"""
-        self.ensure_one()
-        self.state = 'cancelled'
+        for record in self:
+            record.state = 'cancelled'
+        return True
     
     def action_set_draft(self):
         """Reset to draft"""
-        self.ensure_one()
-        self.state = 'draft'
+        for record in self:
+            record.state = 'draft'
+        return True
     
     def action_deliver(self):
         """Mark as delivered"""
-        self.ensure_one()
-        self.state = 'delivered'
-        
-        # Create a learning record if applicable
-        if self.generation_method in ['ollama', 'experience', 'hybrid']:
-            self._create_learning_record()
+        for record in self:
+            record.state = 'delivered'
+            # Create a learning record if applicable
+            if record.generation_method in ['ollama', 'experience', 'hybrid']:
+                record._create_learning_record()
+        return True
     
     def _create_learning_record(self):
         """Create a learning record for AI improvement"""
@@ -385,7 +368,7 @@ class GiftComposition(models.Model):
             elif 'vegetarian' in self.dietary_restrictions.lower():
                 dietary = 'vegetarian'
         
-        wizard = self.env['ollama.recommendation.wizard'].create({
+        wizard_vals = {
             'partner_id': self.partner_id.id,
             'target_budget': self.target_budget,
             'target_year': self.target_year,
@@ -393,8 +376,13 @@ class GiftComposition(models.Model):
             'dietary_restrictions_text': self.dietary_restrictions,
             'client_notes': self.client_notes,
             'engine_type': self.composition_type if self.composition_type != 'custom' else 'custom',
-            'selected_experience': self.experience_code if self.experience_code else False,
-        })
+        }
+        
+        # Only add experience code if it exists
+        if self.experience_code:
+            wizard_vals['selected_experience'] = self.experience_code
+        
+        wizard = self.env['ollama.recommendation.wizard'].create(wizard_vals)
         
         return {
             'type': 'ir.actions.act_window',
@@ -488,6 +476,8 @@ class GiftComposition(models.Model):
             self.charcuterie_product_ids = [(6, 0, charcuterie)]
         if sweets:
             self.sweet_product_ids = [(6, 0, sweets)]
+        
+        return True
     
     @api.model
     def get_experience_compositions(self):

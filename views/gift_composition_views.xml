@@ -30,8 +30,8 @@
                     </header>
                     
                     <sheet>
-                        <!-- Composition Type Banner -->
-                        <div class="oe_button_box" position="inside">
+                        <!-- Composition Type Banner - Fixed syntax -->
+                        <div class="oe_button_box" name="button_box">
                             <button class="oe_stat_button" icon="fa-gift">
                                 <field name="composition_type" widget="statinfo" string="Type"/>
                             </button>
@@ -48,7 +48,7 @@
                                 <field name="display_name" readonly="1"/>
                             </h1>
                             <h3 attrs="{'invisible': [('experience_name', '=', False)]}">
-                                <field name="experience_name" readonly="1" style="color: #7c3aed;"/>
+                                <field name="experience_name" readonly="1"/>
                             </h3>
                         </div>
                         
@@ -82,7 +82,7 @@
                             <!-- Products by Category -->
                             <page string="🍷 Beverages" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="beverage_product_ids">
-                                    <tree string="Beverage Products">
+                                    <tree string="Beverage Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -92,7 +92,7 @@
                             
                             <page string="🥃 Aperitifs" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="aperitif_product_ids">
-                                    <tree string="Aperitif Products">
+                                    <tree string="Aperitif Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -102,7 +102,7 @@
                             
                             <page string="🦆 Foie Gras" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="foie_product_ids">
-                                    <tree string="Foie Gras Products">
+                                    <tree string="Foie Gras Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -112,7 +112,7 @@
                             
                             <page string="🥫 Canned Foods" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="canned_product_ids">
-                                    <tree string="Canned Products">
+                                    <tree string="Canned Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -122,7 +122,7 @@
                             
                             <page string="🥓 Charcuterie" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="charcuterie_product_ids">
-                                    <tree string="Charcuterie Products">
+                                    <tree string="Charcuterie Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -132,7 +132,7 @@
                             
                             <page string="🍬 Sweets" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
                                 <field name="sweet_product_ids">
-                                    <tree string="Sweet Products">
+                                    <tree string="Sweet Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="list_price" widget="monetary"/>
@@ -143,7 +143,7 @@
                             <!-- All Products (always visible) -->
                             <page string="📦 All Products">
                                 <field name="product_ids">
-                                    <tree string="All Products">
+                                    <tree string="All Products" create="false" delete="false">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="categ_id"/>
@@ -169,8 +169,10 @@
                         
                     </sheet>
                     
+                    <!-- Chatter widget - now works because we inherit mail.thread -->
                     <div class="oe_chatter">
                         <field name="message_follower_ids" widget="mail_followers"/>
+                        <field name="activity_ids" widget="mail_activity"/>
                         <field name="message_ids" widget="mail_thread"/>
                     </div>
                 </form>
