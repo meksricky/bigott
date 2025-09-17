@@ -331,88 +331,93 @@ class OllamaRecommendationWizard(models.TransientModel):
 
     # === ACTION METHODS (ALL REQUIRED METHODS) ===
     
+    composition_type = fields.Selection([
+        ('custom', 'Custom'),
+        ('hybrid', 'Hybrid'),
+        ('experience', 'Experience')
+    ], string="Composition Type", default='custom',
+    help="Leave empty to use historical preference or default")
+
     def action_generate_recommendation(self):
-        """Generate gift recommendation based on selected type"""
+        """Generate recommendation with complete data merging"""
         self.ensure_one()
         
+        # Validate inputs
         if not self.partner_id:
-            raise UserError("Please select a client.")
+            raise UserError("Please select a client")
         
-        if self.engine_type in ['experience', 'hybrid'] and not self.selected_experience:
-            raise UserError("Please select an experience for this composition type.")
+        # Prepare dietary restrictions
+        dietary = []
+        if self.is_halal:
+            dietary.append('halal')
+        if self.is_vegan:
+            dietary.append('vegan')
+        if self.is_gluten_free:
+            dietary.append('gluten_free')
+        if self.is_non_alcoholic:
+            dietary.append('non_alcoholic')
         
-        if not self.recommender_id:
-            raise UserError("No recommender available. Please configure an Ollama recommender first.")
+        # Build notes with product count if explicitly specified
+        final_notes = self.client_notes or ""
         
-        _logger.info(f"Generating {self.engine_type} recommendation for {self.partner_id.name}")
-        
-        try:
-            self.write({'state': 'generating'})
-            
-            dietary = self._prepare_dietary_restrictions()
-            
-            if self.engine_type == 'experience':
-                result = self._generate_experience_based()
-            elif self.engine_type == 'hybrid':
-                result = self._generate_hybrid()
+        # Only add product count to notes if user explicitly checked the box
+        if self.specify_product_count and self.product_count:
+            count_instruction = f"Must have exactly {self.product_count} products."
+            if final_notes:
+                # Check if count is already mentioned in notes
+                if not any(word in final_notes.lower() for word in ['product', 'item', 'piece']):
+                    final_notes += f" {count_instruction}"
             else:
-                result = self.recommender_id.generate_gift_recommendations(
-                    partner_id=self.partner_id.id,
-                    target_budget=self.target_budget,
-                    client_notes=self.client_notes or '',
-                    dietary_restrictions=dietary
-                )
+                final_notes = count_instruction
             
-            if result.get('success'):
-                if result.get('composition_id'):
-                    composition = self.env['gift.composition'].browse(result['composition_id'])
-                    exp_code = self.selected_experience if self.selected_experience else False
-                    exp_name = EXPERIENCES_2024[self.selected_experience]['name'] if self.selected_experience else False
-                    
-                    comp_vals = {
-                        'composition_type': self.engine_type,
-                    }
-                    if exp_code:
-                        comp_vals['experience_code'] = exp_code
-                        comp_vals['experience_name'] = exp_name
-                        comp_vals['experience_category'] = EXPERIENCES_2024[self.selected_experience].get('category', 'other')
-                    
-                    composition.write(comp_vals)
-                
-                self.write({
-                    'state': 'done',
-                    'result_message': self._format_enhanced_success_message(result),
-                    'composition_id': result.get('composition_id'),
-                    'recommended_products': [(6, 0, [p.id for p in result.get('products', [])])],
-                    'total_cost': result.get('total_cost', 0.0),
-                    'confidence_score': result.get('confidence_score', 0.0)
-                })
-                
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Recommendation Results',
-                    'res_model': 'ollama.recommendation.wizard',
-                    'res_id': self.id,
-                    'view_mode': 'form',
-                    'target': 'new',
-                    'context': dict(self._context, show_results=True),
-                }
-            else:
-                error_msg = result.get('error', 'Unknown error occurred')
-                self.write({
-                    'state': 'error',
-                    'error_message': error_msg,
-                    'result_message': f"<div class='alert alert-danger'>{error_msg}</div>"
-                })
-                raise UserError(f"Recommendation failed: {error_msg}")
-                
-        except Exception as e:
-            self.write({
-                'state': 'error',
-                'error_message': str(e)
-            })
-            _logger.exception(f"Recommendation wizard error: {e}")
-            raise
+            _logger.info(f"🎯 User explicitly requested {self.product_count} products via form checkbox")
+        
+        # Log the generation request
+        _logger.info(f"""
+        ========== GENERATION REQUEST ==========
+        Client: {self.partner_id.name}
+        Budget (Form): €{self.target_budget:.2f} {'(provided)' if self.target_budget else '(empty)'}
+        Product Count (Form): {self.product_count if self.specify_product_count else 'Not specified'}
+        Dietary (Form): {dietary if dietary else 'None'}
+        Composition Type (Form): {self.composition_type or 'Not specified'}
+        Notes: {final_notes[:100]}{'...' if len(final_notes) > 100 else ''}
+        ========================================
+        """)
+        
+        # Generate recommendation with all data
+        result = self.recommender_id.generate_gift_recommendations(
+            partner_id=self.partner_id.id,
+            target_budget=self.target_budget if self.target_budget else 0,
+            client_notes=final_notes,
+            dietary_restrictions=dietary,
+            composition_type=self.composition_type
+        )
+        
+        if result.get('success'):
+            # Log success details
+            _logger.info(f"""
+            ========== GENERATION SUCCESS ==========
+            Method: {result.get('method', 'unknown')}
+            Products: {result.get('product_count', 0)}
+            Total Cost: €{result.get('total_cost', 0):.2f}
+            Confidence: {result.get('confidence_score', 0)*100:.0f}%
+            Sources Used: Multiple (see logs above)
+            ========================================
+            """)
+            
+            # Show success and open the composition
+            return {
+                'type': 'ir.actions.act_window',
+                'name': 'Generated Composition',
+                'res_model': 'gift.composition',
+                'res_id': result['composition_id'],
+                'view_mode': 'form',
+                'target': 'current',
+            }
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            _logger.error(f"Generation failed: {error_msg}")
+            raise UserError(f"Generation failed: {error_msg}")
 
     def action_view_composition(self):
         """View the generated composition - THIS WAS MISSING!"""

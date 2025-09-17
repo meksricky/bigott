@@ -97,6 +97,15 @@
                                         attrs="{'invisible': [('composition_id', '=', False)]}"/>
                             </group>
                         </group>
+
+                        <group string="Composition Details">
+                            <field name="composition_type" widget="radio" 
+                                help="Custom: Mixed products | Hybrid: Wine-focused | Experience: Activity-focused"/>
+                            <field name="specify_product_count"/>
+                            <field name="product_count" 
+                                attrs="{'invisible': [('specify_product_count', '=', False)], 
+                                        'required': [('specify_product_count', '=', True)]}"/>
+                        </group>
                         
                         <!-- Recommended Products -->
                         <notebook attrs="{'invisible': [('state', '!=', 'done')]}">

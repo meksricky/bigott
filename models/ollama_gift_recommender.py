@@ -667,144 +667,547 @@ Return ONLY the JSON object, no other text."""
     # ============== MAIN RECOMMENDATION METHOD ==============
     
     def generate_gift_recommendations(self, partner_id, target_budget, 
-                                    client_notes='', dietary_restrictions=None):
-        """Generate recommendations with intelligent parsing and comprehensive learning"""
+                                    client_notes='', dietary_restrictions=None,
+                                    composition_type=None):
+        """Main generation method with intelligent multi-source merging"""
         
         partner = self.env['res.partner'].browse(partner_id)
         if not partner:
             return {'success': False, 'error': 'Partner not found'}
         
-        # Create form data context for the parser
+        # 1. COLLECT DATA FROM ALL SOURCES
+        _logger.info("="*60)
+        _logger.info(f"STARTING GENERATION FOR: {partner.name}")
+        _logger.info("="*60)
+        
+        # Form data (what was explicitly provided in the wizard)
         form_data = {
-            'budget': target_budget,
-            'dietary': dietary_restrictions or []
+            'budget': target_budget if target_budget and target_budget > 0 else None,
+            'dietary': dietary_restrictions or [],
+            'composition_type': composition_type
         }
+        _logger.info(f"📋 FORM DATA: Budget={form_data['budget']}, Dietary={form_data['dietary']}, Type={form_data['composition_type']}")
         
-        # 1. PARSE NOTES USING OLLAMA
-        _logger.info(f"Parsing notes for partner {partner.name}: {client_notes}")
-        requirements = self._parse_notes_with_ollama(client_notes, form_data)
+        # Parse notes to extract requirements
+        notes_data = self._parse_notes_with_ollama(client_notes, form_data) if client_notes else {}
+        _logger.info(f"📝 NOTES DATA: {notes_data}")
         
-        # 2. GET COMPREHENSIVE LEARNING DATA (cached for performance)
+        # Get historical patterns
         learning_data = self._get_or_update_learning_cache(partner_id)
-        patterns = learning_data.get('patterns')
-        seasonal = learning_data.get('seasonal')
-        similar_clients = learning_data.get('similar_clients')
+        patterns = learning_data.get('patterns', {})
+        seasonal = learning_data.get('seasonal', {})
+        _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
         
-        # Get product affinities (global, not per client)
-        product_affinities = self._analyze_product_affinity() if self.total_recommendations % 10 == 0 else {}
+        # Get previous sales for 80/20 rule
+        previous_sales = self._get_all_previous_sales_data(partner_id)
         
-        # 3. APPLY OVERRIDES FROM NOTES
-        if requirements.get('budget_override'):
-            original_budget = target_budget
-            target_budget = requirements['budget_override']
-            _logger.info(f"✅ Budget override: €{original_budget} → €{target_budget}")
+        # 2. INTELLIGENTLY MERGE REQUIREMENTS FROM ALL SOURCES
+        final_requirements = self._merge_all_requirements(
+            notes_data, form_data, patterns, seasonal
+        )
         
-        if requirements.get('dietary'):
-            dietary_restrictions = requirements['dietary']
-            _logger.info(f"✅ Dietary override: {dietary_restrictions}")
+        # 3. LOG MERGED REQUIREMENTS
+        _logger.info("="*60)
+        _logger.info("FINAL MERGED REQUIREMENTS:")
+        _logger.info(f"  💰 Budget: €{final_requirements['budget']:.2f} (source: {final_requirements['budget_source']})")
+        _logger.info(f"  📦 Products: {final_requirements['product_count']} (source: {final_requirements['count_source']}, strict={final_requirements['enforce_count']})")
+        _logger.info(f"  🥗 Dietary: {final_requirements['dietary']} (source: {final_requirements['dietary_source']})")
+        _logger.info(f"  🎁 Type: {final_requirements['composition_type']} (source: {final_requirements['type_source']})")
+        _logger.info(f"  📐 Flexibility: {final_requirements['budget_flexibility']}%")
+        if final_requirements.get('categories_required'):
+            _logger.info(f"  📂 Categories Required: {final_requirements['categories_required']}")
+        if final_requirements.get('specific_products'):
+            _logger.info(f"  ⭐ Specific Products: {final_requirements['specific_products']}")
+        _logger.info("="*60)
         
-        # 4. APPLY LEARNING INSIGHTS
-        if patterns and not requirements.get('budget_override'):
-            # Adjust budget based on trend
-            if patterns['budget_trend'] == 'increasing':
-                suggested_budget = target_budget * 1.1
-                _logger.info(f"📈 Client shows increasing budget trend. Suggesting: €{suggested_budget:.2f}")
-                # Only apply if no explicit budget in notes
-                if not requirements.get('budget_override'):
-                    target_budget = suggested_budget
-            elif patterns['budget_trend'] == 'decreasing':
-                suggested_budget = target_budget * 0.95
-                _logger.info(f"📉 Client shows decreasing budget trend. Adjusting to: €{suggested_budget:.2f}")
-                if not requirements.get('budget_override'):
-                    target_budget = suggested_budget
-            
-            # Log insights for generation
-            if patterns['favorite_products']:
-                _logger.info(f"⭐ Client has {len(patterns['favorite_products'])} favorite products to prioritize")
-            
-            if patterns.get('preferred_categories'):
-                _logger.info(f"📦 Preferred categories: {list(patterns['preferred_categories'].keys())[:3]}")
-        
-        if seasonal and seasonal.get('seasonal_favorites'):
-            _logger.info(f"🌡️ Current season: {seasonal['current_season']} with {len(seasonal['seasonal_favorites'])} seasonal preferences")
-        
-        if similar_clients:
-            _logger.info(f"👥 Found {len(similar_clients)} similar clients for collaborative learning")
-        
-        # 5. GET PREVIOUS ORDER DATA
-        previous_data = self._get_previous_order_data(partner_id)
-        
-        # 6. DETERMINE GENERATION STRATEGY
+        # 4. UPDATE TRACKING
         self.total_recommendations += 1
         self.last_recommendation_date = fields.Datetime.now()
         
-        # Pass learning data to generation methods
+        # 5. CREATE GENERATION CONTEXT
         generation_context = {
             'patterns': patterns,
             'seasonal': seasonal,
-            'similar_clients': similar_clients,
-            'product_affinities': product_affinities,
-            'previous_data': previous_data
+            'similar_clients': learning_data.get('similar_clients'),
+            'previous_sales': previous_sales,
+            'requirements_merged': True,
+            'sources_used': {
+                'notes': bool(notes_data),
+                'form': bool(form_data.get('budget') or form_data.get('dietary') or form_data.get('composition_type')),
+                'history': bool(patterns)
+            }
         }
         
-        # Check for explicit product count requirement
-        if requirements.get('product_count'):
-            _logger.info(f"📋 Generating with strict product count: {requirements['product_count']}")
-            result = self._generate_with_strict_requirements(
-                partner, target_budget, requirements, 
-                dietary_restrictions, client_notes, generation_context
-            )
+        # 6. DETERMINE GENERATION STRATEGY
+        strategy = self._determine_generation_strategy(
+            previous_sales, patterns, final_requirements, client_notes
+        )
+        _logger.info(f"🎯 GENERATION STRATEGY: {strategy}")
         
-        # Check if we should use history
-        elif (previous_data and 
-            ('like last time' in client_notes.lower() or 
-             'same as before' in client_notes.lower())):
-            _logger.info("🔄 Using history-based generation as requested")
-            result = self._generate_from_history_enhanced(
-                partner, target_budget, previous_data,
-                client_notes, dietary_restrictions, requirements,
-                generation_context
+        # 7. EXECUTE GENERATION
+        if strategy == '8020_rule':
+            result = self._generate_with_8020_rule(
+                partner, final_requirements, client_notes, generation_context
             )
-        
-        # Use pattern-based generation if good history exists
-        elif patterns and patterns.get('total_orders', 0) >= 3:
-            _logger.info("📊 Using pattern-based generation (sufficient history)")
-            result = self._generate_from_patterns(
-                partner, target_budget, client_notes,
-                dietary_restrictions, requirements, generation_context
+        elif strategy == 'similar_clients':
+            result = self._generate_from_similar_clients(
+                partner, final_requirements, client_notes, generation_context
             )
-        
-        # Try Ollama generation
-        elif self.ollama_enabled:
-            _logger.info("🤖 Using Ollama AI generation")
-            result = self._generate_with_ollama_enhanced(
-                partner, target_budget, client_notes, 
-                dietary_restrictions, requirements, generation_context
+        elif strategy == 'pattern_based':
+            result = self._generate_from_patterns_enhanced(
+                partner, final_requirements, client_notes, generation_context
             )
-            
-            if not result or not result.get('success'):
-                _logger.warning("Ollama failed, using fallback")
-                result = self._generate_fallback_recommendation_enhanced(
-                    partner, target_budget, client_notes, 
-                    dietary_restrictions, requirements
-                )
-        
-        # Standard fallback generation
         else:
-            _logger.info("📝 Using fallback generation")
-            result = self._generate_fallback_recommendation_enhanced(
-                partner, target_budget, client_notes, 
-                dietary_restrictions, requirements
+            result = self._generate_with_universal_enforcement(
+                partner, final_requirements, client_notes, generation_context
             )
         
-        # Update success tracking
+        # 8. VALIDATE RESULT
         if result and result.get('success'):
             self.successful_recommendations += 1
-            _logger.info(f"✅ Success: {result.get('product_count')} products, €{result.get('total_cost'):.2f}")
-        else:
-            _logger.error(f"❌ Generation failed: {result.get('error', 'Unknown error')}")
+            self._validate_and_log_result(result, final_requirements)
         
         return result
+
+    def _merge_all_requirements(self, notes_data, form_data, patterns, seasonal):
+        """Intelligently merge requirements from all sources"""
+        
+        merged = {
+            # Budget
+            'budget': None,
+            'budget_source': 'none',
+            'budget_flexibility': 10,
+            
+            # Product count
+            'product_count': None,
+            'count_source': 'none',
+            'enforce_count': False,
+            
+            # Dietary
+            'dietary': [],
+            'dietary_source': 'none',
+            
+            # Composition type
+            'composition_type': 'custom',
+            'type_source': 'default',
+            
+            # Categories and products
+            'categories_required': {},
+            'categories_excluded': [],
+            'specific_products': [],
+            'special_instructions': [],
+        }
+        
+        # 1. MERGE BUDGET (Priority: Notes > Form > History)
+        if notes_data.get('budget_override'):
+            merged['budget'] = notes_data['budget_override']
+            merged['budget_source'] = 'notes'
+            _logger.info(f"💰 Budget from NOTES: €{merged['budget']:.2f}")
+        elif form_data.get('budget'):
+            merged['budget'] = form_data['budget']
+            merged['budget_source'] = 'form'
+            _logger.info(f"💰 Budget from FORM: €{merged['budget']:.2f}")
+        elif patterns and patterns.get('avg_order_value'):
+            # Apply trend adjustment to historical budget
+            historical_budget = patterns['avg_order_value']
+            if patterns.get('budget_trend') == 'increasing':
+                historical_budget *= 1.1
+            elif patterns.get('budget_trend') == 'decreasing':
+                historical_budget *= 0.95
+            merged['budget'] = historical_budget
+            merged['budget_source'] = f"history ({patterns.get('budget_trend', 'stable')} trend)"
+            _logger.info(f"💰 Budget from HISTORY: €{merged['budget']:.2f}")
+        else:
+            merged['budget'] = 1000.0  # Default
+            merged['budget_source'] = 'default'
+            _logger.info(f"💰 Budget DEFAULT: €{merged['budget']:.2f}")
+        
+        # 2. MERGE PRODUCT COUNT (Priority: Notes > History > Default)
+        if notes_data.get('product_count'):
+            merged['product_count'] = notes_data['product_count']
+            merged['enforce_count'] = True  # Notes count is always strict
+            merged['count_source'] = 'notes (strict)'
+            _logger.info(f"📦 Product count from NOTES: {merged['product_count']} (STRICT)")
+        elif patterns and patterns.get('avg_product_count'):
+            merged['product_count'] = int(round(patterns['avg_product_count']))
+            merged['enforce_count'] = False  # Historical count is flexible
+            merged['count_source'] = 'history (flexible)'
+            _logger.info(f"📦 Product count from HISTORY: {merged['product_count']} (flexible)")
+        else:
+            # Estimate based on budget
+            avg_price = 80  # Default assumption
+            if patterns and patterns.get('preferred_price_range'):
+                avg_price = patterns['preferred_price_range'].get('avg', 80)
+            merged['product_count'] = max(8, min(20, int(merged['budget'] / avg_price)))
+            merged['enforce_count'] = False
+            merged['count_source'] = 'estimated'
+            _logger.info(f"📦 Product count ESTIMATED: {merged['product_count']}")
+        
+        # 3. MERGE DIETARY (Union of Notes and Form)
+        dietary_set = set()
+        
+        # Add from notes
+        if notes_data.get('dietary'):
+            dietary_set.update(notes_data['dietary'])
+            merged['dietary_source'] = 'notes'
+            _logger.info(f"🥗 Dietary from NOTES: {notes_data['dietary']}")
+        
+        # Add from form (union, not replace)
+        if form_data.get('dietary'):
+            dietary_set.update(form_data['dietary'])
+            if merged['dietary_source'] == 'notes':
+                merged['dietary_source'] = 'notes+form'
+            else:
+                merged['dietary_source'] = 'form'
+            _logger.info(f"🥗 Dietary from FORM: {form_data['dietary']}")
+        
+        merged['dietary'] = list(dietary_set)
+        if not merged['dietary']:
+            merged['dietary_source'] = 'none'
+        
+        # 4. MERGE COMPOSITION TYPE (Priority: Notes > Form > History > Default)
+        if notes_data.get('composition_type'):
+            merged['composition_type'] = notes_data['composition_type']
+            merged['type_source'] = 'notes'
+            _logger.info(f"🎁 Composition type from NOTES: {merged['composition_type']}")
+        elif form_data.get('composition_type'):
+            merged['composition_type'] = form_data['composition_type']
+            merged['type_source'] = 'form'
+            _logger.info(f"🎁 Composition type from FORM: {merged['composition_type']}")
+        elif patterns and patterns.get('total_orders') >= 3:
+            # Determine from history
+            if patterns.get('preferred_categories'):
+                top_categories = list(patterns['preferred_categories'].keys())
+                if 'wine' in str(top_categories).lower() or 'champagne' in str(top_categories).lower():
+                    merged['composition_type'] = 'hybrid'
+                    merged['type_source'] = 'history (wine preference)'
+                else:
+                    merged['composition_type'] = 'custom'
+                    merged['type_source'] = 'history'
+            else:
+                merged['composition_type'] = 'custom'
+                merged['type_source'] = 'default'
+        else:
+            merged['composition_type'] = 'custom'
+            merged['type_source'] = 'default'
+        
+        # 5. MERGE FLEXIBILITY (from notes or default)
+        if notes_data.get('budget_flexibility'):
+            merged['budget_flexibility'] = notes_data['budget_flexibility']
+            _logger.info(f"📐 Flexibility from NOTES: {merged['budget_flexibility']}%")
+        else:
+            merged['budget_flexibility'] = 10  # Default 10%
+        
+        # 6. MERGE CATEGORIES AND PRODUCTS (primarily from notes)
+        if notes_data.get('categories_required'):
+            merged['categories_required'] = notes_data['categories_required']
+            _logger.info(f"📂 Categories required from NOTES: {merged['categories_required']}")
+        
+        if notes_data.get('categories_excluded'):
+            merged['categories_excluded'] = notes_data['categories_excluded']
+        
+        if notes_data.get('specific_products'):
+            merged['specific_products'] = notes_data['specific_products']
+        
+        if notes_data.get('special_instructions'):
+            merged['special_instructions'] = notes_data['special_instructions']
+        
+        # 7. ADD SEASONAL PREFERENCES (if no specific requirements)
+        if seasonal and not merged['categories_required']:
+            current_season = seasonal.get('current_season')
+            if current_season and seasonal.get('seasonal_data', {}).get(current_season):
+                season_data = seasonal['seasonal_data'][current_season]
+                if season_data.get('top_categories'):
+                    # Add seasonal hint (not strict requirement)
+                    merged['seasonal_hint'] = season_data['top_categories']
+                    _logger.info(f"🌡️ Seasonal hint: {merged['seasonal_hint']}")
+        
+        return merged
+
+    def _determine_generation_strategy(self, previous_sales, patterns, requirements, notes):
+        """Determine the best generation strategy based on available data"""
+        
+        # Check for explicit instructions in notes
+        notes_lower = notes.lower() if notes else ""
+        
+        # Priority 1: Use 80/20 rule if has purchase history
+        if previous_sales and len(previous_sales) > 0:
+            # Unless notes explicitly say "all new" or "completely different"
+            if 'all new' not in notes_lower and 'completely different' not in notes_lower:
+                return '8020_rule'
+        
+        # Priority 2: Use patterns if sufficient history
+        if patterns and patterns.get('total_orders', 0) >= 3:
+            return 'pattern_based'
+        
+        # Priority 3: Use similar clients if available
+        if not previous_sales and patterns.get('total_orders', 0) < 3:
+            return 'similar_clients'
+        
+        # Default: Universal enforcement
+        return 'universal'
+
+    def _generate_from_patterns_enhanced(self, partner, requirements, notes, context):
+        """Enhanced pattern-based generation using merged requirements"""
+        
+        patterns = context.get('patterns', {})
+        seasonal = context.get('seasonal', {})
+        
+        budget = requirements['budget']
+        product_count = requirements['product_count']
+        dietary = requirements['dietary']
+        composition_type = requirements['composition_type']
+        
+        _logger.info(f"📊 Generating from patterns: {product_count} products, €{budget:.2f}, type={composition_type}")
+        
+        # Get product pool
+        products = self._get_smart_product_pool_enhanced(
+            budget, dietary, composition_type, context
+        )
+        
+        if not products:
+            return {'success': False, 'error': 'No products available matching criteria'}
+        
+        # Score products based on patterns
+        scored_products = []
+        for product in products:
+            score = self._score_product_by_patterns(
+                product, patterns, seasonal, composition_type
+            )
+            scored_products.append((product, score))
+        
+        # Sort by score
+        scored_products.sort(key=lambda x: x[1], reverse=True)
+        
+        # Select products
+        selected = self._optimize_selection_enhanced(
+            scored_products, product_count, budget, 
+            requirements['budget_flexibility'],
+            requirements['enforce_count']
+        )
+        
+        total_cost = sum(p.list_price for p in selected)
+        
+        # Create composition
+        try:
+            reasoning = self._build_enhanced_reasoning(
+                requirements, selected, total_cost, budget, context
+            )
+            
+            composition = self.env['gift.composition'].create({
+                'partner_id': partner.id,
+                'target_budget': budget,
+                'target_year': fields.Date.today().year,
+                'product_ids': [(6, 0, [p.id for p in selected])],
+                'dietary_restrictions': ', '.join(dietary) if dietary else '',
+                'client_notes': notes,
+                'generation_method': 'ollama',
+                'composition_type': composition_type,
+                'confidence_score': 0.88,
+                'ai_reasoning': reasoning
+            })
+            
+            composition.auto_categorize_products()
+            
+            return {
+                'success': True,
+                'composition_id': composition.id,
+                'products': selected,
+                'total_cost': total_cost,
+                'product_count': len(selected),
+                'confidence_score': 0.88,
+                'message': f'Pattern-based: {len(selected)} products, €{total_cost:.2f}',
+                'method': 'pattern_based_enhanced'
+            }
+        except Exception as e:
+            _logger.error(f"Failed to create composition: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def _get_smart_product_pool_enhanced(self, budget, dietary, composition_type, context):
+        """Get product pool considering composition type"""
+        
+        patterns = context.get('patterns', {})
+        
+        # Adjust price range based on composition type
+        if composition_type == 'experience':
+            min_price = max(10, budget * 0.02)
+            max_price = budget * 0.5
+        elif composition_type == 'hybrid':
+            min_price = max(15, budget * 0.03)
+            max_price = budget * 0.4
+        elif patterns and patterns.get('preferred_price_range'):
+            min_price = patterns['preferred_price_range'].get('min', budget * 0.01)
+            max_price = patterns['preferred_price_range'].get('max', budget * 0.4)
+        else:
+            min_price = max(5, budget * 0.01)
+            max_price = budget * 0.4
+        
+        domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>=', min_price),
+            ('list_price', '<=', max_price),
+        ]
+        
+        # Add composition type filters
+        if composition_type == 'hybrid':
+            # For hybrid, prioritize wines and gourmet foods
+            domain_hybrid = domain + [
+                '|', '|',
+                ('categ_id.name', 'ilike', 'wine'),
+                ('categ_id.name', 'ilike', 'champagne'),
+                ('categ_id.name', 'ilike', 'gourmet')
+            ]
+            products = self.env['product.template'].sudo().search(domain_hybrid, limit=500)
+            
+            # If not enough, add from general pool
+            if len(products) < 100:
+                general = self.env['product.template'].sudo().search(domain, limit=500)
+                products = products | general
+        else:
+            products = self.env['product.template'].sudo().search(domain, limit=1000)
+        
+        # Apply dietary filters
+        if dietary:
+            filtered = []
+            for product in products:
+                if self._check_dietary_compliance(product, dietary) and self._has_stock(product):
+                    filtered.append(product)
+            products = filtered
+        else:
+            products = [p for p in products if self._has_stock(p)]
+        
+        _logger.info(f"📦 Product pool: {len(products)} products (€{min_price:.2f}-€{max_price:.2f}) for {composition_type}")
+        return products
+
+    def _score_product_by_patterns(self, product, patterns, seasonal, composition_type):
+        """Score product based on patterns and composition type"""
+        
+        score = 1.0
+        
+        # Pattern-based scoring
+        if patterns:
+            # Favorite products
+            if product.id in patterns.get('favorite_products', []):
+                score += 5.0
+            
+            # Never repeated (penalty)
+            if product.id in patterns.get('never_repeated_products', []):
+                score -= 2.0
+            
+            # Category preference
+            if hasattr(product, 'categ_id'):
+                cat_name = product.categ_id.name
+                if cat_name in patterns.get('preferred_categories', {}):
+                    score += patterns['preferred_categories'][cat_name] * 0.5
+        
+        # Seasonal scoring
+        if seasonal and product.id in seasonal.get('seasonal_favorites', []):
+            score += 2.0
+        
+        # Composition type scoring
+        if composition_type == 'hybrid' and hasattr(product, 'categ_id'):
+            cat_name = product.categ_id.name.lower()
+            if 'wine' in cat_name or 'champagne' in cat_name:
+                score += 3.0
+            elif 'cheese' in cat_name or 'gourmet' in cat_name:
+                score += 2.0
+        elif composition_type == 'experience':
+            # Prefer unique/experiential products
+            if hasattr(product, 'name'):
+                if any(word in product.name.lower() for word in ['experience', 'tour', 'tasting', 'workshop']):
+                    score += 3.0
+        
+        return score
+
+    def _optimize_selection_enhanced(self, scored_products, target_count, budget, flexibility, enforce_strict):
+        """Enhanced selection optimization"""
+        
+        min_budget = budget * (1 - flexibility/100)
+        max_budget = budget * (1 + flexibility/100)
+        avg_price_target = budget / target_count if target_count > 0 else 50
+        
+        selected = []
+        current_total = 0
+        
+        for product, score in scored_products:
+            if enforce_strict and len(selected) >= target_count:
+                break
+            
+            future_total = current_total + product.list_price
+            remaining_slots = target_count - len(selected) - 1
+            
+            # Check if we can still meet constraints
+            if remaining_slots > 0:
+                min_remaining = remaining_slots * 5  # Minimum €5 per product
+                if future_total + min_remaining <= max_budget:
+                    selected.append(product)
+                    current_total = future_total
+            else:
+                # Last slot - check total is within range
+                if min_budget <= future_total <= max_budget:
+                    selected.append(product)
+                    current_total = future_total
+                    break
+        
+        # Enforce exact count if required
+        if enforce_strict:
+            if len(selected) < target_count:
+                # Add more products
+                remaining = [p for p, _ in scored_products if p not in selected]
+                selected.extend(remaining[:target_count - len(selected)])
+            elif len(selected) > target_count:
+                # Remove excess
+                selected = selected[:target_count]
+        
+        return selected
+
+    def _build_enhanced_reasoning(self, requirements, products, total_cost, budget, context):
+        """Build comprehensive reasoning including sources used"""
+        
+        reasoning_parts = []
+        
+        # Data sources
+        sources = []
+        if requirements['budget_source'] != 'none':
+            sources.append(f"Budget from {requirements['budget_source']}")
+        if requirements['count_source'] != 'none':
+            sources.append(f"Count from {requirements['count_source']}")
+        if requirements['dietary_source'] != 'none':
+            sources.append(f"Dietary from {requirements['dietary_source']}")
+        if requirements['type_source'] != 'default':
+            sources.append(f"Type from {requirements['type_source']}")
+        
+        reasoning_parts.append(f"📊 Data Sources: {', '.join(sources)}")
+        
+        # Results
+        reasoning_parts.append(f"📦 Generated {len(products)} products = €{total_cost:.2f}")
+        
+        # Budget compliance
+        variance = ((total_cost - budget) / budget) * 100
+        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        
+        # Requirements met
+        if requirements.get('enforce_count'):
+            if len(products) == requirements['product_count']:
+                reasoning_parts.append(f"✅ Met exact count: {requirements['product_count']}")
+            else:
+                reasoning_parts.append(f"⚠️ Count mismatch: {len(products)} vs {requirements['product_count']}")
+        
+        if requirements.get('dietary'):
+            reasoning_parts.append(f"🥗 Dietary applied: {', '.join(requirements['dietary'])}")
+        
+        if requirements.get('composition_type') != 'custom':
+            reasoning_parts.append(f"🎁 Composition type: {requirements['composition_type']}")
+        
+        # Historical insights
+        if context.get('patterns'):
+            patterns = context['patterns']
+            if patterns.get('favorite_products'):
+                favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
+                if favorites_included > 0:
+                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products")
+        
+        return "\n".join(reasoning_parts)
     
     # ============== ENHANCED GENERATION METHODS ==============
     
