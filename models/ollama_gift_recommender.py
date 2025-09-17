@@ -333,7 +333,7 @@ class OllamaGiftRecommender(models.Model):
     # ================== GENERATION METHODS ==================
     
     def _generate_with_8020_rule(self, partner, requirements, notes, context):
-        """Generate with 80/20 rule"""
+        """Generate with 80/20 rule - keep 80% from history, change 20%"""
         previous_sales = context.get('previous_sales', [])
         if not previous_sales:
             return self._generate_with_universal_enforcement(partner, requirements, notes, context)
@@ -379,6 +379,8 @@ class OllamaGiftRecommender(models.Model):
                 if len(products_to_keep) >= keep_count:
                     break
         
+        _logger.info(f"✅ Selected {len(products_to_keep)} products from history (target: {keep_count})")
+        
         # Find new products
         new_budget = budget - current_keep_cost
         exclude_ids = [p.id for p in products_to_keep]
@@ -386,11 +388,20 @@ class OllamaGiftRecommender(models.Model):
             new_count, new_budget, dietary, exclude_ids, context
         )
         
+        _logger.info(f"✅ Added {len(new_products)} new products")
+        
         # Combine and create composition
         final_products = products_to_keep + new_products
         total_cost = sum(p.list_price for p in final_products)
         
         try:
+            reasoning = f"""80/20 Rule Applied:
+- Kept {len(products_to_keep)} products from purchase history ({keep_count} target)
+- Added {len(new_products)} new products for variety ({new_count} target)
+- Total: {len(final_products)} products = €{total_cost:.2f}
+- Budget target: €{budget:.2f} (variance: {((total_cost-budget)/budget)*100:+.1f}%)
+- Based on {len(previous_sales)} previous orders"""
+            
             composition = self.env['gift.composition'].create({
                 'partner_id': partner.id,
                 'target_budget': budget,
@@ -401,7 +412,7 @@ class OllamaGiftRecommender(models.Model):
                 'generation_method': 'ollama',
                 'composition_type': requirements.get('composition_type', 'custom'),
                 'confidence_score': 0.92,
-                'ai_reasoning': f"80/20 Rule: Kept {len(products_to_keep)}/{keep_count}, Added {len(new_products)}/{new_count}"
+                'ai_reasoning': reasoning
             })
             
             composition.auto_categorize_products()
@@ -421,33 +432,61 @@ class OllamaGiftRecommender(models.Model):
             return {'success': False, 'error': str(e)}
     
     def _generate_with_universal_enforcement(self, partner, requirements, notes, context):
-        """Universal generation with enforcement"""
-        budget = requirements['budget']
-        product_count = requirements['product_count']
-        dietary = requirements['dietary']
-        flexibility = requirements['budget_flexibility']
+        """Universal generation with strict enforcement of ALL requirements"""
         
+        budget = requirements['budget']
+        flexibility = requirements['budget_flexibility']
+        product_count = requirements['product_count']
+        enforce_count = requirements['enforce_count']
+        dietary = requirements['dietary']
+        
+        # Calculate budget bounds
         min_budget = budget * (1 - flexibility/100)
         max_budget = budget * (1 + flexibility/100)
         
+        _logger.info(f"🎯 Generating: {'EXACTLY' if enforce_count else 'APPROXIMATELY'} {product_count} products, €{min_budget:.2f}-€{max_budget:.2f}")
+        
         # Get product pool
-        products = self._get_smart_product_pool_enhanced(
-            budget, dietary, requirements.get('composition_type', 'custom'), context
-        )
+        products = self._get_smart_product_pool(budget, dietary, context)
         
         if not products:
-            return {'success': False, 'error': 'No products available'}
+            return {'success': False, 'error': 'No products available matching criteria'}
         
-        # Select products
-        selected = self._smart_optimize_selection(
-            products, product_count, budget, flexibility,
-            requirements.get('enforce_count', False), context
-        )
+        # Apply category requirements if any
+        if requirements.get('categories_required'):
+            selected = self._select_with_category_requirements(
+                products, requirements['categories_required'], 
+                product_count, budget
+            )
+        else:
+            # Use smart optimization
+            selected = self._smart_optimize_selection(
+                products, product_count, budget, flexibility,
+                enforce_count, context
+            )
         
+        # STRICT ENFORCEMENT
+        if enforce_count and product_count:
+            selected = self._enforce_exact_count(selected, products, product_count, budget)
+        
+        # Calculate total
         total_cost = sum(p.list_price for p in selected)
+        
+        # Check compliance
+        count_ok = (not enforce_count) or (len(selected) == product_count)
+        budget_ok = min_budget <= total_cost <= max_budget
+        
+        if not count_ok:
+            _logger.error(f"❌ Count violation: {len(selected)} != {product_count}")
+        if not budget_ok:
+            _logger.warning(f"⚠️ Budget variance: €{total_cost:.2f} not in €{min_budget:.2f}-€{max_budget:.2f}")
         
         # Create composition
         try:
+            reasoning = self._build_comprehensive_reasoning(
+                requirements, selected, total_cost, budget, context
+            )
+            
             composition = self.env['gift.composition'].create({
                 'partner_id': partner.id,
                 'target_budget': budget,
@@ -457,8 +496,8 @@ class OllamaGiftRecommender(models.Model):
                 'client_notes': notes,
                 'generation_method': 'ollama',
                 'composition_type': requirements.get('composition_type', 'custom'),
-                'confidence_score': 0.85,
-                'ai_reasoning': f"Generated {len(selected)} products, €{total_cost:.2f}"
+                'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
+                'ai_reasoning': reasoning
             })
             
             composition.auto_categorize_products()
@@ -469,25 +508,28 @@ class OllamaGiftRecommender(models.Model):
                 'products': selected,
                 'total_cost': total_cost,
                 'product_count': len(selected),
-                'confidence_score': 0.85,
-                'message': f'Generated {len(selected)} products, €{total_cost:.2f}',
-                'method': 'universal'
+                'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
+                'message': f"{'✅' if (count_ok and budget_ok) else '⚠️'} Generated {len(selected)} products, €{total_cost:.2f}",
+                'method': 'universal_enforcement',
+                'compliant': count_ok and budget_ok
             }
         except Exception as e:
             _logger.error(f"Failed to create composition: {e}")
             return {'success': False, 'error': str(e)}
     
     def _generate_from_similar_clients(self, partner, requirements, notes, context):
-        """Generate based on similar clients"""
+        """Generate based on similar clients when no direct history exists"""
         similar_clients = context.get('similar_clients', [])
         if not similar_clients:
             return self._generate_with_universal_enforcement(partner, requirements, notes, context)
+        
+        _logger.info(f"👥 Learning from {len(similar_clients)} similar clients")
         
         budget = requirements['budget']
         product_count = requirements['product_count']
         dietary = requirements['dietary']
         
-        # Aggregate products from similar clients
+        # Aggregate popular products from similar clients
         product_popularity = {}
         for similar in similar_clients:
             similarity_weight = similar['similarity']
@@ -513,11 +555,24 @@ class OllamaGiftRecommender(models.Model):
                 products.append(product)
         
         # Optimize selection
+        if len(products) < product_count:
+            # Need more products - get from general pool
+            additional = self._get_available_products(budget, dietary)
+            products.extend(additional[:product_count - len(products)])
+        
         selected = products[:product_count] if products else []
         total_cost = sum(p.list_price for p in selected)
         
         # Create composition
         try:
+            top_similar = similar_clients[0] if similar_clients else None
+            reasoning = f"""Similar Client Pattern Generation:
+- Based on {len(similar_clients)} similar clients
+- Top match: {top_similar['similarity']*100:.0f}% similarity
+- Popular products from similar clients: {len(product_popularity)} identified
+- Selected {len(selected)} products = €{total_cost:.2f}
+- Budget target: €{budget:.2f} (variance: {((total_cost-budget)/budget)*100:+.1f}%)"""
+            
             composition = self.env['gift.composition'].create({
                 'partner_id': partner.id,
                 'target_budget': budget,
@@ -528,7 +583,7 @@ class OllamaGiftRecommender(models.Model):
                 'generation_method': 'ollama',
                 'composition_type': requirements.get('composition_type', 'custom'),
                 'confidence_score': 0.85,
-                'ai_reasoning': f"Based on {len(similar_clients)} similar clients"
+                'ai_reasoning': reasoning
             })
             
             composition.auto_categorize_products()
@@ -540,7 +595,7 @@ class OllamaGiftRecommender(models.Model):
                 'total_cost': total_cost,
                 'product_count': len(selected),
                 'confidence_score': 0.85,
-                'message': f'Similar clients: {len(selected)} products',
+                'message': f'Similar clients: {len(selected)} products = €{total_cost:.2f}',
                 'method': 'similar_clients'
             }
         except Exception as e:
@@ -548,42 +603,52 @@ class OllamaGiftRecommender(models.Model):
             return {'success': False, 'error': str(e)}
     
     def _generate_from_patterns_enhanced(self, partner, requirements, notes, context):
-        """Generate from patterns"""
+        """Enhanced pattern-based generation using merged requirements"""
+        
         patterns = context.get('patterns', {})
+        seasonal = context.get('seasonal', {})
+        
         budget = requirements['budget']
         product_count = requirements['product_count']
         dietary = requirements['dietary']
+        composition_type = requirements['composition_type']
         
-        # Get products
+        _logger.info(f"📊 Generating from patterns: {product_count} products, €{budget:.2f}, type={composition_type}")
+        
+        # Get product pool
         products = self._get_smart_product_pool_enhanced(
-            budget, dietary, requirements.get('composition_type', 'custom'), context
+            budget, dietary, composition_type, context
         )
         
         if not products:
-            return {'success': False, 'error': 'No products available'}
+            return {'success': False, 'error': 'No products available matching criteria'}
         
-        # Score products
+        # Score products based on patterns
         scored_products = []
         for product in products:
-            score = 1.0
-            if patterns:
-                if product.id in patterns.get('favorite_products', []):
-                    score += 5.0
-                if product.id in patterns.get('never_repeated_products', []):
-                    score -= 2.0
+            score = self._score_product_by_patterns(
+                product, patterns, seasonal, composition_type
+            )
             scored_products.append((product, score))
         
+        # Sort by score
         scored_products.sort(key=lambda x: x[1], reverse=True)
         
         # Select products
-        selected = []
-        for product, score in scored_products[:product_count]:
-            selected.append(product)
+        selected = self._optimize_selection_enhanced(
+            scored_products, product_count, budget, 
+            requirements['budget_flexibility'],
+            requirements['enforce_count']
+        )
         
         total_cost = sum(p.list_price for p in selected)
         
         # Create composition
         try:
+            reasoning = self._build_enhanced_reasoning(
+                requirements, selected, total_cost, budget, context
+            )
+            
             composition = self.env['gift.composition'].create({
                 'partner_id': partner.id,
                 'target_budget': budget,
@@ -592,9 +657,9 @@ class OllamaGiftRecommender(models.Model):
                 'dietary_restrictions': ', '.join(dietary) if dietary else '',
                 'client_notes': notes,
                 'generation_method': 'ollama',
-                'composition_type': requirements.get('composition_type', 'custom'),
+                'composition_type': composition_type,
                 'confidence_score': 0.88,
-                'ai_reasoning': f"Pattern-based: {patterns.get('total_orders', 0)} historical orders"
+                'ai_reasoning': reasoning
             })
             
             composition.auto_categorize_products()
@@ -606,8 +671,8 @@ class OllamaGiftRecommender(models.Model):
                 'total_cost': total_cost,
                 'product_count': len(selected),
                 'confidence_score': 0.88,
-                'message': f'Pattern-based: {len(selected)} products',
-                'method': 'pattern_based'
+                'message': f'Pattern-based: {len(selected)} products, €{total_cost:.2f}',
+                'method': 'pattern_based_enhanced'
             }
         except Exception as e:
             _logger.error(f"Failed to create composition: {e}")
@@ -615,12 +680,65 @@ class OllamaGiftRecommender(models.Model):
     
     # ================== PRODUCT SELECTION HELPERS ==================
     
-    def _get_smart_product_pool_enhanced(self, budget, dietary, composition_type, context):
-        """Get intelligent product pool"""
+    def _get_smart_product_pool(self, budget, dietary, context):
+        """Get intelligently filtered product pool based on context"""
+        
         patterns = context.get('patterns', {})
         
-        # Price range based on type
-        if composition_type == 'hybrid':
+        # Determine price range based on patterns or defaults
+        if patterns and patterns.get('preferred_price_range'):
+            min_price = patterns['preferred_price_range'].get('min', budget * 0.01)
+            max_price = patterns['preferred_price_range'].get('max', budget * 0.4)
+        else:
+            min_price = max(5, budget * 0.01)  # At least €5
+            max_price = budget * 0.4  # Max 40% of budget for single item
+        
+        domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>=', min_price),
+            ('list_price', '<=', max_price),
+        ]
+        
+        # Add dietary filters
+        if dietary:
+            if 'halal' in dietary:
+                if 'is_halal_compatible' in self.env['product.template']._fields:
+                    domain.append(('is_halal_compatible', '!=', False))
+                if 'contains_pork' in self.env['product.template']._fields:
+                    domain.append(('contains_pork', '=', False))
+                if 'contains_alcohol' in self.env['product.template']._fields:
+                    domain.append(('contains_alcohol', '=', False))
+        
+        products = self.env['product.template'].sudo().search(domain, limit=1000)
+        
+        # Filter by stock
+        available = []
+        for product in products:
+            if self._has_stock(product):
+                available.append(product)
+        
+        # Score products based on patterns
+        if patterns and patterns.get('favorite_products'):
+            scored = []
+            for product in available:
+                score = 10 if product.id in patterns['favorite_products'] else 1
+                scored.append((product, score))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            available = [p for p, s in scored]
+        
+        _logger.info(f"📦 Product pool: {len(available)} products (€{min_price:.2f}-€{max_price:.2f})")
+        return available
+    
+    def _get_smart_product_pool_enhanced(self, budget, dietary, composition_type, context):
+        """Get product pool considering composition type"""
+        
+        patterns = context.get('patterns', {})
+        
+        # Adjust price range based on composition type
+        if composition_type == 'experience':
+            min_price = max(10, budget * 0.02)
+            max_price = budget * 0.5
+        elif composition_type == 'hybrid':
             min_price = max(15, budget * 0.03)
             max_price = budget * 0.4
         elif patterns and patterns.get('preferred_price_range'):
@@ -636,28 +754,46 @@ class OllamaGiftRecommender(models.Model):
             ('list_price', '<=', max_price),
         ]
         
+        # Add composition type filters
+        if composition_type == 'hybrid':
+            # For hybrid, prioritize wines and gourmet foods
+            domain_hybrid = domain + [
+                '|', '|',
+                ('categ_id.name', 'ilike', 'wine'),
+                ('categ_id.name', 'ilike', 'champagne'),
+                ('categ_id.name', 'ilike', 'gourmet')
+            ]
+            products = self.env['product.template'].sudo().search(domain_hybrid, limit=500)
+            
+            # If not enough, add from general pool
+            if len(products) < 100:
+                general = self.env['product.template'].sudo().search(domain, limit=500)
+                products = products | general
+        else:
+            products = self.env['product.template'].sudo().search(domain, limit=1000)
+        
         # Apply dietary filters
         if dietary:
-            if 'halal' in dietary:
-                if 'is_halal_compatible' in self.env['product.template']._fields:
-                    domain.append(('is_halal_compatible', '!=', False))
-                if 'contains_pork' in self.env['product.template']._fields:
-                    domain.append(('contains_pork', '=', False))
-                if 'contains_alcohol' in self.env['product.template']._fields:
-                    domain.append(('contains_alcohol', '=', False))
+            filtered = []
+            for product in products:
+                if self._check_dietary_compliance(product, dietary) and self._has_stock(product):
+                    filtered.append(product)
+            products = filtered
+        else:
+            products = [p for p in products if self._has_stock(p)]
         
-        products = self.env['product.template'].sudo().search(domain, limit=1000)
-        
-        # Filter by stock
-        available = [p for p in products if self._has_stock(p)]
-        
-        _logger.info(f"📦 Product pool: {len(available)} products (€{min_price:.2f}-€{max_price:.2f})")
-        return available
+        _logger.info(f"📦 Product pool: {len(products)} products (€{min_price:.2f}-€{max_price:.2f}) for {composition_type}")
+        return products
     
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_strict, context):
-        """Smart product selection"""
+        """Smart optimization considering all constraints and context"""
+        
         if not target_count:
-            target_count = max(5, int(budget / 50))
+            # Estimate count based on budget
+            avg_price = 50  # Default assumption
+            if context.get('patterns', {}).get('preferred_price_range'):
+                avg_price = context['patterns']['preferred_price_range'].get('avg', 50)
+            target_count = max(5, int(budget / avg_price))
         
         min_budget = budget * (1 - flexibility/100)
         max_budget = budget * (1 + flexibility/100)
@@ -666,13 +802,23 @@ class OllamaGiftRecommender(models.Model):
         # Score products
         scored_products = []
         for product in products:
+            # Price fitness score
             price_diff = abs(product.list_price - avg_price_target)
             price_score = 1 / (1 + price_diff/avg_price_target)
-            scored_products.append((product, price_score))
+            
+            # Pattern bonus
+            pattern_score = 0
+            if context.get('patterns'):
+                if product.id in context['patterns'].get('favorite_products', []):
+                    pattern_score = 2
+            
+            total_score = price_score + pattern_score
+            scored_products.append((product, total_score))
         
+        # Sort by score
         scored_products.sort(key=lambda x: x[1], reverse=True)
         
-        # Select products
+        # Greedy selection with budget awareness
         selected = []
         current_total = 0
         
@@ -683,28 +829,169 @@ class OllamaGiftRecommender(models.Model):
             future_total = current_total + product.list_price
             remaining_slots = target_count - len(selected) - 1
             
+            # Check if we can still meet budget constraints
             if remaining_slots > 0:
-                min_remaining = remaining_slots * 5
+                # Estimate if we can fill remaining slots within budget
+                min_remaining = remaining_slots * 5  # Assume min €5 per product
+                max_remaining = remaining_slots * (max_budget - future_total) / remaining_slots if remaining_slots > 0 else 0
+                
                 if future_total + min_remaining <= max_budget:
                     selected.append(product)
                     current_total = future_total
             else:
+                # Last product - check if total is within range
                 if min_budget <= future_total <= max_budget:
                     selected.append(product)
                     current_total = future_total
         
-        # Enforce count if required
-        if enforce_strict and len(selected) != target_count:
+        # If we don't have enough, add more
+        if enforce_strict and len(selected) < target_count:
+            remaining = [p for p in products if p not in selected]
+            remaining.sort(key=lambda p: p.list_price)  # Add cheapest
+            selected.extend(remaining[:target_count - len(selected)])
+        
+        return selected
+    
+    def _enforce_exact_count(self, selected, all_products, exact_count, budget):
+        """Enforce exact product count no matter what"""
+        
+        if len(selected) == exact_count:
+            return selected
+        
+        if len(selected) < exact_count:
+            # Add products
+            remaining_needed = exact_count - len(selected)
+            available = [p for p in all_products if p not in selected]
+            
+            # Sort by price to add cheapest
+            available.sort(key=lambda p: p.list_price)
+            selected.extend(available[:remaining_needed])
+            
+            _logger.info(f"➕ Added {remaining_needed} products to meet count requirement")
+        
+        elif len(selected) > exact_count:
+            # Remove products
+            excess = len(selected) - exact_count
+            
+            # Remove most expensive to get closer to budget
+            selected.sort(key=lambda p: p.list_price, reverse=True)
+            selected = selected[excess:]  # Remove the most expensive ones
+            
+            _logger.info(f"➖ Removed {excess} products to meet count requirement")
+        
+        return selected[:exact_count]  # Final safety check
+    
+    def _select_with_category_requirements(self, products, categories_required, total_count, budget):
+        """Select products meeting specific category requirements"""
+        
+        selected = []
+        
+        # First fulfill category requirements
+        for category, count in categories_required.items():
+            cat_products = [p for p in products if category.lower() in p.name.lower()]
+            cat_products.sort(key=lambda p: abs(p.list_price - (budget/total_count if total_count else 50)))
+            selected.extend(cat_products[:count])
+            _logger.info(f"📂 Added {min(count, len(cat_products))} {category} products")
+        
+        # Fill remaining slots
+        if total_count:
+            remaining_count = total_count - len(selected)
+            if remaining_count > 0:
+                available = [p for p in products if p not in selected]
+                available.sort(key=lambda p: abs(p.list_price - (budget/total_count)))
+                selected.extend(available[:remaining_count])
+        
+        return selected
+    
+    def _score_product_by_patterns(self, product, patterns, seasonal, composition_type):
+        """Score product based on patterns and composition type"""
+        
+        score = 1.0
+        
+        # Pattern-based scoring
+        if patterns:
+            # Favorite products
+            if product.id in patterns.get('favorite_products', []):
+                score += 5.0
+            
+            # Never repeated (penalty)
+            if product.id in patterns.get('never_repeated_products', []):
+                score -= 2.0
+            
+            # Category preference
+            if hasattr(product, 'categ_id'):
+                cat_name = product.categ_id.name
+                if cat_name in patterns.get('preferred_categories', {}):
+                    score += patterns['preferred_categories'][cat_name] * 0.5
+        
+        # Seasonal scoring
+        if seasonal and product.id in seasonal.get('seasonal_favorites', []):
+            score += 2.0
+        
+        # Composition type scoring
+        if composition_type == 'hybrid' and hasattr(product, 'categ_id'):
+            cat_name = product.categ_id.name.lower()
+            if 'wine' in cat_name or 'champagne' in cat_name:
+                score += 3.0
+            elif 'cheese' in cat_name or 'gourmet' in cat_name:
+                score += 2.0
+        elif composition_type == 'experience':
+            # Prefer unique/experiential products
+            if hasattr(product, 'name'):
+                if any(word in product.name.lower() for word in ['experience', 'tour', 'tasting', 'workshop']):
+                    score += 3.0
+        
+        return score
+    
+    def _optimize_selection_enhanced(self, scored_products, target_count, budget, flexibility, enforce_strict):
+        """Enhanced selection optimization"""
+        
+        min_budget = budget * (1 - flexibility/100)
+        max_budget = budget * (1 + flexibility/100)
+        avg_price_target = budget / target_count if target_count > 0 else 50
+        
+        selected = []
+        current_total = 0
+        
+        for product, score in scored_products:
+            if enforce_strict and len(selected) >= target_count:
+                break
+            
+            future_total = current_total + product.list_price
+            remaining_slots = target_count - len(selected) - 1
+            
+            # Check if we can still meet constraints
+            if remaining_slots > 0:
+                min_remaining = remaining_slots * 5  # Minimum €5 per product
+                if future_total + min_remaining <= max_budget:
+                    selected.append(product)
+                    current_total = future_total
+            else:
+                # Last slot - check total is within range
+                if min_budget <= future_total <= max_budget:
+                    selected.append(product)
+                    current_total = future_total
+                    break
+        
+        # Enforce exact count if required
+        if enforce_strict:
             if len(selected) < target_count:
+                # Add more products
                 remaining = [p for p, _ in scored_products if p not in selected]
                 selected.extend(remaining[:target_count - len(selected)])
-            else:
+            elif len(selected) > target_count:
+                # Remove excess
                 selected = selected[:target_count]
         
         return selected
     
     def _find_complementary_products(self, count, budget, dietary, exclude_ids, context):
         """Find complementary new products"""
+        
+        patterns = context.get('patterns', {})
+        seasonal = context.get('seasonal', {})
+        
+        # Determine search criteria
         avg_price = budget / count if count > 0 else 50
         min_price = max(5, avg_price * 0.3)
         max_price = avg_price * 2
@@ -716,242 +1003,154 @@ class OllamaGiftRecommender(models.Model):
             ('id', 'not in', exclude_ids)
         ]
         
-        # Apply dietary
-        if dietary and 'halal' in dietary:
-            if 'is_halal_compatible' in self.env['product.template']._fields:
-                domain.append(('is_halal_compatible', '!=', False))
+        # Add dietary filters
+        if dietary:
+            if 'halal' in dietary:
+                if 'is_halal_compatible' in self.env['product.template']._fields:
+                    domain.append(('is_halal_compatible', '!=', False))
+                if 'contains_pork' in self.env['product.template']._fields:
+                    domain.append(('contains_pork', '=', False))
+                if 'contains_alcohol' in self.env['product.template']._fields:
+                    domain.append(('contains_alcohol', '=', False))
         
         products = self.env['product.template'].sudo().search(domain, limit=500)
+        
+        # Filter for stock
         available = [p for p in products if self._has_stock(p)]
         
-        # Sort by price fitness
-        available.sort(key=lambda p: abs(p.list_price - avg_price))
-        
-        return available[:count]
-    
-    # ================== LEARNING & ANALYSIS METHODS ==================
-    
-    def _get_or_update_learning_cache(self, partner_id):
-        """Get or update learning cache"""
-        if self.cache_expiry and self.cache_expiry > datetime.now():
-            if self.learning_cache:
-                try:
-                    cache = json.loads(self.learning_cache)
-                    if str(partner_id) in cache:
-                        return cache[str(partner_id)]
-                except:
-                    pass
-        
-        # Generate fresh analysis
-        learning_data = {
-            'patterns': self._analyze_client_purchase_patterns(partner_id),
-            'seasonal': self._analyze_seasonal_preferences(partner_id),
-            'similar_clients': self._find_similar_clients(partner_id),
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Update cache
-        try:
-            cache = json.loads(self.learning_cache) if self.learning_cache else {}
-        except:
-            cache = {}
-        
-        cache[str(partner_id)] = learning_data
-        self.learning_cache = json.dumps(cache)
-        self.cache_expiry = datetime.now() + timedelta(hours=24)
-        
-        return learning_data
-    
-    def _analyze_client_purchase_patterns(self, partner_id):
-        """Analyze client purchase patterns"""
-        all_orders = self.env['sale.order'].search([
-            ('partner_id', '=', partner_id),
-            ('state', 'in', ['sale', 'done'])
-        ], order='date_order desc')
-        
-        if not all_orders:
-            return None
-        
-        pattern_analysis = {
-            'total_orders': len(all_orders),
-            'avg_order_value': 0,
-            'preferred_categories': {},
-            'product_frequency': {},
-            'budget_trend': 'stable',
-            'avg_product_count': 0,
-            'favorite_products': [],
-            'never_repeated_products': [],
-            'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
-        }
-        
-        total_value = 0
-        total_products = 0
-        product_counter = Counter()
-        category_counter = Counter()
-        all_product_prices = []
-        
-        for order in all_orders:
-            total_value += order.amount_untaxed
+        # Score products for complementarity
+        scored = []
+        for product in available:
+            score = 1.0
             
-            for line in order.order_line:
-                if line.product_id:
-                    product_tmpl = line.product_id.product_tmpl_id
-                    product_counter[product_tmpl.id] += 1
-                    all_product_prices.append(line.price_unit)
-                    
-                    if hasattr(product_tmpl, 'categ_id'):
-                        category_counter[product_tmpl.categ_id.name] += 1
-                    total_products += 1
-        
-        # Calculate insights
-        pattern_analysis['avg_order_value'] = total_value / len(all_orders) if all_orders else 0
-        pattern_analysis['avg_product_count'] = total_products / len(all_orders) if all_orders else 0
-        pattern_analysis['favorite_products'] = [
-            prod_id for prod_id, count in product_counter.items() if count >= 2
-        ]
-        pattern_analysis['never_repeated_products'] = [
-            prod_id for prod_id, count in product_counter.items() 
-            if count == 1 and len(all_orders) > 2
-        ]
-        pattern_analysis['preferred_categories'] = dict(category_counter.most_common(5))
-        
-        if all_product_prices:
-            pattern_analysis['preferred_price_range'] = {
-                'min': min(all_product_prices),
-                'max': max(all_product_prices),
-                'avg': sum(all_product_prices) / len(all_product_prices)
-            }
-        
-        # Budget trend
-        if len(all_orders) >= 3:
-            recent_avg = sum(o.amount_untaxed for o in all_orders[:3]) / 3
-            older_avg = sum(o.amount_untaxed for o in all_orders[-3:]) / 3
-            if recent_avg > older_avg * 1.2:
-                pattern_analysis['budget_trend'] = 'increasing'
-            elif recent_avg < older_avg * 0.8:
-                pattern_analysis['budget_trend'] = 'decreasing'
-        
-        return pattern_analysis
-    
-    def _analyze_seasonal_preferences(self, partner_id):
-        """Analyze seasonal preferences"""
-        orders = self.env['sale.order'].search([
-            ('partner_id', '=', partner_id),
-            ('state', 'in', ['sale', 'done'])
-        ])
-        
-        if not orders:
-            return None
-        
-        seasonal_data = {
-            'spring': {'products': [], 'categories': []},
-            'summer': {'products': [], 'categories': []},
-            'autumn': {'products': [], 'categories': []},
-            'winter': {'products': [], 'categories': []},
-            'christmas': {'products': [], 'categories': []}
-        }
-        
-        for order in orders:
-            month = order.date_order.month
-            season = self._get_current_season(month)
+            # Prefer products from different categories than existing
+            if hasattr(product, 'categ_id'):
+                cat_name = product.categ_id.name
+                # Higher score for underrepresented categories
+                if patterns and cat_name not in patterns.get('preferred_categories', {}):
+                    score += 0.5
             
-            for line in order.order_line:
-                if line.product_id:
-                    seasonal_data[season]['products'].append(line.product_id.product_tmpl_id.id)
-                    if hasattr(line.product_id.product_tmpl_id, 'categ_id'):
-                        seasonal_data[season]['categories'].append(line.product_id.product_tmpl_id.categ_id.name)
-        
-        current_season = self._get_current_season(datetime.now().month)
-        
-        return {
-            'current_season': current_season,
-            'seasonal_data': seasonal_data,
-            'seasonal_favorites': seasonal_data[current_season]['products'] if current_season in seasonal_data else []
-        }
-    
-    def _get_current_season(self, month):
-        """Get season from month"""
-        if month in [3, 4, 5]:
-            return 'spring'
-        elif month in [6, 7, 8]:
-            return 'summer'
-        elif month in [9, 10, 11]:
-            return 'autumn'
-        elif month == 12:
-            return 'christmas'
-        else:
-            return 'winter'
-    
-    def _find_similar_clients(self, partner_id, limit=5):
-        """Find similar clients"""
-        target_patterns = self._analyze_client_purchase_patterns(partner_id)
-        if not target_patterns:
-            return []
-        
-        all_clients = self.env['sale.order'].read_group(
-            [('state', 'in', ['sale', 'done'])],
-            ['partner_id'],
-            ['partner_id']
-        )
-        
-        similar_clients = []
-        
-        for client_data in all_clients[:20]:
-            other_partner_id = client_data['partner_id'][0]
-            if other_partner_id == partner_id:
-                continue
+            # Seasonal bonus
+            if seasonal and product.id in seasonal.get('seasonal_favorites', []):
+                score += 1.0
             
-            other_patterns = self._analyze_client_purchase_patterns(other_partner_id)
-            if not other_patterns:
-                continue
+            # Price fitness
+            price_diff = abs(product.list_price - avg_price)
+            price_score = 1 / (1 + price_diff/avg_price)
+            score += price_score
             
-            similarity_score = self._calculate_similarity(target_patterns, other_patterns)
-            
-            if similarity_score > 0.6:
-                similar_clients.append({
-                    'partner_id': other_partner_id,
-                    'similarity': similarity_score,
-                    'patterns': other_patterns
-                })
+            scored.append((product, score))
         
-        similar_clients.sort(key=lambda x: x['similarity'], reverse=True)
-        return similar_clients[:limit]
+        # Sort by score
+        scored.sort(key=lambda x: x[1], reverse=True)
+        
+        # Select products
+        selected = []
+        current_total = 0
+        
+        for product, score in scored:
+            if len(selected) >= count:
+                break
+            
+            if current_total + product.list_price <= budget * 1.1:  # Allow 10% flexibility
+                selected.append(product)
+                current_total += product.list_price
+        
+        return selected
     
-    def _calculate_similarity(self, patterns1, patterns2):
-        """Calculate similarity between patterns"""
-        score = 0
-        factors = 0
+    def _build_comprehensive_reasoning(self, requirements, products, total_cost, budget, context):
+        """Build detailed reasoning for the composition"""
         
-        # Budget similarity
-        avg1 = patterns1.get('avg_order_value', 0)
-        avg2 = patterns2.get('avg_order_value', 0)
-        if avg1 and avg2:
-            budget_diff = abs(avg1 - avg2) / max(avg1, avg2)
-            if budget_diff < 0.3:
-                score += (1 - budget_diff)
-            factors += 1
+        reasoning_parts = []
         
-        # Product count similarity
-        count1 = patterns1.get('avg_product_count', 0)
-        count2 = patterns2.get('avg_product_count', 0)
-        if count1 and count2:
-            count_diff = abs(count1 - count2) / max(count1, count2)
-            if count_diff < 0.3:
-                score += (1 - count_diff)
-            factors += 1
+        # Basic stats
+        reasoning_parts.append(f"📊 Generated {len(products)} products totaling €{total_cost:.2f}")
         
-        # Category overlap
-        cats1 = set(patterns1.get('preferred_categories', {}).keys())
-        cats2 = set(patterns2.get('preferred_categories', {}).keys())
-        if cats1 and cats2:
-            overlap = len(cats1.intersection(cats2)) / len(cats1.union(cats2))
-            score += overlap
-            factors += 1
+        # Budget compliance
+        variance = ((total_cost - budget) / budget) * 100
+        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
         
-        return score / factors if factors > 0 else 0
+        # Count compliance
+        if requirements.get('enforce_count') and requirements.get('product_count'):
+            if len(products) == requirements['product_count']:
+                reasoning_parts.append(f"✅ Met exact count requirement: {requirements['product_count']}")
+            else:
+                reasoning_parts.append(f"⚠️ Count mismatch: {len(products)} vs {requirements['product_count']} required")
+        
+        # Dietary compliance
+        if requirements.get('dietary'):
+            reasoning_parts.append(f"🥗 Dietary restrictions applied: {', '.join(requirements['dietary'])}")
+        
+        # Historical insights used
+        if context.get('patterns'):
+            patterns = context['patterns']
+            if patterns.get('favorite_products'):
+                favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
+                if favorites_included > 0:
+                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products from history")
+            
+            if patterns.get('budget_trend'):
+                reasoning_parts.append(f"📈 Budget trend: {patterns['budget_trend']}")
+        
+        # Category requirements
+        if requirements.get('categories_required'):
+            reasoning_parts.append(f"📂 Category requirements: {requirements['categories_required']}")
+        
+        return "\n".join(reasoning_parts)
+    
+    def _build_enhanced_reasoning(self, requirements, products, total_cost, budget, context):
+        """Build comprehensive reasoning including sources used"""
+        
+        reasoning_parts = []
+        
+        # Data sources
+        sources = []
+        if requirements['budget_source'] != 'none':
+            sources.append(f"Budget from {requirements['budget_source']}")
+        if requirements['count_source'] != 'none':
+            sources.append(f"Count from {requirements['count_source']}")
+        if requirements['dietary_source'] != 'none':
+            sources.append(f"Dietary from {requirements['dietary_source']}")
+        if requirements['type_source'] != 'default':
+            sources.append(f"Type from {requirements['type_source']}")
+        
+        reasoning_parts.append(f"📊 Data Sources: {', '.join(sources)}")
+        
+        # Results
+        reasoning_parts.append(f"📦 Generated {len(products)} products = €{total_cost:.2f}")
+        
+        # Budget compliance
+        variance = ((total_cost - budget) / budget) * 100
+        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        
+        # Requirements met
+        if requirements.get('enforce_count'):
+            if len(products) == requirements['product_count']:
+                reasoning_parts.append(f"✅ Met exact count: {requirements['product_count']}")
+            else:
+                reasoning_parts.append(f"⚠️ Count mismatch: {len(products)} vs {requirements['product_count']}")
+        
+        if requirements.get('dietary'):
+            reasoning_parts.append(f"🥗 Dietary applied: {', '.join(requirements['dietary'])}")
+        
+        if requirements.get('composition_type') != 'custom':
+            reasoning_parts.append(f"🎁 Composition type: {requirements['composition_type']}")
+        
+        # Historical insights
+        if context.get('patterns'):
+            patterns = context['patterns']
+            if patterns.get('favorite_products'):
+                favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
+                if favorites_included > 0:
+                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products")
+        
+        return "\n".join(reasoning_parts)
+    
+    # ================== DATA RETRIEVAL METHODS ==================
     
     def _get_all_previous_sales_data(self, partner_id):
-        """Get all previous sales data"""
+        """Get ALL previous sales data for 80/20 rule application"""
+        
         sales = self.env['sale.order'].search([
             ('partner_id', '=', partner_id),
             ('state', 'in', ['sale', 'done'])
@@ -968,7 +1167,7 @@ class OllamaGiftRecommender(models.Model):
                         'product': product_tmpl,
                         'qty': line.product_uom_qty,
                         'price': line.price_unit,
-                        'times_ordered': 0
+                        'times_ordered': 0  # Will be calculated later
                     })
             
             if products:
@@ -979,13 +1178,14 @@ class OllamaGiftRecommender(models.Model):
                     'total': sale.amount_untaxed
                 })
         
-        # Calculate frequency
+        # Calculate how many times each product was ordered
         product_frequency = {}
         for sale_data in all_sales_data:
             for prod_data in sale_data['products']:
                 prod_id = prod_data['product'].id
                 product_frequency[prod_id] = product_frequency.get(prod_id, 0) + 1
         
+        # Update frequency in the data
         for sale_data in all_sales_data:
             for prod_data in sale_data['products']:
                 prod_data['times_ordered'] = product_frequency.get(prod_data['product'].id, 0)
@@ -1023,35 +1223,325 @@ class OllamaGiftRecommender(models.Model):
             'order_name': last_order.name
         }
     
-    # ================== NOTES PARSING ==================
+    def _get_available_products(self, target_budget, dietary_restrictions):
+        """Get available products with proper filtering"""
+        
+        min_price = max(10, target_budget * 0.02)
+        max_price = target_budget * 0.40
+        
+        domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>=', min_price),
+            ('list_price', '<=', max_price),
+        ]
+        
+        if dietary_restrictions:
+            if 'halal' in dietary_restrictions:
+                if 'is_halal_compatible' in self.env['product.template']._fields:
+                    domain.append(('is_halal_compatible', '!=', False))
+                if 'contains_pork' in self.env['product.template']._fields:
+                    domain.append(('contains_pork', '=', False))
+                if 'contains_alcohol' in self.env['product.template']._fields:
+                    domain.append(('contains_alcohol', '=', False))
+        
+        products = self.env['product.template'].sudo().search(domain, limit=500)
+        
+        available = []
+        for product in products:
+            if self._has_stock(product):
+                available.append(product)
+        
+        _logger.info(f"Found {len(available)} available products")
+        return available
+    
+    # ================== LEARNING & ANALYSIS METHODS ==================
+    
+    def _get_or_update_learning_cache(self, partner_id):
+        """Get cached learning data or update if expired"""
+        
+        # Check if cache is valid (24 hours)
+        if self.cache_expiry and self.cache_expiry > datetime.now():
+            if self.learning_cache:
+                try:
+                    cache = json.loads(self.learning_cache)
+                    if str(partner_id) in cache:
+                        _logger.info("Using cached learning data")
+                        return cache[str(partner_id)]
+                except:
+                    pass
+        
+        # Generate new analysis
+        _logger.info("Generating fresh learning analysis")
+        learning_data = {
+            'patterns': self._analyze_client_purchase_patterns(partner_id),
+            'seasonal': self._analyze_seasonal_preferences(partner_id),
+            'similar_clients': self._find_similar_clients(partner_id),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Update cache
+        try:
+            cache = json.loads(self.learning_cache) if self.learning_cache else {}
+        except:
+            cache = {}
+        
+        cache[str(partner_id)] = learning_data
+        self.learning_cache = json.dumps(cache)
+        self.cache_expiry = datetime.now() + timedelta(hours=24)
+        
+        return learning_data
+    
+    def _analyze_client_purchase_patterns(self, partner_id):
+        """Analyze patterns across all client orders"""
+        
+        all_orders = self.env['sale.order'].search([
+            ('partner_id', '=', partner_id),
+            ('state', 'in', ['sale', 'done'])
+        ], order='date_order desc')
+        
+        if not all_orders:
+            return None
+        
+        pattern_analysis = {
+            'total_orders': len(all_orders),
+            'avg_order_value': 0,
+            'preferred_categories': {},
+            'product_frequency': {},
+            'budget_trend': 'stable',
+            'avg_product_count': 0,
+            'favorite_products': [],
+            'never_repeated_products': [],
+            'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
+        }
+        
+        # Analyze each order
+        total_value = 0
+        total_products = 0
+        product_counter = Counter()
+        category_counter = Counter()
+        all_product_prices = []
+        
+        for order in all_orders:
+            total_value += order.amount_untaxed
+            
+            for line in order.order_line:
+                if line.product_id:
+                    product_tmpl = line.product_id.product_tmpl_id
+                    product_counter[product_tmpl.id] += 1
+                    all_product_prices.append(line.price_unit)
+                    
+                    if hasattr(product_tmpl, 'categ_id'):
+                        category_counter[product_tmpl.categ_id.name] += 1
+                    total_products += 1
+        
+        # Calculate insights
+        pattern_analysis['avg_order_value'] = total_value / len(all_orders) if all_orders else 0
+        pattern_analysis['avg_product_count'] = total_products / len(all_orders) if all_orders else 0
+        
+        # Find favorite products (ordered multiple times)
+        pattern_analysis['favorite_products'] = [
+            prod_id for prod_id, count in product_counter.items() 
+            if count >= 2
+        ]
+        
+        # Find never-repeated products
+        pattern_analysis['never_repeated_products'] = [
+            prod_id for prod_id, count in product_counter.items() 
+            if count == 1 and len(all_orders) > 2
+        ]
+        
+        # Preferred categories
+        pattern_analysis['preferred_categories'] = dict(category_counter.most_common(5))
+        
+        # Price range preference
+        if all_product_prices:
+            pattern_analysis['preferred_price_range'] = {
+                'min': min(all_product_prices),
+                'max': max(all_product_prices),
+                'avg': sum(all_product_prices) / len(all_product_prices)
+            }
+        
+        # Budget trend analysis
+        if len(all_orders) >= 3:
+            recent_orders = all_orders[:3]
+            older_orders = all_orders[-3:]
+            recent_avg = sum(o.amount_untaxed for o in recent_orders) / 3
+            older_avg = sum(o.amount_untaxed for o in older_orders) / 3
+            
+            if recent_avg > older_avg * 1.2:
+                pattern_analysis['budget_trend'] = 'increasing'
+            elif recent_avg < older_avg * 0.8:
+                pattern_analysis['budget_trend'] = 'decreasing'
+        
+        return pattern_analysis
+    
+    def _analyze_seasonal_preferences(self, partner_id):
+        """Identify seasonal patterns in purchases"""
+        
+        orders = self.env['sale.order'].search([
+            ('partner_id', '=', partner_id),
+            ('state', 'in', ['sale', 'done'])
+        ])
+        
+        if not orders:
+            return None
+        
+        seasonal_data = {
+            'spring': {'products': [], 'categories': []},
+            'summer': {'products': [], 'categories': []},
+            'autumn': {'products': [], 'categories': []},
+            'winter': {'products': [], 'categories': []},
+            'christmas': {'products': [], 'categories': []}
+        }
+        
+        for order in orders:
+            month = order.date_order.month
+            season = self._get_current_season(month)
+            
+            for line in order.order_line:
+                if line.product_id:
+                    seasonal_data[season]['products'].append(line.product_id.product_tmpl_id.id)
+                    if hasattr(line.product_id.product_tmpl_id, 'categ_id'):
+                        seasonal_data[season]['categories'].append(line.product_id.product_tmpl_id.categ_id.name)
+        
+        current_season = self._get_current_season(datetime.now().month)
+        
+        return {
+            'current_season': current_season,
+            'seasonal_data': seasonal_data,
+            'seasonal_favorites': seasonal_data[current_season]['products'] if current_season in seasonal_data else []
+        }
+    
+    def _get_current_season(self, month):
+        """Get current season based on month"""
+        if month in [3, 4, 5]:
+            return 'spring'
+        elif month in [6, 7, 8]:
+            return 'summer'
+        elif month in [9, 10, 11]:
+            return 'autumn'
+        elif month == 12:
+            return 'christmas'
+        else:
+            return 'winter'
+    
+    def _find_similar_clients(self, partner_id, limit=5):
+        """Find clients with similar purchase patterns"""
+        
+        target_patterns = self._analyze_client_purchase_patterns(partner_id)
+        
+        if not target_patterns:
+            return []
+        
+        # Find other clients with orders
+        all_clients = self.env['sale.order'].read_group(
+            [('state', 'in', ['sale', 'done'])],
+            ['partner_id'],
+            ['partner_id']
+        )
+        
+        similar_clients = []
+        
+        for client_data in all_clients[:20]:  # Limit to 20 for performance
+            other_partner_id = client_data['partner_id'][0]
+            if other_partner_id == partner_id:
+                continue
+            
+            other_patterns = self._analyze_client_purchase_patterns(other_partner_id)
+            if not other_patterns:
+                continue
+            
+            # Calculate similarity score
+            similarity_score = self._calculate_similarity(target_patterns, other_patterns)
+            
+            if similarity_score > 0.6:  # 60% similarity threshold
+                similar_clients.append({
+                    'partner_id': other_partner_id,
+                    'similarity': similarity_score,
+                    'patterns': other_patterns
+                })
+        
+        # Sort by similarity and return top matches
+        similar_clients.sort(key=lambda x: x['similarity'], reverse=True)
+        return similar_clients[:limit]
+    
+    def _calculate_similarity(self, patterns1, patterns2):
+        """Calculate similarity score between two client patterns"""
+        
+        score = 0
+        factors = 0
+        
+        # Budget similarity (within 30%)
+        avg1 = patterns1.get('avg_order_value', 0)
+        avg2 = patterns2.get('avg_order_value', 0)
+        if avg1 and avg2:
+            budget_diff = abs(avg1 - avg2) / max(avg1, avg2)
+            if budget_diff < 0.3:
+                score += (1 - budget_diff)
+            factors += 1
+        
+        # Product count similarity
+        count1 = patterns1.get('avg_product_count', 0)
+        count2 = patterns2.get('avg_product_count', 0)
+        if count1 and count2:
+            count_diff = abs(count1 - count2) / max(count1, count2)
+            if count_diff < 0.3:
+                score += (1 - count_diff)
+            factors += 1
+        
+        # Category overlap
+        cats1 = set(patterns1.get('preferred_categories', {}).keys())
+        cats2 = set(patterns2.get('preferred_categories', {}).keys())
+        if cats1 and cats2:
+            overlap = len(cats1.intersection(cats2)) / len(cats1.union(cats2))
+            score += overlap
+            factors += 1
+        
+        # Budget trend similarity
+        if patterns1.get('budget_trend') == patterns2.get('budget_trend'):
+            score += 0.5
+            factors += 0.5
+        
+        return score / factors if factors > 0 else 0
+    
+    # ================== NOTES PARSING METHODS ==================
     
     def _parse_notes_with_ollama(self, notes, form_data=None):
-        """Parse notes using Ollama"""
+        """Use Ollama to intelligently parse notes and extract requirements"""
+        
         if not notes:
-            return {'use_default': False}
+            return {'use_default': True}
         
         if not self.ollama_enabled:
             return self._parse_notes_basic_fallback(notes)
         
-        prompt = f"""Extract requirements from these notes: "{notes}"
+        prompt = f"""You are an expert at understanding customer requirements for luxury gift compositions.
 
-Return ONLY valid JSON:
+Analyze the following customer notes and extract ALL requirements mentioned.
+
+CUSTOMER NOTES: "{notes}"
+
+Extract and return ONLY a valid JSON object with these fields:
 {{
     "product_count": <number or null>,
     "budget": <number or null>,
-    "budget_flexibility": <5-20>,
-    "dietary_restrictions": [],
-    "composition_type": "custom|hybrid|experience|null",
-    "categories_required": {{}},
-    "specific_products": [],
+    "budget_flexibility": <5 for strict, 10 for normal, 15 for flexible, 20 for very flexible>,
+    "dietary_restrictions": ["halal", "vegan", "vegetarian", "gluten_free", "non_alcoholic"],
+    "composition_type": "hybrid|experience|custom|null",
+    "categories_required": {{"wines": 2, "cheese": 3}},
+    "specific_products": ["product names"],
+    "exclude_products": ["things to avoid"],
+    "special_instructions": ["any special requests"],
     "confidence": <0-100>
 }}"""
         
         try:
             response = self._call_ollama(prompt, format_json=True)
+            
             if response:
                 try:
                     extracted = json.loads(response)
+                    
                     requirements = {
                         'use_default': False,
                         'product_count': extracted.get('product_count'),
@@ -1060,31 +1550,43 @@ Return ONLY valid JSON:
                         'dietary': extracted.get('dietary_restrictions', []),
                         'composition_type': extracted.get('composition_type'),
                         'categories_required': extracted.get('categories_required', {}),
-                        'specific_products': extracted.get('specific_products', [])
+                        'specific_products': extracted.get('specific_products', []),
+                        'categories_excluded': extracted.get('exclude_products', []),
+                        'special_instructions': extracted.get('special_instructions', [])
                     }
+                    
+                    _logger.info(f"Ollama parsed requirements (confidence: {extracted.get('confidence', 0)}%): {requirements}")
+                    
                     return requirements
-                except json.JSONDecodeError:
+                    
+                except json.JSONDecodeError as e:
+                    _logger.error(f"Failed to parse Ollama response as JSON: {e}")
                     return self._parse_notes_basic_fallback(notes)
             else:
                 return self._parse_notes_basic_fallback(notes)
+                
         except Exception as e:
-            _logger.error(f"Ollama parsing error: {e}")
+            _logger.error(f"Error in Ollama parsing: {e}")
             return self._parse_notes_basic_fallback(notes)
     
     def _parse_notes_basic_fallback(self, notes):
-        """Basic fallback parser"""
+        """Basic fallback parser for when Ollama is not available"""
+        
         parsed = {
             'use_default': False,
             'product_count': None,
             'budget_override': None,
             'budget_flexibility': 10,
             'dietary': [],
-            'composition_type': None
+            'composition_type': None,
+            'categories_required': {},
+            'categories_excluded': [],
+            'special_instructions': []
         }
         
         notes_lower = notes.lower()
         
-        # Extract numbers
+        # Basic number extraction
         numbers = re.findall(r'\b(\d+)\b', notes)
         for num in numbers:
             num_int = int(num)
@@ -1095,13 +1597,13 @@ Return ONLY valid JSON:
                 if 'budget' in notes_lower or '€' in notes or '$' in notes:
                     parsed['budget_override'] = float(num_int)
         
-        # Dietary
+        # Basic dietary detection
         if 'halal' in notes_lower:
             parsed['dietary'].append('halal')
         if 'vegan' in notes_lower:
             parsed['dietary'].append('vegan')
         
-        # Type
+        # Composition type
         if 'hybrid' in notes_lower:
             parsed['composition_type'] = 'hybrid'
         elif 'experience' in notes_lower:
@@ -1110,12 +1612,13 @@ Return ONLY valid JSON:
         return parsed
     
     def _call_ollama(self, prompt, format_json=False):
-        """Call Ollama API"""
+        """Make a call to Ollama API"""
         if not self.ollama_enabled:
             return None
         
         try:
             url = f"{self.ollama_base_url}/api/generate"
+            
             payload = {
                 'model': self.ollama_model,
                 'prompt': prompt,
@@ -1136,6 +1639,7 @@ Return ONLY valid JSON:
                 data = response.json()
                 return data.get('response', '').strip()
             else:
+                _logger.error(f"Ollama API error: {response.status_code}")
                 return None
                 
         except Exception as e:
@@ -1159,7 +1663,7 @@ Return ONLY valid JSON:
         return False
     
     def _check_dietary_compliance(self, product, dietary_restrictions):
-        """Check dietary compliance"""
+        """Check if product complies with dietary restrictions"""
         if not dietary_restrictions:
             return True
         
@@ -1179,26 +1683,31 @@ Return ONLY valid JSON:
         return True
     
     def _validate_and_log_result(self, result, requirements):
-        """Validate and log result"""
+        """Validate and log the result against requirements"""
+        
         actual_count = result.get('product_count', 0)
         actual_cost = result.get('total_cost', 0)
         expected_count = requirements.get('product_count')
         expected_budget = requirements['budget']
         flexibility = requirements['budget_flexibility']
         
+        # Count validation
         if requirements.get('enforce_count') and expected_count:
             if actual_count == expected_count:
-                _logger.info(f"✅ Count MET: {actual_count}")
+                _logger.info(f"✅ Count requirement MET: {actual_count} products")
             else:
-                _logger.error(f"❌ Count FAILED: {actual_count} != {expected_count}")
+                _logger.error(f"❌ Count requirement FAILED: {actual_count} != {expected_count}")
         
+        # Budget validation
         min_budget = expected_budget * (1 - flexibility/100)
         max_budget = expected_budget * (1 + flexibility/100)
         
         if min_budget <= actual_cost <= max_budget:
-            _logger.info(f"✅ Budget MET: €{actual_cost:.2f}")
+            variance = ((actual_cost - expected_budget) / expected_budget) * 100
+            _logger.info(f"✅ Budget requirement MET: €{actual_cost:.2f} ({variance:+.1f}% variance)")
         else:
-            _logger.error(f"❌ Budget FAILED: €{actual_cost:.2f}")
+            variance = ((actual_cost - expected_budget) / expected_budget) * 100
+            _logger.error(f"❌ Budget requirement FAILED: €{actual_cost:.2f} ({variance:+.1f}% variance)")
         
         return result.get('compliant', False)
     
@@ -1211,18 +1720,32 @@ Return ONLY valid JSON:
             'name': 'All Recommendations',
             'res_model': 'gift.composition',
             'view_mode': 'tree,form',
-            'domain': [('composition_type', '=', 'custom')],
+            'domain': [('generation_method', '=', 'ollama')],
+            'context': {'search_default_partner_id': True}
+        }
+    
+    def action_view_successful_recommendations(self):
+        """View successful recommendations"""
+        return {
+            'type': 'ir.actions.act_window',
+            'name': 'Successful Recommendations',
+            'res_model': 'gift.composition',
+            'view_mode': 'tree,form',
+            'domain': [
+                ('generation_method', '=', 'ollama'),
+                ('confidence_score', '>=', 0.8)
+            ],
             'context': {'search_default_partner_id': True}
         }
     
     def trigger_learning(self):
-        """Trigger learning analysis"""
+        """Trigger comprehensive learning analysis"""
         self.ensure_one()
         
         # Force cache refresh
         self.cache_expiry = datetime.now() - timedelta(days=1)
         
-        # Analyze clients
+        # Analyze all clients
         all_clients = self.env['sale.order'].read_group(
             [('state', 'in', ['sale', 'done'])],
             ['partner_id'],
@@ -1230,7 +1753,7 @@ Return ONLY valid JSON:
         )
         
         analyzed_count = 0
-        for client_data in all_clients[:50]:
+        for client_data in all_clients[:50]:  # Limit for performance
             partner_id = client_data['partner_id'][0]
             self._get_or_update_learning_cache(partner_id)
             analyzed_count += 1
@@ -1240,7 +1763,7 @@ Return ONLY valid JSON:
             'tag': 'display_notification',
             'params': {
                 'title': '🧠 Learning Analysis Complete',
-                'message': f'Analyzed {analyzed_count} clients',
+                'message': f'Analyzed {analyzed_count} clients. Cache updated for 24 hours.',
                 'type': 'success',
                 'sticky': False,
             }
