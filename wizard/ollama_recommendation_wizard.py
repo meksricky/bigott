@@ -1,8 +1,6 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import logging
-import json
-from datetime import datetime
 
 _logger = logging.getLogger(__name__)
 
@@ -54,7 +52,7 @@ class OllamaRecommendationWizard(models.TransientModel):
         ('hybrid', 'Hybrid'),
         ('experience', 'Experience')
     ], string="Composition Type", default='custom',
-       help="Leave empty to use historical preference or default")
+       help="Custom: Mixed products | Hybrid: Wine-focused | Experience: Activity-focused")
     
     composition_display_type = fields.Char(
         string='Composition Type',
@@ -105,7 +103,8 @@ class OllamaRecommendationWizard(models.TransientModel):
     ], string='Dietary Restrictions', default='none')
     
     dietary_restrictions_text = fields.Char(
-        string='Custom Dietary Restrictions'
+        string='Custom Dietary Restrictions',
+        help="Enter multiple restrictions separated by commas"
     )
     
     # Legacy dietary fields (for compatibility)
@@ -117,7 +116,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     # Client Information
     client_notes = fields.Text(
         string='Client Notes',
-        help="Any special requests or preferences"
+        help="Any special requests or preferences. You can specify composition type, budget, product count here."
     )
     
     client_info = fields.Html(
@@ -189,14 +188,63 @@ class OllamaRecommendationWizard(models.TransientModel):
         for wizard in self:
             if wizard.selected_experience:
                 exp = wizard.selected_experience
-                wizard.experience_preview = f"""
-                <div style="border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
-                    <h4>{exp.name}</h4>
-                    <p><strong>Price:</strong> €{exp.list_price:.2f}</p>
-                    <p><strong>Category:</strong> {exp.categ_id.name if exp.categ_id else 'N/A'}</p>
-                    <p><strong>Description:</strong> {exp.description_sale or 'No description available'}</p>
+                html = f"""
+                <div style="border: 1px solid #ddd; padding: 15px; border-radius: 5px; background: #f9f9f9;">
+                    <h4 style="margin: 0 0 10px 0; color: #333;">{exp.name}</h4>
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="width: 30%;"><b>Price:</b></td>
+                            <td>€{exp.list_price:.2f}</td>
+                        </tr>
+                        <tr>
+                            <td><b>Category:</b></td>
+                            <td>{exp.categ_id.name if exp.categ_id else 'N/A'}</td>
+                        </tr>
+                """
+                
+                # Add experience-specific fields if they exist
+                if hasattr(exp, 'experience_category') and exp.experience_category:
+                    html += f"""
+                        <tr>
+                            <td><b>Experience Type:</b></td>
+                            <td>{dict(exp._fields['experience_category'].selection).get(exp.experience_category, exp.experience_category)}</td>
+                        </tr>
+                    """
+                
+                if hasattr(exp, 'experience_duration') and exp.experience_duration:
+                    html += f"""
+                        <tr>
+                            <td><b>Duration:</b></td>
+                            <td>{exp.experience_duration} hours</td>
+                        </tr>
+                    """
+                
+                if hasattr(exp, 'experience_location') and exp.experience_location:
+                    html += f"""
+                        <tr>
+                            <td><b>Location:</b></td>
+                            <td>{exp.experience_location}</td>
+                        </tr>
+                    """
+                
+                if hasattr(exp, 'max_participants') and exp.max_participants:
+                    html += f"""
+                        <tr>
+                            <td><b>Max Participants:</b></td>
+                            <td>{exp.max_participants}</td>
+                        </tr>
+                    """
+                
+                html += f"""
+                    </table>
+                    <div style="margin-top: 10px;">
+                        <b>Description:</b><br/>
+                        {exp.description_sale or 'No description available'}
+                    </div>
                 </div>
                 """
+                
+                wizard.experience_preview = html
             else:
                 wizard.experience_preview = False
     
@@ -415,6 +463,26 @@ class OllamaRecommendationWizard(models.TransientModel):
         if self.engine_type:
             self.composition_type = self.engine_type
     
+    @api.onchange('experience_category_filter')
+    def _onchange_experience_category_filter(self):
+        """Filter experiences based on category"""
+        if self.experience_category_filter and self.experience_category_filter != 'all':
+            # Update domain for selected_experience field
+            return {
+                'domain': {
+                    'selected_experience': [
+                        ('is_experience', '=', True),
+                        ('experience_category', '=', self.experience_category_filter)
+                    ]
+                }
+            }
+        else:
+            return {
+                'domain': {
+                    'selected_experience': [('is_experience', '=', True)]
+                }
+            }
+    
     # ================== ACTION METHODS ==================
     
     def action_generate_recommendation(self):
@@ -432,11 +500,15 @@ class OllamaRecommendationWizard(models.TransientModel):
             # Prepare dietary restrictions
             dietary = self._prepare_dietary_restrictions()
             
-            # Build notes with product count if explicitly specified
+            # Build notes with all specifications
             final_notes = self._prepare_final_notes()
             
             # Log the generation request
             self._log_generation_request(dietary, final_notes)
+            
+            # Include selected experience if applicable
+            if self.composition_type == 'experience' and self.selected_experience:
+                final_notes += f" Include experience: {self.selected_experience.name}"
             
             # Generate recommendation with all data
             result = self.recommender_id.generate_gift_recommendations(
@@ -522,7 +594,9 @@ class OllamaRecommendationWizard(models.TransientModel):
         Budget (Form): €{self.target_budget:.2f} {'(provided)' if self.target_budget else '(empty)'}
         Product Count (Form): {self.product_count if self.specify_product_count else 'Not specified'}
         Dietary (Form): {dietary if dietary else 'None'}
-        Composition Type (Form): {self.composition_type or 'Not specified'}
+        Composition Type: {self.composition_type}
+        Engine Type: {self.engine_type}
+        Experience: {self.selected_experience.name if self.selected_experience else 'None'}
         Notes: {final_notes[:100]}{'...' if len(final_notes) > 100 else ''}
         ========================================
         """)

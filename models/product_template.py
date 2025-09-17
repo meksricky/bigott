@@ -60,3 +60,42 @@ class ProductTemplate(models.Model):
         ]
         
         return self.search(gift_domain + domain)
+
+    # Experience-related fields
+    is_experience = fields.Boolean(
+        string='Is Experience',
+        default=False,
+        help='Check if this product is an experience/activity rather than a physical product'
+    )
+    
+    experience_category = fields.Selection([
+        ('gastronomy', 'Gastronomy'),
+        ('wellness', 'Wellness & Spa'),
+        ('adventure', 'Adventure'),
+        ('culture', 'Culture & Arts'),
+        ('luxury', 'Luxury Experiences'),
+        ('other', 'Other')
+    ], string='Experience Category')
+    
+    experience_duration = fields.Float(
+        string='Duration (hours)',
+        help='Duration of the experience in hours'
+    )
+    
+    experience_location = fields.Char(
+        string='Experience Location'
+    )
+    
+    max_participants = fields.Integer(
+        string='Maximum Participants',
+        default=1
+    )
+    
+    @api.onchange('is_experience')
+    def _onchange_is_experience(self):
+        """Clear experience fields if not an experience"""
+        if not self.is_experience:
+            self.experience_category = False
+            self.experience_duration = False
+            self.experience_location = False
+            self.max_participants = 1
