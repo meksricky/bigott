@@ -145,44 +145,32 @@ class OllamaGiftRecommender(models.Model):
         
         # Get historical patterns
         learning_data = self._get_or_update_learning_cache(partner_id)
-        patterns = learning_data.get('patterns', {})
-        seasonal = learning_data.get('seasonal', {})
+        patterns = learning_data.get('patterns') if learning_data else None
+        seasonal = learning_data.get('seasonal') if learning_data else None
         
-        # FIX: Handle None patterns safely
-        if patterns:
-            _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
+        # FIX: Ensure patterns is never None
+        if not patterns:
+            patterns = {
+                'total_orders': 0,
+                'avg_order_value': 0,
+                'preferred_categories': {},
+                'product_frequency': {},
+                'budget_trend': 'stable',
+                'avg_product_count': 0,
+                'favorite_products': [],
+                'never_repeated_products': [],
+                'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
+            }
+            _logger.info("📊 HISTORY DATA: No historical data available (new customer)")
         else:
-            _logger.info("📊 HISTORY DATA: No historical data available")
-            patterns = {}
-
-        """Main generation method with intelligent multi-source merging"""
+            _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
         
-        partner = self.env['res.partner'].browse(partner_id)
-        if not partner:
-            return {'success': False, 'error': 'Partner not found'}
-        
-        # 1. COLLECT DATA FROM ALL SOURCES
-        _logger.info("="*60)
-        _logger.info(f"STARTING GENERATION FOR: {partner.name}")
-        _logger.info("="*60)
-        
-        # Form data
-        form_data = {
-            'budget': target_budget if target_budget and target_budget > 0 else None,
-            'dietary': dietary_restrictions or [],
-            'composition_type': composition_type
-        }
-        _logger.info(f"📋 FORM DATA: Budget={form_data['budget']}, Dietary={form_data['dietary']}, Type={form_data['composition_type']}")
-        
-        # Parse notes
-        notes_data = self._parse_notes_with_ollama(client_notes, form_data) if client_notes else {}
-        _logger.info(f"📝 NOTES DATA: {notes_data}")
-        
-        # Get historical patterns
-        learning_data = self._get_or_update_learning_cache(partner_id)
-        patterns = learning_data.get('patterns', {})
-        seasonal = learning_data.get('seasonal', {})
-        _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
+        if not seasonal:
+            seasonal = {
+                'current_season': self._get_current_season(datetime.now().month),
+                'seasonal_data': {},
+                'seasonal_favorites': []
+            }
         
         # Get previous sales
         previous_sales = self._get_all_previous_sales_data(partner_id)
@@ -203,7 +191,7 @@ class OllamaGiftRecommender(models.Model):
         generation_context = {
             'patterns': patterns,
             'seasonal': seasonal,
-            'similar_clients': learning_data.get('similar_clients'),
+            'similar_clients': learning_data.get('similar_clients', []) if learning_data else [],
             'previous_sales': previous_sales,
             'requirements_merged': True
         }
@@ -239,6 +227,194 @@ class OllamaGiftRecommender(models.Model):
             self._validate_and_log_result(result, final_requirements)
         
         return result
+
+    def _analyze_client_purchase_patterns(self, partner_id):
+        """Analyze patterns across all client orders"""
+        
+        # Default pattern structure
+        default_pattern = {
+            'total_orders': 0,
+            'avg_order_value': 0,
+            'preferred_categories': {},
+            'seasonal_patterns': {},
+            'product_frequency': {},
+            'budget_trend': 'stable',
+            'avg_product_count': 0,
+            'favorite_products': [],
+            'never_repeated_products': [],
+            'category_evolution': {},
+            'order_intervals': [],
+            'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
+        }
+        
+        # Get ALL historical orders
+        all_orders = self.env['sale.order'].search([
+            ('partner_id', '=', partner_id),
+            ('state', 'in', ['sale', 'done'])
+        ], order='date_order desc')
+        
+        if not all_orders:
+            _logger.info(f"No historical orders found for partner {partner_id}")
+            return default_pattern
+        
+        pattern_analysis = default_pattern.copy()
+        pattern_analysis['total_orders'] = len(all_orders)
+        
+        # Analyze each order
+        total_value = 0
+        total_products = 0
+        product_counter = Counter()
+        category_counter = Counter()
+        budgets_timeline = []
+        all_product_prices = []
+        last_order_date = None
+        
+        for order in all_orders:
+            order_value = order.amount_untaxed
+            total_value += order_value
+            budgets_timeline.append((order.date_order, order_value))
+            
+            # Calculate intervals between orders
+            if last_order_date:
+                interval = (last_order_date - order.date_order).days
+                pattern_analysis['order_intervals'].append(interval)
+            last_order_date = order.date_order
+            
+            # Count products and categories
+            for line in order.order_line:
+                if line.product_id:
+                    product_tmpl = line.product_id.product_tmpl_id
+                    product_counter[product_tmpl.id] += 1
+                    all_product_prices.append(line.price_unit)
+                    
+                    # Track category if available
+                    if hasattr(product_tmpl, 'categ_id'):
+                        category_counter[product_tmpl.categ_id.name] += 1
+                    total_products += 1
+        
+        # Calculate insights
+        pattern_analysis['avg_order_value'] = total_value / len(all_orders) if all_orders else 0
+        pattern_analysis['avg_product_count'] = total_products / len(all_orders) if all_orders else 0
+        
+        # Find favorite products (ordered multiple times)
+        pattern_analysis['favorite_products'] = [
+            prod_id for prod_id, count in product_counter.items() 
+            if count >= 2
+        ]
+        
+        # Find never-repeated products
+        pattern_analysis['never_repeated_products'] = [
+            prod_id for prod_id, count in product_counter.items() 
+            if count == 1 and len(all_orders) > 2
+        ]
+        
+        # Preferred categories
+        pattern_analysis['preferred_categories'] = dict(category_counter.most_common(5))
+        
+        # Price range preference
+        if all_product_prices:
+            pattern_analysis['preferred_price_range'] = {
+                'min': min(all_product_prices),
+                'max': max(all_product_prices),
+                'avg': sum(all_product_prices) / len(all_product_prices)
+            }
+        
+        # Budget trend analysis
+        if len(budgets_timeline) >= 3:
+            recent_orders = budgets_timeline[:min(3, len(budgets_timeline))]
+            older_orders = budgets_timeline[-min(3, len(budgets_timeline)):]
+            recent_avg = sum(b[1] for b in recent_orders) / len(recent_orders)
+            older_avg = sum(b[1] for b in older_orders) / len(older_orders)
+            
+            if recent_avg > older_avg * 1.2:
+                pattern_analysis['budget_trend'] = 'increasing'
+            elif recent_avg < older_avg * 0.8:
+                pattern_analysis['budget_trend'] = 'decreasing'
+        
+        # Average order interval
+        if pattern_analysis['order_intervals']:
+            pattern_analysis['avg_order_interval'] = sum(pattern_analysis['order_intervals']) / len(pattern_analysis['order_intervals'])
+        
+        return pattern_analysis
+
+    def _analyze_seasonal_preferences(self, partner_id):
+        """Identify seasonal patterns in purchases"""
+        
+        # Default seasonal structure
+        default_seasonal = {
+            'current_season': self._get_current_season(datetime.now().month),
+            'seasonal_data': {
+                'spring': {'products': [], 'categories': [], 'avg_value': 0},
+                'summer': {'products': [], 'categories': [], 'avg_value': 0},
+                'autumn': {'products': [], 'categories': [], 'avg_value': 0},
+                'winter': {'products': [], 'categories': [], 'avg_value': 0},
+                'christmas': {'products': [], 'categories': [], 'avg_value': 0}
+            },
+            'seasonal_favorites': [],
+            'seasonal_categories': []
+        }
+        
+        orders = self.env['sale.order'].search([
+            ('partner_id', '=', partner_id),
+            ('state', 'in', ['sale', 'done'])
+        ])
+        
+        if not orders:
+            _logger.info(f"No orders found for seasonal analysis - partner {partner_id}")
+            return default_seasonal
+        
+        seasonal_data = default_seasonal['seasonal_data'].copy()
+        season_order_values = defaultdict(list)
+        
+        for order in orders:
+            month = order.date_order.month
+            
+            # Determine season
+            if month in [3, 4, 5]:
+                season = 'spring'
+            elif month in [6, 7, 8]:
+                season = 'summer'
+            elif month in [9, 10, 11]:
+                season = 'autumn'
+            elif month == 12:
+                season = 'christmas'
+            else:
+                season = 'winter'
+            
+            season_order_values[season].append(order.amount_untaxed)
+            
+            # Track products for this season
+            for line in order.order_line:
+                if line.product_id:
+                    seasonal_data[season]['products'].append(line.product_id.product_tmpl_id.id)
+                    if hasattr(line.product_id.product_tmpl_id, 'categ_id'):
+                        seasonal_data[season]['categories'].append(line.product_id.product_tmpl_id.categ_id.name)
+        
+        # Calculate average values per season
+        for season, values in season_order_values.items():
+            if values:
+                seasonal_data[season]['avg_value'] = sum(values) / len(values)
+        
+        # Find patterns
+        current_month = datetime.now().month
+        current_season = self._get_current_season(current_month)
+        
+        # Get most common products/categories per season
+        for season in seasonal_data:
+            if seasonal_data[season]['products']:
+                product_counter = Counter(seasonal_data[season]['products'])
+                seasonal_data[season]['top_products'] = product_counter.most_common(5)
+            
+            if seasonal_data[season]['categories']:
+                category_counter = Counter(seasonal_data[season]['categories'])
+                seasonal_data[season]['top_categories'] = category_counter.most_common(3)
+        
+        return {
+            'current_season': current_season,
+            'seasonal_data': seasonal_data,
+            'seasonal_favorites': seasonal_data[current_season]['products'] if current_season in seasonal_data else [],
+            'seasonal_categories': seasonal_data[current_season].get('top_categories', []) if current_season in seasonal_data else []
+        }
     
     # ================== REQUIREMENT MERGING METHODS ==================
     
@@ -1588,126 +1764,126 @@ class OllamaGiftRecommender(models.Model):
         
         return learning_data
     
-    def _analyze_client_purchase_patterns(self, partner_id):
-        """Analyze patterns across all client orders"""
+    # def _analyze_client_purchase_patterns(self, partner_id):
+    #     """Analyze patterns across all client orders"""
         
-        all_orders = self.env['sale.order'].search([
-            ('partner_id', '=', partner_id),
-            ('state', 'in', ['sale', 'done'])
-        ], order='date_order desc')
+    #     all_orders = self.env['sale.order'].search([
+    #         ('partner_id', '=', partner_id),
+    #         ('state', 'in', ['sale', 'done'])
+    #     ], order='date_order desc')
         
-        if not all_orders:
-            return None
+    #     if not all_orders:
+    #         return None
         
-        pattern_analysis = {
-            'total_orders': len(all_orders),
-            'avg_order_value': 0,
-            'preferred_categories': {},
-            'product_frequency': {},
-            'budget_trend': 'stable',
-            'avg_product_count': 0,
-            'favorite_products': [],
-            'never_repeated_products': [],
-            'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
-        }
+    #     pattern_analysis = {
+    #         'total_orders': len(all_orders),
+    #         'avg_order_value': 0,
+    #         'preferred_categories': {},
+    #         'product_frequency': {},
+    #         'budget_trend': 'stable',
+    #         'avg_product_count': 0,
+    #         'favorite_products': [],
+    #         'never_repeated_products': [],
+    #         'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
+    #     }
         
-        # Analyze each order
-        total_value = 0
-        total_products = 0
-        product_counter = Counter()
-        category_counter = Counter()
-        all_product_prices = []
+    #     # Analyze each order
+    #     total_value = 0
+    #     total_products = 0
+    #     product_counter = Counter()
+    #     category_counter = Counter()
+    #     all_product_prices = []
         
-        for order in all_orders:
-            total_value += order.amount_untaxed
+    #     for order in all_orders:
+    #         total_value += order.amount_untaxed
             
-            for line in order.order_line:
-                if line.product_id:
-                    product_tmpl = line.product_id.product_tmpl_id
-                    product_counter[product_tmpl.id] += 1
-                    all_product_prices.append(line.price_unit)
+    #         for line in order.order_line:
+    #             if line.product_id:
+    #                 product_tmpl = line.product_id.product_tmpl_id
+    #                 product_counter[product_tmpl.id] += 1
+    #                 all_product_prices.append(line.price_unit)
                     
-                    if hasattr(product_tmpl, 'categ_id'):
-                        category_counter[product_tmpl.categ_id.name] += 1
-                    total_products += 1
+    #                 if hasattr(product_tmpl, 'categ_id'):
+    #                     category_counter[product_tmpl.categ_id.name] += 1
+    #                 total_products += 1
         
-        # Calculate insights
-        pattern_analysis['avg_order_value'] = total_value / len(all_orders) if all_orders else 0
-        pattern_analysis['avg_product_count'] = total_products / len(all_orders) if all_orders else 0
+    #     # Calculate insights
+    #     pattern_analysis['avg_order_value'] = total_value / len(all_orders) if all_orders else 0
+    #     pattern_analysis['avg_product_count'] = total_products / len(all_orders) if all_orders else 0
         
-        # Find favorite products (ordered multiple times)
-        pattern_analysis['favorite_products'] = [
-            prod_id for prod_id, count in product_counter.items() 
-            if count >= 2
-        ]
+    #     # Find favorite products (ordered multiple times)
+    #     pattern_analysis['favorite_products'] = [
+    #         prod_id for prod_id, count in product_counter.items() 
+    #         if count >= 2
+    #     ]
         
-        # Find never-repeated products
-        pattern_analysis['never_repeated_products'] = [
-            prod_id for prod_id, count in product_counter.items() 
-            if count == 1 and len(all_orders) > 2
-        ]
+    #     # Find never-repeated products
+    #     pattern_analysis['never_repeated_products'] = [
+    #         prod_id for prod_id, count in product_counter.items() 
+    #         if count == 1 and len(all_orders) > 2
+    #     ]
         
-        # Preferred categories
-        pattern_analysis['preferred_categories'] = dict(category_counter.most_common(5))
+    #     # Preferred categories
+    #     pattern_analysis['preferred_categories'] = dict(category_counter.most_common(5))
         
-        # Price range preference
-        if all_product_prices:
-            pattern_analysis['preferred_price_range'] = {
-                'min': min(all_product_prices),
-                'max': max(all_product_prices),
-                'avg': sum(all_product_prices) / len(all_product_prices)
-            }
+    #     # Price range preference
+    #     if all_product_prices:
+    #         pattern_analysis['preferred_price_range'] = {
+    #             'min': min(all_product_prices),
+    #             'max': max(all_product_prices),
+    #             'avg': sum(all_product_prices) / len(all_product_prices)
+    #         }
         
-        # Budget trend analysis
-        if len(all_orders) >= 3:
-            recent_orders = all_orders[:3]
-            older_orders = all_orders[-3:]
-            recent_avg = sum(o.amount_untaxed for o in recent_orders) / 3
-            older_avg = sum(o.amount_untaxed for o in older_orders) / 3
+    #     # Budget trend analysis
+    #     if len(all_orders) >= 3:
+    #         recent_orders = all_orders[:3]
+    #         older_orders = all_orders[-3:]
+    #         recent_avg = sum(o.amount_untaxed for o in recent_orders) / 3
+    #         older_avg = sum(o.amount_untaxed for o in older_orders) / 3
             
-            if recent_avg > older_avg * 1.2:
-                pattern_analysis['budget_trend'] = 'increasing'
-            elif recent_avg < older_avg * 0.8:
-                pattern_analysis['budget_trend'] = 'decreasing'
+    #         if recent_avg > older_avg * 1.2:
+    #             pattern_analysis['budget_trend'] = 'increasing'
+    #         elif recent_avg < older_avg * 0.8:
+    #             pattern_analysis['budget_trend'] = 'decreasing'
         
-        return pattern_analysis
+    #     return pattern_analysis
     
-    def _analyze_seasonal_preferences(self, partner_id):
-        """Identify seasonal patterns in purchases"""
+    # def _analyze_seasonal_preferences(self, partner_id):
+    #     """Identify seasonal patterns in purchases"""
         
-        orders = self.env['sale.order'].search([
-            ('partner_id', '=', partner_id),
-            ('state', 'in', ['sale', 'done'])
-        ])
+    #     orders = self.env['sale.order'].search([
+    #         ('partner_id', '=', partner_id),
+    #         ('state', 'in', ['sale', 'done'])
+    #     ])
         
-        if not orders:
-            return None
+    #     if not orders:
+    #         return None
         
-        seasonal_data = {
-            'spring': {'products': [], 'categories': []},
-            'summer': {'products': [], 'categories': []},
-            'autumn': {'products': [], 'categories': []},
-            'winter': {'products': [], 'categories': []},
-            'christmas': {'products': [], 'categories': []}
-        }
+    #     seasonal_data = {
+    #         'spring': {'products': [], 'categories': []},
+    #         'summer': {'products': [], 'categories': []},
+    #         'autumn': {'products': [], 'categories': []},
+    #         'winter': {'products': [], 'categories': []},
+    #         'christmas': {'products': [], 'categories': []}
+    #     }
         
-        for order in orders:
-            month = order.date_order.month
-            season = self._get_current_season(month)
+    #     for order in orders:
+    #         month = order.date_order.month
+    #         season = self._get_current_season(month)
             
-            for line in order.order_line:
-                if line.product_id:
-                    seasonal_data[season]['products'].append(line.product_id.product_tmpl_id.id)
-                    if hasattr(line.product_id.product_tmpl_id, 'categ_id'):
-                        seasonal_data[season]['categories'].append(line.product_id.product_tmpl_id.categ_id.name)
+    #         for line in order.order_line:
+    #             if line.product_id:
+    #                 seasonal_data[season]['products'].append(line.product_id.product_tmpl_id.id)
+    #                 if hasattr(line.product_id.product_tmpl_id, 'categ_id'):
+    #                     seasonal_data[season]['categories'].append(line.product_id.product_tmpl_id.categ_id.name)
         
-        current_season = self._get_current_season(datetime.now().month)
+    #     current_season = self._get_current_season(datetime.now().month)
         
-        return {
-            'current_season': current_season,
-            'seasonal_data': seasonal_data,
-            'seasonal_favorites': seasonal_data[current_season]['products'] if current_season in seasonal_data else []
-        }
+    #     return {
+    #         'current_season': current_season,
+    #         'seasonal_data': seasonal_data,
+    #         'seasonal_favorites': seasonal_data[current_season]['products'] if current_season in seasonal_data else []
+    #     }
     
     def _get_current_season(self, month):
         """Get current season based on month"""
