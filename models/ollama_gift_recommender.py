@@ -419,18 +419,18 @@ class OllamaGiftRecommender(models.Model):
     # ================== REQUIREMENT MERGING METHODS ==================
     
     def _merge_all_requirements(self, notes_data, form_data, patterns, seasonal):
-        """Intelligently merge requirements from all sources with proper priority handling"""
+        """Intelligently merge requirements from all sources with proper error handling"""
         
-        # Initialize merged requirements with defaults
+        # Initialize merged requirements with safe defaults
         merged = {
             # Budget related
-            'budget': None,
-            'budget_source': 'none',
+            'budget': 100.0,  # Safe default budget
+            'budget_source': 'default',
             'budget_flexibility': 15,  # Default 15% flexibility
             
             # Product count related
-            'product_count': None,
-            'count_source': 'none',
+            'product_count': 5,  # Safe default count
+            'count_source': 'default',
             'enforce_count': False,
             
             # Dietary restrictions
@@ -453,92 +453,107 @@ class OllamaGiftRecommender(models.Model):
         }
         
         # 1. MERGE BUDGET (Priority: Notes > Form > History > Default)
-        if notes_data and notes_data.get('budget_override'):
-            # Highest priority: explicit budget in notes
-            merged['budget'] = notes_data['budget_override']
+        if notes_data and notes_data.get('budget_override') and notes_data['budget_override'] > 0:
+            merged['budget'] = float(notes_data['budget_override'])
             merged['budget_source'] = 'notes (override)'
             _logger.info(f"💰 Budget from NOTES: €{merged['budget']:.2f}")
         elif form_data and form_data.get('budget') and form_data['budget'] > 0:
-            # Second priority: form input
-            merged['budget'] = form_data['budget']
+            merged['budget'] = float(form_data['budget'])
             merged['budget_source'] = 'form'
             _logger.info(f"💰 Budget from FORM: €{merged['budget']:.2f}")
         elif patterns and patterns.get('avg_order_value') and patterns['avg_order_value'] > 0:
-            # Third priority: historical average with trend adjustment
-            historical_budget = patterns['avg_order_value']
+            historical_budget = float(patterns['avg_order_value'])
             
             # Apply trend adjustment if available
             trend = patterns.get('budget_trend', 'stable')
             if trend == 'increasing':
-                historical_budget *= 1.1  # Increase by 10% for upward trend
+                historical_budget *= 1.1
                 merged['budget_source'] = 'history (increasing trend +10%)'
             elif trend == 'decreasing':
-                historical_budget *= 0.95  # Decrease by 5% for downward trend
+                historical_budget *= 0.95
                 merged['budget_source'] = 'history (decreasing trend -5%)'
             else:
                 merged['budget_source'] = 'history (stable trend)'
             
-            merged['budget'] = historical_budget
+            merged['budget'] = max(100.0, historical_budget)  # Ensure minimum budget
             _logger.info(f"💰 Budget from HISTORY: €{merged['budget']:.2f} ({trend} trend)")
         else:
-            # Default fallback
             merged['budget'] = 1000.0
             merged['budget_source'] = 'default'
             _logger.info(f"💰 Using DEFAULT budget: €{merged['budget']:.2f}")
         
+        # Ensure budget is valid
+        merged['budget'] = max(100.0, float(merged['budget']))
+        
         # 2. MERGE PRODUCT COUNT (Priority: Notes > History > Calculated)
-        if notes_data and notes_data.get('product_count'):
-            # Notes count is mandatory/strict
-            merged['product_count'] = notes_data['product_count']
-            merged['enforce_count'] = True  # Notes count is always strict
+        if notes_data and notes_data.get('product_count') and notes_data['product_count'] > 0:
+            merged['product_count'] = int(notes_data['product_count'])
+            merged['enforce_count'] = True
             merged['count_source'] = 'notes (strict enforcement)'
             _logger.info(f"📦 Product count from NOTES: {merged['product_count']} (STRICT)")
-        elif notes_data and notes_data.get('mandatory_count'):
-            # Alternative field for mandatory count
-            merged['product_count'] = notes_data['mandatory_count']
+        elif notes_data and notes_data.get('mandatory_count') and notes_data['mandatory_count'] > 0:
+            merged['product_count'] = int(notes_data['mandatory_count'])
             merged['enforce_count'] = True
             merged['count_source'] = 'notes (mandatory)'
             _logger.info(f"📦 Mandatory count from NOTES: {merged['product_count']}")
         elif patterns and patterns.get('avg_product_count') and patterns['avg_product_count'] > 0:
-            # Historical average, but flexible
-            merged['product_count'] = int(round(patterns['avg_product_count']))
-            merged['enforce_count'] = False  # Historical count is flexible
+            merged['product_count'] = max(1, int(round(patterns['avg_product_count'])))
+            merged['enforce_count'] = False
             merged['count_source'] = 'history (flexible)'
             _logger.info(f"📦 Product count from HISTORY: {merged['product_count']} (flexible)")
         else:
             # Calculate based on budget and average price
-            avg_price = 80  # Default average price assumption
+            # FIX: Handle division by zero and ensure valid avg_price
+            avg_price = 80.0  # Safe default
             
-            # Use historical price range if available
             if patterns and patterns.get('preferred_price_range'):
-                avg_price = patterns['preferred_price_range'].get('avg', 80)
+                price_range = patterns['preferred_price_range']
+                if price_range.get('avg') and price_range['avg'] > 0:
+                    avg_price = float(price_range['avg'])
+                elif price_range.get('min') and price_range.get('max'):
+                    min_p = float(price_range.get('min', 50))
+                    max_p = float(price_range.get('max', 150))
+                    if min_p > 0 and max_p > 0:
+                        avg_price = (min_p + max_p) / 2
             
-            # Calculate count ensuring reasonable range (8-20 products)
-            calculated_count = int(merged['budget'] / avg_price)
-            merged['product_count'] = max(8, min(20, calculated_count))
+            # Ensure avg_price is never zero
+            avg_price = max(10.0, avg_price)
+            
+            # Calculate count with safe division
+            calculated_count = int(merged['budget'] / avg_price) if avg_price > 0 else 12
+            merged['product_count'] = max(5, min(25, calculated_count))  # Between 5-25 products
             merged['enforce_count'] = False
             merged['count_source'] = f'calculated (€{merged["budget"]:.0f}/€{avg_price:.0f})'
             _logger.info(f"📦 Product count CALCULATED: {merged['product_count']} (flexible)")
         
+        # Ensure product count is valid
+        merged['product_count'] = max(1, int(merged['product_count']))
+        
         # 3. MERGE DIETARY RESTRICTIONS (Union of all sources)
         dietary_set = set()
         
-        # Add from notes (highest priority)
         if notes_data and notes_data.get('dietary'):
-            dietary_set.update(notes_data['dietary'])
+            dietary_items = notes_data['dietary']
+            if isinstance(dietary_items, list):
+                dietary_set.update(dietary_items)
+            elif isinstance(dietary_items, str):
+                dietary_set.add(dietary_items)
             merged['dietary_source'] = 'notes'
             _logger.info(f"🥗 Dietary from NOTES: {notes_data['dietary']}")
         
-        # Add from form (merge with notes if both exist)
         if form_data and form_data.get('dietary'):
-            dietary_set.update(form_data['dietary'])
+            dietary_items = form_data['dietary']
+            if isinstance(dietary_items, list):
+                dietary_set.update(dietary_items)
+            elif isinstance(dietary_items, str):
+                dietary_set.add(dietary_items)
+            
             if merged['dietary_source'] == 'notes':
                 merged['dietary_source'] = 'notes+form (combined)'
             else:
                 merged['dietary_source'] = 'form'
             _logger.info(f"🥗 Dietary from FORM: {form_data['dietary']}")
         
-        # Convert set to list
         merged['dietary'] = list(dietary_set)
         if not merged['dietary']:
             merged['dietary_source'] = 'none'
@@ -554,12 +569,10 @@ class OllamaGiftRecommender(models.Model):
             merged['type_source'] = 'form'
             _logger.info(f"🎁 Composition type from FORM: {merged['composition_type']}")
         elif patterns and patterns.get('total_orders', 0) >= 3:
-            # Infer from historical preferences
             if patterns.get('preferred_categories'):
                 top_categories = list(patterns['preferred_categories'].keys())
-                top_categories_str = ' '.join(top_categories).lower()
+                top_categories_str = ' '.join(str(cat) for cat in top_categories).lower()
                 
-                # Check for wine/alcohol preference
                 if any(word in top_categories_str for word in ['wine', 'vino', 'champagne', 'alcohol']):
                     merged['composition_type'] = 'hybrid'
                     merged['type_source'] = 'history (wine preference detected)'
@@ -582,10 +595,14 @@ class OllamaGiftRecommender(models.Model):
         
         # 5. MERGE BUDGET FLEXIBILITY (Notes > Default)
         if notes_data and notes_data.get('budget_flexibility'):
-            merged['budget_flexibility'] = notes_data['budget_flexibility']
-            _logger.info(f"📐 Flexibility from NOTES: {merged['budget_flexibility']}%")
+            try:
+                flex = float(notes_data['budget_flexibility'])
+                merged['budget_flexibility'] = max(5, min(30, flex))  # Between 5-30%
+                _logger.info(f"📐 Flexibility from NOTES: {merged['budget_flexibility']}%")
+            except (ValueError, TypeError):
+                merged['budget_flexibility'] = 15
+                _logger.info("📐 Invalid flexibility in notes, using DEFAULT: 15%")
         else:
-            # Default 15% flexibility as per business requirements
             merged['budget_flexibility'] = 15
             _logger.info("📐 Using DEFAULT flexibility: 15%")
         
@@ -613,25 +630,26 @@ class OllamaGiftRecommender(models.Model):
             if current_season and seasonal.get('seasonal_data', {}).get(current_season):
                 season_data = seasonal['seasonal_data'][current_season]
                 
-                # Add top categories as hint
                 if season_data.get('top_categories'):
                     merged['seasonal_hint'] = season_data['top_categories']
-                    _logger.info(f"🌡️ Seasonal hint ({current_season}): {merged['seasonal_hint'][:3]}")
+                    _logger.info(f"🌡️ Seasonal hint ({current_season}): {merged['seasonal_hint'][:3] if merged['seasonal_hint'] else 'None'}")
                 
-                # Add seasonal products as consideration
                 if season_data.get('top_products'):
                     merged['seasonal_products'] = [p[0] for p in season_data['top_products'][:5]]
                     _logger.info(f"🌡️ Seasonal products to consider: {len(merged.get('seasonal_products', []))} items")
         
         # 8. ADD PRICE RANGE PREFERENCE (from patterns)
         if patterns and patterns.get('preferred_price_range'):
-            merged['preferred_price_range'] = patterns['preferred_price_range']
-            _logger.info(f"💰 Price range preference: €{merged['preferred_price_range']['min']:.2f} - €{merged['preferred_price_range']['max']:.2f}")
+            price_range = patterns['preferred_price_range']
+            if price_range.get('min') and price_range.get('max'):
+                merged['preferred_price_range'] = price_range
+                _logger.info(f"💰 Price range preference: €{price_range.get('min', 0):.2f} - €{price_range.get('max', 0):.2f}")
         
         # 9. CALCULATE FINAL BUDGET BOUNDS
-        flexibility = merged['budget_flexibility']
-        merged['min_budget'] = merged['budget'] * (1 - flexibility/100)
-        merged['max_budget'] = merged['budget'] * (1 + flexibility/100)
+        flexibility = float(merged['budget_flexibility'])
+        budget = float(merged['budget'])
+        merged['min_budget'] = budget * (1 - flexibility/100)
+        merged['max_budget'] = budget * (1 + flexibility/100)
         
         # 10. LOG SUMMARY OF MERGED REQUIREMENTS
         _logger.info("="*60)
@@ -647,7 +665,7 @@ class OllamaGiftRecommender(models.Model):
         if merged.get('categories_required'):
             _logger.info(f"  📂 Required categories: {merged['categories_required']}")
         if merged.get('seasonal_hint'):
-            _logger.info(f"  🌡️ Seasonal consideration: {merged['seasonal_hint'][:3]}")
+            _logger.info(f"  🌡️ Seasonal consideration: {merged['seasonal_hint'][:3] if isinstance(merged['seasonal_hint'], list) else merged['seasonal_hint']}")
         _logger.info("="*60)
         
         return merged
