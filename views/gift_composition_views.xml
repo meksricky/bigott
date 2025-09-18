@@ -4,175 +4,130 @@
     <data>
         
         <!-- Enhanced Form View -->
-        <record id="view_gift_composition_form" model="ir.ui.view">
-            <field name="name">gift.composition.form.enhanced</field>
+       <record id="view_gift_composition_form" model="ir.ui.view">
+            <field name="name">gift.composition.form</field>
             <field name="model">gift.composition</field>
             <field name="arch" type="xml">
                 <form string="Gift Composition">
                     <header>
-                        <button name="action_confirm" type="object" string="Confirm" 
-                                states="draft" class="btn-primary"/>
-                        <button name="action_deliver" type="object" string="Mark Delivered" 
-                                states="confirmed" class="btn-success"/>
-                        <button name="action_cancel" type="object" string="Cancel" 
-                                states="draft,confirmed" class="btn-warning"/>
-                        <button name="action_set_draft" type="object" string="Reset to Draft" 
-                                states="cancelled" class="btn-secondary"/>
-                        <button name="action_regenerate" type="object" string="🔄 Regenerate" 
-                                states="draft" class="btn-info"/>
-                        <button name="action_duplicate" type="object" string="📋 Duplicate" 
-                                class="btn-secondary"/>
-                        <button name="auto_categorize_products" type="object" 
-                                string="🏷️ Auto-Categorize Products" 
-                                states="draft" class="btn-secondary"/>
-                        <field name="state" widget="statusbar" 
-                               statusbar_visible="draft,confirmed,delivered"/>
+                        <field name="state" widget="statusbar" statusbar_visible="draft,confirmed,delivered"/>
+                        <button name="action_confirm" string="Confirm" type="object" class="btn-primary" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
+                        <button name="action_cancel" string="Cancel" type="object" attrs="{'invisible': [('state', 'not in', ['draft', 'confirmed'])]}"/>
+                        <button name="action_regenerate" string="🔄 Regenerate" type="object" class="btn-warning" attrs="{'invisible': [('state', '!=', 'draft')]}"/>
                     </header>
                     
                     <sheet>
-                        <!-- Composition Type Banner - Fixed syntax -->
                         <div class="oe_button_box" name="button_box">
-                            <button class="oe_stat_button" icon="fa-gift">
-                                <field name="composition_type" widget="statinfo" string="Type"/>
-                            </button>
-                            <button class="oe_stat_button" icon="fa-cubes">
-                                <field name="product_count" widget="statinfo" string="Products"/>
-                            </button>
-                            <button class="oe_stat_button" icon="fa-euro">
-                                <field name="budget_variance" widget="statinfo" string="Variance %"/>
-                            </button>
+                            <button name="action_duplicate" string="Duplicate" type="object" class="oe_stat_button" icon="fa-copy"/>
+                            <button name="auto_categorize_products" string="Auto-Categorize Products" type="object" class="oe_stat_button" icon="fa-tags"/>
                         </div>
                         
                         <div class="oe_title">
                             <h1>
-                                <field name="display_name" readonly="1"/>
+                                <field name="name" readonly="1"/>
                             </h1>
-                            <h3 attrs="{'invisible': [('experience_name', '=', False)]}">
-                                <field name="experience_name" readonly="1"/>
-                            </h3>
+                            <h2>
+                                <field name="partner_id"/>
+                            </h2>
                         </div>
                         
-                        <group col="4">
-                            <field name="name" readonly="1"/>
-                            <field name="partner_id" options="{'no_create': True}"/>
-                            <field name="currency_id" invisible="1"/>
-                            <field name="target_budget" widget="monetary"/>
-                            <field name="actual_cost" widget="monetary" readonly="1"/>
-                            <field name="target_year"/>
-                            <field name="composition_type"/>
-                            <field name="experience_code" 
-                                   attrs="{'invisible': [('composition_type', 'not in', ['experience', 'hybrid'])]}"/>
-                            <field name="experience_category" 
-                                   attrs="{'invisible': [('composition_type', 'not in', ['experience', 'hybrid'])]}"/>
-                        </group>
-                        
-                        <group string="Dietary &amp; Notes" col="2">
-                            <group>
-                                <field name="dietary_restriction_type"/>
-                                <field name="dietary_restrictions" 
-                                       attrs="{'invisible': [('dietary_restriction_type', '!=', 'multiple')]}"/>
+                        <group>
+                            <group string="Composition Details">
+                                <field name="reference"/>
+                                <field name="composition_type"/>
+                                <field name="target_budget"/>
+                                <field name="actual_cost" readonly="1"/>
+                                <field name="variance_percentage" widget="progressbar"/>
+                                <field name="target_year"/>
                             </group>
-                            <group>
-                                <field name="client_notes"/>
-                                <field name="internal_notes"/>
+                            <group string="Generation Info">
+                                <field name="generation_method"/>
+                                <field name="confidence_score" widget="progressbar" attrs="{'invisible': [('generation_method', '!=', 'ollama')]}"/>
+                                <field name="experience_code" attrs="{'invisible': [('composition_type', '!=', 'experience')]}"/>
+                                <field name="product_count" readonly="1"/>
+                                <field name="state"/>
                             </group>
                         </group>
                         
+                        <group string="Dietary &amp; Notes">
+                            <group>
+                                <field name="dietary_restrictions" placeholder="e.g., Halal, Vegan, Gluten-free"/>
+                            </group>
+                            <group>
+                                <field name="client_notes" placeholder="Special requirements from client"/>
+                                <field name="internal_notes" placeholder="Internal notes (not visible to client)"/>
+                            </group>
+                        </group>
+                        
+                        <!-- NOTEBOOK WITH ALL TABS -->
                         <notebook>
-                            <!-- Products by Category -->
-                            <page string="🍷 Beverages" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="beverage_product_ids">
-                                    <tree string="Beverage Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <page string="🥃 Aperitifs" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="aperitif_product_ids">
-                                    <tree string="Aperitif Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <page string="🦆 Foie Gras" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="foie_product_ids">
-                                    <tree string="Foie Gras Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <page string="🥫 Canned Foods" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="canned_product_ids">
-                                    <tree string="Canned Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <page string="🥓 Charcuterie" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="charcuterie_product_ids">
-                                    <tree string="Charcuterie Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <page string="🍬 Sweets" attrs="{'invisible': [('composition_type', '=', 'experience')]}">
-                                <field name="sweet_product_ids">
-                                    <tree string="Sweet Products" create="false" delete="false">
-                                        <field name="name"/>
-                                        <field name="default_code"/>
-                                        <field name="list_price" widget="monetary"/>
-                                    </tree>
-                                </field>
-                            </page>
-                            
-                            <!-- All Products (always visible) -->
-                            <page string="📦 All Products">
-                                <field name="product_ids">
-                                    <tree string="All Products" create="false" delete="false">
+                            <!-- Products Tab -->
+                            <page string="📦 Products" name="products">
+                                <field name="product_ids" widget="many2many_tags_avatar">
+                                    <tree editable="bottom">
                                         <field name="name"/>
                                         <field name="default_code"/>
                                         <field name="categ_id"/>
-                                        <field name="list_price" widget="monetary"/>
+                                        <field name="list_price"/>
                                         <field name="qty_available"/>
                                     </tree>
                                 </field>
                                 <group class="oe_subtotal_footer">
-                                    <field name="actual_cost" widget="monetary" class="oe_subtotal_footer_separator"/>
+                                    <field name="actual_cost" class="oe_subtotal_footer_separator"/>
+                                    <field name="target_budget"/>
+                                    <field name="variance_amount" widget="monetary"/>
                                 </group>
                             </page>
                             
-                            <!-- AI Information -->
-                            <page string="🤖 AI Details" groups="base.group_system">
-                                <group col="2">
-                                    <field name="generation_method"/>
+                            <!-- Categories Tab -->
+                            <page string="📊 Categories" name="categories">
+                                <group string="Category Distribution">
+                                    <field name="categories_distribution" widget="html" readonly="1" nolabel="1"/>
+                                </group>
+                                <group col="4" string="Category Counts">
+                                    <field name="total_categories" readonly="1"/>
+                                    <field name="wine_count" readonly="1"/>
+                                    <field name="cheese_count" readonly="1"/>
+                                    <field name="gourmet_count" readonly="1"/>
+                                </group>
+                            </page>
+                            
+                            <!-- AI Insights Tab -->
+                            <page string="🤖 AI Insights" name="ai_insights" attrs="{'invisible': [('generation_method', '!=', 'ollama')]}">
+                                <group string="Generation Details">
+                                    <field name="ai_reasoning" readonly="1" widget="text" nolabel="1"/>
+                                </group>
+                                <group col="4" string="AI Metrics">
                                     <field name="confidence_score" widget="percentage"/>
-                                    <field name="ai_reasoning" widget="text"/>
-                                    <field name="category_distribution" readonly="1"/>
+                                    <field name="generation_method"/>
+                                    <field name="compliance_status" attrs="{'invisible': [('compliance_status', '=', False)]}"/>
+                                    <field name="generation_strategy" attrs="{'invisible': [('generation_strategy', '=', False)]}"/>
+                                </group>
+                            </page>
+                            
+                            <!-- Statistics Tab -->
+                            <page string="📈 Statistics" name="statistics">
+                                <group col="4">
+                                    <field name="product_count"/>
+                                    <field name="total_categories"/>
+                                    <field name="actual_cost"/>
+                                    <field name="target_budget"/>
+                                    <field name="variance_percentage" widget="percentage"/>
+                                    <field name="variance_amount"/>
+                                </group>
+                                <group string="Price Analysis">
+                                    <field name="avg_product_price" readonly="1"/>
+                                    <field name="min_product_price" readonly="1"/>
+                                    <field name="max_product_price" readonly="1"/>
+                                    <field name="price_std_deviation" readonly="1"/>
                                 </group>
                             </page>
                         </notebook>
-                        
                     </sheet>
                     
-                    <!-- Chatter widget - now works because we inherit mail.thread -->
+                    <!-- Chatter -->
                     <div class="oe_chatter">
                         <field name="message_follower_ids" widget="mail_followers"/>
-                        <field name="activity_ids" widget="mail_activity"/>
                         <field name="message_ids" widget="mail_thread"/>
                     </div>
                 </form>

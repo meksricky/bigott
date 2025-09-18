@@ -147,6 +147,41 @@ class OllamaGiftRecommender(models.Model):
         learning_data = self._get_or_update_learning_cache(partner_id)
         patterns = learning_data.get('patterns', {})
         seasonal = learning_data.get('seasonal', {})
+        
+        # FIX: Handle None patterns safely
+        if patterns:
+            _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
+        else:
+            _logger.info("📊 HISTORY DATA: No historical data available")
+            patterns = {}
+
+        """Main generation method with intelligent multi-source merging"""
+        
+        partner = self.env['res.partner'].browse(partner_id)
+        if not partner:
+            return {'success': False, 'error': 'Partner not found'}
+        
+        # 1. COLLECT DATA FROM ALL SOURCES
+        _logger.info("="*60)
+        _logger.info(f"STARTING GENERATION FOR: {partner.name}")
+        _logger.info("="*60)
+        
+        # Form data
+        form_data = {
+            'budget': target_budget if target_budget and target_budget > 0 else None,
+            'dietary': dietary_restrictions or [],
+            'composition_type': composition_type
+        }
+        _logger.info(f"📋 FORM DATA: Budget={form_data['budget']}, Dietary={form_data['dietary']}, Type={form_data['composition_type']}")
+        
+        # Parse notes
+        notes_data = self._parse_notes_with_ollama(client_notes, form_data) if client_notes else {}
+        _logger.info(f"📝 NOTES DATA: {notes_data}")
+        
+        # Get historical patterns
+        learning_data = self._get_or_update_learning_cache(partner_id)
+        patterns = learning_data.get('patterns', {})
+        seasonal = learning_data.get('seasonal', {})
         _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
         
         # Get previous sales
@@ -208,96 +243,236 @@ class OllamaGiftRecommender(models.Model):
     # ================== REQUIREMENT MERGING METHODS ==================
     
     def _merge_all_requirements(self, notes_data, form_data, patterns, seasonal):
-        """Intelligently merge requirements from all sources"""
+        """Intelligently merge requirements from all sources with proper priority handling"""
         
+        # Initialize merged requirements with defaults
         merged = {
+            # Budget related
             'budget': None,
             'budget_source': 'none',
-            'budget_flexibility': 10,
+            'budget_flexibility': 15,  # Default 15% flexibility
+            
+            # Product count related
             'product_count': None,
             'count_source': 'none',
             'enforce_count': False,
+            
+            # Dietary restrictions
             'dietary': [],
             'dietary_source': 'none',
+            
+            # Composition type
             'composition_type': 'custom',
             'type_source': 'default',
+            
+            # Categories and products
             'categories_required': {},
             'categories_excluded': [],
             'specific_products': [],
             'special_instructions': [],
+            
+            # Additional hints
+            'seasonal_hint': None,
+            'preferred_price_range': None
         }
         
-        # MERGE BUDGET
-        if notes_data.get('budget_override'):
+        # 1. MERGE BUDGET (Priority: Notes > Form > History > Default)
+        if notes_data and notes_data.get('budget_override'):
+            # Highest priority: explicit budget in notes
             merged['budget'] = notes_data['budget_override']
-            merged['budget_source'] = 'notes'
-        elif form_data.get('budget'):
+            merged['budget_source'] = 'notes (override)'
+            _logger.info(f"💰 Budget from NOTES: €{merged['budget']:.2f}")
+        elif form_data and form_data.get('budget') and form_data['budget'] > 0:
+            # Second priority: form input
             merged['budget'] = form_data['budget']
             merged['budget_source'] = 'form'
-        elif patterns and patterns.get('avg_order_value'):
+            _logger.info(f"💰 Budget from FORM: €{merged['budget']:.2f}")
+        elif patterns and patterns.get('avg_order_value') and patterns['avg_order_value'] > 0:
+            # Third priority: historical average with trend adjustment
             historical_budget = patterns['avg_order_value']
-            if patterns.get('budget_trend') == 'increasing':
-                historical_budget *= 1.1
-            elif patterns.get('budget_trend') == 'decreasing':
-                historical_budget *= 0.95
+            
+            # Apply trend adjustment if available
+            trend = patterns.get('budget_trend', 'stable')
+            if trend == 'increasing':
+                historical_budget *= 1.1  # Increase by 10% for upward trend
+                merged['budget_source'] = 'history (increasing trend +10%)'
+            elif trend == 'decreasing':
+                historical_budget *= 0.95  # Decrease by 5% for downward trend
+                merged['budget_source'] = 'history (decreasing trend -5%)'
+            else:
+                merged['budget_source'] = 'history (stable trend)'
+            
             merged['budget'] = historical_budget
-            merged['budget_source'] = f"history ({patterns.get('budget_trend', 'stable')} trend)"
+            _logger.info(f"💰 Budget from HISTORY: €{merged['budget']:.2f} ({trend} trend)")
         else:
+            # Default fallback
             merged['budget'] = 1000.0
             merged['budget_source'] = 'default'
+            _logger.info(f"💰 Using DEFAULT budget: €{merged['budget']:.2f}")
         
-        # MERGE PRODUCT COUNT
-        if notes_data.get('product_count'):
+        # 2. MERGE PRODUCT COUNT (Priority: Notes > History > Calculated)
+        if notes_data and notes_data.get('product_count'):
+            # Notes count is mandatory/strict
             merged['product_count'] = notes_data['product_count']
+            merged['enforce_count'] = True  # Notes count is always strict
+            merged['count_source'] = 'notes (strict enforcement)'
+            _logger.info(f"📦 Product count from NOTES: {merged['product_count']} (STRICT)")
+        elif notes_data and notes_data.get('mandatory_count'):
+            # Alternative field for mandatory count
+            merged['product_count'] = notes_data['mandatory_count']
             merged['enforce_count'] = True
-            merged['count_source'] = 'notes (strict)'
-        elif patterns and patterns.get('avg_product_count'):
+            merged['count_source'] = 'notes (mandatory)'
+            _logger.info(f"📦 Mandatory count from NOTES: {merged['product_count']}")
+        elif patterns and patterns.get('avg_product_count') and patterns['avg_product_count'] > 0:
+            # Historical average, but flexible
             merged['product_count'] = int(round(patterns['avg_product_count']))
-            merged['enforce_count'] = False
+            merged['enforce_count'] = False  # Historical count is flexible
             merged['count_source'] = 'history (flexible)'
+            _logger.info(f"📦 Product count from HISTORY: {merged['product_count']} (flexible)")
         else:
-            avg_price = 80
+            # Calculate based on budget and average price
+            avg_price = 80  # Default average price assumption
+            
+            # Use historical price range if available
             if patterns and patterns.get('preferred_price_range'):
                 avg_price = patterns['preferred_price_range'].get('avg', 80)
-            merged['product_count'] = max(8, min(20, int(merged['budget'] / avg_price)))
+            
+            # Calculate count ensuring reasonable range (8-20 products)
+            calculated_count = int(merged['budget'] / avg_price)
+            merged['product_count'] = max(8, min(20, calculated_count))
             merged['enforce_count'] = False
-            merged['count_source'] = 'estimated'
+            merged['count_source'] = f'calculated (€{merged["budget"]:.0f}/€{avg_price:.0f})'
+            _logger.info(f"📦 Product count CALCULATED: {merged['product_count']} (flexible)")
         
-        # MERGE DIETARY
+        # 3. MERGE DIETARY RESTRICTIONS (Union of all sources)
         dietary_set = set()
-        if notes_data.get('dietary'):
+        
+        # Add from notes (highest priority)
+        if notes_data and notes_data.get('dietary'):
             dietary_set.update(notes_data['dietary'])
             merged['dietary_source'] = 'notes'
-        if form_data.get('dietary'):
+            _logger.info(f"🥗 Dietary from NOTES: {notes_data['dietary']}")
+        
+        # Add from form (merge with notes if both exist)
+        if form_data and form_data.get('dietary'):
             dietary_set.update(form_data['dietary'])
             if merged['dietary_source'] == 'notes':
-                merged['dietary_source'] = 'notes+form'
+                merged['dietary_source'] = 'notes+form (combined)'
             else:
                 merged['dietary_source'] = 'form'
-        merged['dietary'] = list(dietary_set)
+            _logger.info(f"🥗 Dietary from FORM: {form_data['dietary']}")
         
-        # MERGE COMPOSITION TYPE
-        if notes_data.get('composition_type'):
+        # Convert set to list
+        merged['dietary'] = list(dietary_set)
+        if not merged['dietary']:
+            merged['dietary_source'] = 'none'
+            _logger.info("🥗 No dietary restrictions")
+        
+        # 4. MERGE COMPOSITION TYPE (Priority: Notes > Form > History-based > Default)
+        if notes_data and notes_data.get('composition_type'):
             merged['composition_type'] = notes_data['composition_type']
             merged['type_source'] = 'notes'
-        elif form_data.get('composition_type'):
+            _logger.info(f"🎁 Composition type from NOTES: {merged['composition_type']}")
+        elif form_data and form_data.get('composition_type'):
             merged['composition_type'] = form_data['composition_type']
             merged['type_source'] = 'form'
+            _logger.info(f"🎁 Composition type from FORM: {merged['composition_type']}")
+        elif patterns and patterns.get('total_orders', 0) >= 3:
+            # Infer from historical preferences
+            if patterns.get('preferred_categories'):
+                top_categories = list(patterns['preferred_categories'].keys())
+                top_categories_str = ' '.join(top_categories).lower()
+                
+                # Check for wine/alcohol preference
+                if any(word in top_categories_str for word in ['wine', 'vino', 'champagne', 'alcohol']):
+                    merged['composition_type'] = 'hybrid'
+                    merged['type_source'] = 'history (wine preference detected)'
+                    _logger.info("🎁 Composition type from HISTORY: hybrid (wine preference)")
+                elif any(word in top_categories_str for word in ['experience', 'experiencia']):
+                    merged['composition_type'] = 'experience'
+                    merged['type_source'] = 'history (experience preference detected)'
+                    _logger.info("🎁 Composition type from HISTORY: experience")
+                else:
+                    merged['composition_type'] = 'custom'
+                    merged['type_source'] = 'history (general products)'
+                    _logger.info("🎁 Composition type from HISTORY: custom")
+            else:
+                merged['composition_type'] = 'custom'
+                merged['type_source'] = 'default'
         else:
             merged['composition_type'] = 'custom'
             merged['type_source'] = 'default'
+            _logger.info("🎁 Using DEFAULT composition type: custom")
         
-        # MERGE OTHER REQUIREMENTS
-        if notes_data.get('budget_flexibility'):
+        # 5. MERGE BUDGET FLEXIBILITY (Notes > Default)
+        if notes_data and notes_data.get('budget_flexibility'):
             merged['budget_flexibility'] = notes_data['budget_flexibility']
-        if notes_data.get('categories_required'):
-            merged['categories_required'] = notes_data['categories_required']
-        if notes_data.get('categories_excluded'):
-            merged['categories_excluded'] = notes_data['categories_excluded']
-        if notes_data.get('specific_products'):
-            merged['specific_products'] = notes_data['specific_products']
-        if notes_data.get('special_instructions'):
-            merged['special_instructions'] = notes_data['special_instructions']
+            _logger.info(f"📐 Flexibility from NOTES: {merged['budget_flexibility']}%")
+        else:
+            # Default 15% flexibility as per business requirements
+            merged['budget_flexibility'] = 15
+            _logger.info("📐 Using DEFAULT flexibility: 15%")
+        
+        # 6. MERGE CATEGORY REQUIREMENTS (Primarily from notes)
+        if notes_data:
+            if notes_data.get('categories_required'):
+                merged['categories_required'] = notes_data['categories_required']
+                _logger.info(f"📂 Categories required: {merged['categories_required']}")
+            
+            if notes_data.get('categories_excluded'):
+                merged['categories_excluded'] = notes_data['categories_excluded']
+                _logger.info(f"🚫 Categories excluded: {merged['categories_excluded']}")
+            
+            if notes_data.get('specific_products'):
+                merged['specific_products'] = notes_data['specific_products']
+                _logger.info(f"⭐ Specific products requested: {len(merged['specific_products'])} items")
+            
+            if notes_data.get('special_instructions'):
+                merged['special_instructions'] = notes_data['special_instructions']
+                _logger.info(f"📋 Special instructions: {len(merged['special_instructions'])} notes")
+        
+        # 7. ADD SEASONAL PREFERENCES (as hints, not requirements)
+        if seasonal and not merged.get('categories_required'):
+            current_season = seasonal.get('current_season')
+            if current_season and seasonal.get('seasonal_data', {}).get(current_season):
+                season_data = seasonal['seasonal_data'][current_season]
+                
+                # Add top categories as hint
+                if season_data.get('top_categories'):
+                    merged['seasonal_hint'] = season_data['top_categories']
+                    _logger.info(f"🌡️ Seasonal hint ({current_season}): {merged['seasonal_hint'][:3]}")
+                
+                # Add seasonal products as consideration
+                if season_data.get('top_products'):
+                    merged['seasonal_products'] = [p[0] for p in season_data['top_products'][:5]]
+                    _logger.info(f"🌡️ Seasonal products to consider: {len(merged.get('seasonal_products', []))} items")
+        
+        # 8. ADD PRICE RANGE PREFERENCE (from patterns)
+        if patterns and patterns.get('preferred_price_range'):
+            merged['preferred_price_range'] = patterns['preferred_price_range']
+            _logger.info(f"💰 Price range preference: €{merged['preferred_price_range']['min']:.2f} - €{merged['preferred_price_range']['max']:.2f}")
+        
+        # 9. CALCULATE FINAL BUDGET BOUNDS
+        flexibility = merged['budget_flexibility']
+        merged['min_budget'] = merged['budget'] * (1 - flexibility/100)
+        merged['max_budget'] = merged['budget'] * (1 + flexibility/100)
+        
+        # 10. LOG SUMMARY OF MERGED REQUIREMENTS
+        _logger.info("="*60)
+        _logger.info("FINAL MERGED REQUIREMENTS SUMMARY:")
+        _logger.info(f"  💰 Budget: €{merged['budget']:.2f} (±{flexibility}%)")
+        _logger.info(f"     Range: €{merged['min_budget']:.2f} - €{merged['max_budget']:.2f}")
+        _logger.info(f"     Source: {merged['budget_source']}")
+        _logger.info(f"  📦 Products: {merged['product_count']} (enforce: {merged['enforce_count']})")
+        _logger.info(f"     Source: {merged['count_source']}")
+        _logger.info(f"  🎁 Type: {merged['composition_type']} (from: {merged['type_source']})")
+        if merged['dietary']:
+            _logger.info(f"  🥗 Dietary: {', '.join(merged['dietary'])} (from: {merged['dietary_source']})")
+        if merged.get('categories_required'):
+            _logger.info(f"  📂 Required categories: {merged['categories_required']}")
+        if merged.get('seasonal_hint'):
+            _logger.info(f"  🌡️ Seasonal consideration: {merged['seasonal_hint'][:3]}")
+        _logger.info("="*60)
         
         return merged
     
@@ -786,71 +961,193 @@ class OllamaGiftRecommender(models.Model):
         return products
     
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_strict, context):
-        """Smart optimization considering all constraints and context"""
+        """Smart optimization with STRICT budget enforcement (85%-115% of target)"""
         
+        if not products:
+            return []
+            
         if not target_count:
-            # Estimate count based on budget
-            avg_price = 50  # Default assumption
-            if context.get('patterns', {}).get('preferred_price_range'):
-                avg_price = context['patterns']['preferred_price_range'].get('avg', 50)
-            target_count = max(5, int(budget / avg_price))
+            target_count = max(5, int(budget / 50))
         
-        min_budget = budget * (1 - flexibility/100)
-        max_budget = budget * (1 + flexibility/100)
-        avg_price_target = budget / target_count
+        # CRITICAL: Enforce 85%-115% of budget (±15% flexibility)
+        min_budget = budget * 0.85  # 85% of budget
+        max_budget = budget * 1.15  # 115% of budget
         
-        # Score products
-        scored_products = []
-        for product in products:
-            # Price fitness score
-            price_diff = abs(product.list_price - avg_price_target)
-            price_score = 1 / (1 + price_diff/avg_price_target)
+        _logger.info(f"🎯 STRICT Budget Range: €{min_budget:.2f} - €{max_budget:.2f} (target: €{budget:.2f})")
+        _logger.info(f"📦 Target: {target_count} products")
+        
+        # Calculate ideal average price
+        ideal_avg_price = budget / target_count
+        
+        # METHOD 1: Try to hit exact budget with exact count
+        best_selection = []
+        best_total = 0
+        best_diff = float('inf')
+        
+        # Sort products by how close they are to ideal price
+        products_by_price_fit = sorted(products, 
+                                    key=lambda p: abs(p.list_price - ideal_avg_price))
+        
+        # Try different combinations
+        for attempt in range(10):
+            selected = []
+            current_total = 0
             
-            # Pattern bonus
-            pattern_score = 0
-            if context.get('patterns'):
-                if product.id in context['patterns'].get('favorite_products', []):
-                    pattern_score = 2
-            
-            total_score = price_score + pattern_score
-            scored_products.append((product, total_score))
-        
-        # Sort by score
-        scored_products.sort(key=lambda x: x[1], reverse=True)
-        
-        # Greedy selection with budget awareness
-        selected = []
-        current_total = 0
-        
-        for product, score in scored_products:
-            if len(selected) >= target_count:
-                break
-            
-            future_total = current_total + product.list_price
-            remaining_slots = target_count - len(selected) - 1
-            
-            # Check if we can still meet budget constraints
-            if remaining_slots > 0:
-                # Estimate if we can fill remaining slots within budget
-                min_remaining = remaining_slots * 5  # Assume min €5 per product
-                max_remaining = remaining_slots * (max_budget - future_total) / remaining_slots if remaining_slots > 0 else 0
-                
-                if future_total + min_remaining <= max_budget:
-                    selected.append(product)
-                    current_total = future_total
+            # Vary strategy per attempt
+            if attempt == 0:
+                # First attempt: products closest to ideal price
+                candidate_products = products_by_price_fit
+            elif attempt < 5:
+                # Mix of ideal price products
+                import random
+                candidate_products = products_by_price_fit[:len(products_by_price_fit)//2]
+                random.shuffle(candidate_products)
+                candidate_products.extend(products_by_price_fit[len(products_by_price_fit)//2:])
             else:
-                # Last product - check if total is within range
-                if min_budget <= future_total <= max_budget:
+                # Random shuffle for variety
+                import random
+                candidate_products = products.copy()
+                random.shuffle(candidate_products)
+            
+            for product in candidate_products:
+                if len(selected) >= target_count:
+                    break
+                
+                future_total = current_total + product.list_price
+                remaining_slots = target_count - len(selected) - 1
+                
+                if remaining_slots > 0:
+                    # Check if we can still reach minimum budget
+                    max_possible = future_total + (remaining_slots * max_budget)
+                    min_possible = future_total + (remaining_slots * 5)  # Assume min €5 products
+                    
+                    # Only add if we can still reach target range
+                    if min_possible <= max_budget and max_possible >= min_budget:
+                        selected.append(product)
+                        current_total = future_total
+                else:
+                    # Last product - must hit target range
+                    if min_budget <= future_total <= max_budget:
+                        selected.append(product)
+                        current_total = future_total
+                        break
+            
+            # Check if this selection is better
+            if min_budget <= current_total <= max_budget:
+                diff = abs(current_total - budget)
+                if diff < best_diff:
+                    best_selection = selected
+                    best_total = current_total
+                    best_diff = diff
+                    
+                    # If within 1% of target, good enough
+                    if diff < budget * 0.01:
+                        break
+        
+        # METHOD 2: If no valid selection yet, try filling to budget
+        if not best_selection or best_total < min_budget:
+            _logger.warning("⚠️ Method 1 failed, trying Method 2: Fill to budget")
+            
+            # Start with expensive products to reach budget faster
+            expensive_first = sorted(products, key=lambda p: p.list_price, reverse=True)
+            selected = []
+            current_total = 0
+            
+            for product in expensive_first:
+                if current_total + product.list_price <= max_budget:
                     selected.append(product)
-                    current_total = future_total
+                    current_total += product.list_price
+                    
+                    # Stop if we've reached minimum budget and have enough products
+                    if current_total >= min_budget and len(selected) >= target_count * 0.7:
+                        break
+            
+            # Fill remaining with cheaper products
+            if current_total < min_budget:
+                cheap_products = sorted(products, key=lambda p: p.list_price)
+                for product in cheap_products:
+                    if product not in selected and current_total + product.list_price <= max_budget:
+                        selected.append(product)
+                        current_total += product.list_price
+                        
+                        if current_total >= min_budget:
+                            break
+            
+            if min_budget <= current_total <= max_budget:
+                best_selection = selected
+                best_total = current_total
         
-        # If we don't have enough, add more
-        if enforce_strict and len(selected) < target_count:
-            remaining = [p for p in products if p not in selected]
-            remaining.sort(key=lambda p: p.list_price)  # Add cheapest
-            selected.extend(remaining[:target_count - len(selected)])
+        # METHOD 3: If still failing, be more aggressive
+        if not best_selection or best_total < min_budget:
+            _logger.warning("⚠️ Method 2 failed, trying Method 3: Aggressive filling")
+            
+            # Calculate how much we need per product
+            per_product_target = budget / target_count
+            
+            # Get products in this price range
+            suitable_products = [p for p in products 
+                                if per_product_target * 0.5 <= p.list_price <= per_product_target * 2]
+            
+            if not suitable_products:
+                suitable_products = products
+            
+            # Sort by price descending
+            suitable_products.sort(key=lambda p: p.list_price, reverse=True)
+            
+            selected = []
+            current_total = 0
+            
+            # Add products until we reach budget
+            for product in suitable_products:
+                if current_total + product.list_price <= max_budget:
+                    selected.append(product)
+                    current_total += product.list_price
+                    
+                    if current_total >= min_budget and len(selected) >= target_count - 2:
+                        break
+            
+            # If we're close but under, add one more product
+            if current_total < min_budget:
+                remaining = [p for p in suitable_products if p not in selected]
+                for product in remaining:
+                    if current_total + product.list_price <= max_budget:
+                        selected.append(product)
+                        current_total += product.list_price
+                        break
+            
+            best_selection = selected
+            best_total = current_total
         
-        return selected
+        # Enforce product count if strict
+        if enforce_strict and best_selection:
+            if len(best_selection) < target_count:
+                # Add cheapest products to meet count
+                remaining = [p for p in products if p not in best_selection]
+                remaining.sort(key=lambda p: p.list_price)
+                
+                while len(best_selection) < target_count and remaining:
+                    next_product = remaining.pop(0)
+                    if best_total + next_product.list_price <= max_budget:
+                        best_selection.append(next_product)
+                        best_total += next_product.list_price
+            elif len(best_selection) > target_count:
+                # Remove cheapest products to meet count
+                best_selection.sort(key=lambda p: p.list_price)
+                while len(best_selection) > target_count:
+                    removed = best_selection.pop(0)
+                    best_total -= removed.list_price
+        
+        # Final validation
+        if best_total < min_budget or best_total > max_budget:
+            variance = ((best_total / budget) - 1) * 100
+            _logger.error(f"❌ BUDGET VIOLATION: €{best_total:.2f} is {variance:+.1f}% from target €{budget:.2f}")
+            _logger.error(f"   Required range: €{min_budget:.2f} - €{max_budget:.2f}")
+        else:
+            variance = ((best_total / budget) - 1) * 100
+            _logger.info(f"✅ Budget OK: €{best_total:.2f} ({variance:+.1f}% from target)")
+            _logger.info(f"✅ Selected {len(best_selection)} products")
+        
+        return best_selection
     
     def _enforce_exact_count(self, selected, all_products, exact_count, budget):
         """Enforce exact product count no matter what"""

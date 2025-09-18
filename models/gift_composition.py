@@ -147,7 +147,47 @@ class GiftComposition(models.Model):
     # NEW: Category distribution
     category_distribution = fields.Text(string='Category Distribution', compute='_compute_category_distribution')
     
-    # Rest of the methods remain the same...
+    # Statistical fields
+    avg_product_price = fields.Float(string="Average Price", compute="_compute_price_statistics", store=True)
+    min_product_price = fields.Float(string="Min Price", compute="_compute_price_statistics", store=True)
+    max_product_price = fields.Float(string="Max Price", compute="_compute_price_statistics", store=True)
+    price_std_deviation = fields.Float(string="Price Std Dev", compute="_compute_price_statistics", store=True)
+
+    # AI fields
+    compliance_status = fields.Char(string="Compliance Status", readonly=True)
+    generation_strategy = fields.Char(string="Generation Strategy", readonly=True)
+
+    # Variance fields
+    variance_amount = fields.Float(string="Variance Amount", compute="_compute_variance", store=True)
+
+    @api.depends('product_ids')
+    def _compute_price_statistics(self):
+        """Compute price statistics"""
+        for record in self:
+            if record.product_ids:
+                prices = record.product_ids.mapped('list_price')
+                record.avg_product_price = sum(prices) / len(prices) if prices else 0
+                record.min_product_price = min(prices) if prices else 0
+                record.max_product_price = max(prices) if prices else 0
+                
+                # Calculate standard deviation
+                if len(prices) > 1:
+                    avg = record.avg_product_price
+                    variance = sum((p - avg) ** 2 for p in prices) / len(prices)
+                    record.price_std_deviation = variance ** 0.5
+                else:
+                    record.price_std_deviation = 0
+            else:
+                record.avg_product_price = 0
+                record.min_product_price = 0
+                record.max_product_price = 0
+                record.price_std_deviation = 0
+
+    @api.depends('actual_cost', 'target_budget')
+    def _compute_variance(self):
+        """Compute variance amount"""
+        for record in self:
+            record.variance_amount = record.actual_cost - record.target_budget
     
     @api.depends('name', 'partner_id', 'composition_type', 'experience_name')
     def _compute_display_name(self):
