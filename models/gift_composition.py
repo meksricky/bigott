@@ -1,4 +1,3 @@
-# models/gift_composition.py
 from odoo import models, fields, api
 from datetime import datetime
 import logging
@@ -8,19 +7,21 @@ _logger = logging.getLogger(__name__)
 class GiftComposition(models.Model):
     _name = 'gift.composition'
     _description = 'Gift Composition'
-    _inherit = ['mail.thread', 'mail.activity.mixin']  # ADD THIS LINE for chatter support
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'create_date desc'
     _rec_name = 'display_name'
 
-    # Keep all existing fields
-    name = fields.Char(string='Reference', default='New', copy=False, tracking=True)
+    # ============== BASIC FIELDS ==============
+    name = fields.Char(string='Name', default='New', copy=False, tracking=True)
+    reference = fields.Char(string='Reference', copy=False, readonly=True, 
+                          help="Unique reference for this composition")
     display_name = fields.Char(string='Display Name', compute='_compute_display_name', store=True)
     
     partner_id = fields.Many2one('res.partner', string='Client', required=True, ondelete='cascade', tracking=True)
     partner_email = fields.Char(related='partner_id.email', string='Email', readonly=True)
     partner_phone = fields.Char(related='partner_id.phone', string='Phone', readonly=True)
     
-    # NEW FIELDS for Experience Support
+    # ============== COMPOSITION TYPE FIELDS ==============
     composition_type = fields.Selection([
         ('experience', 'Experience'),
         ('custom', 'Custom Made'),
@@ -41,18 +42,22 @@ class GiftComposition(models.Model):
         ('other', 'Other')
     ], string='Experience Category')
     
-    # Budget Information (keep existing)
+    # ============== BUDGET FIELDS ==============
     currency_id = fields.Many2one('res.currency', default=lambda self: self.env.company.currency_id)
     target_budget = fields.Monetary(string='Target Budget', currency_field='currency_id', required=True, tracking=True)
     actual_cost = fields.Monetary(string='Actual Cost', currency_field='currency_id', compute='_compute_actual_cost', store=True)
     budget_variance = fields.Float(string='Budget Variance %', compute='_compute_budget_variance', store=True)
     
+    # ADD THESE VARIANCE FIELDS (referenced in view)
+    variance_amount = fields.Float(string="Variance Amount", compute="_compute_variance", store=True)
+    variance_percentage = fields.Float(string="Variance %", compute="_compute_variance", store=True)
+    
     target_year = fields.Integer(string='Target Year', default=lambda self: datetime.now().year, required=True)
     
-    # Products - Main field (keep existing)
+    # ============== PRODUCT FIELDS ==============
     product_ids = fields.Many2many('product.template', string='All Products')
     
-    # NEW: Categorized Products for better organization
+    # Categorized Products
     beverage_product_ids = fields.Many2many(
         'product.template', 
         'composition_beverage_rel',
@@ -107,7 +112,7 @@ class GiftComposition(models.Model):
         help='Turrón, Lingote, Trufas, Dulces'
     )
     
-    # Dietary and Notes (keep existing + enhance)
+    # ============== DIETARY & NOTES FIELDS ==============
     dietary_restrictions = fields.Text(string='Dietary Restrictions')
     dietary_restriction_type = fields.Selection([
         ('none', 'None'),
@@ -122,7 +127,7 @@ class GiftComposition(models.Model):
     client_notes = fields.Text(string='Client Notes')
     internal_notes = fields.Text(string='Internal Notes')
     
-    # AI Information (keep existing)
+    # ============== AI GENERATION FIELDS ==============
     ai_reasoning = fields.Text(string='AI Reasoning')
     confidence_score = fields.Float(string='Confidence Score', digits=(3, 2))
     generation_method = fields.Selection([
@@ -133,7 +138,10 @@ class GiftComposition(models.Model):
         ('hybrid', 'Hybrid')
     ], string='Generation Method', default='manual')
     
-    # State (keep existing)
+    compliance_status = fields.Char(string="Compliance Status", readonly=True)
+    generation_strategy = fields.Char(string="Generation Strategy", readonly=True)
+    
+    # ============== STATE FIELD ==============
     state = fields.Selection([
         ('draft', 'Draft'),
         ('confirmed', 'Confirmed'),
@@ -141,53 +149,24 @@ class GiftComposition(models.Model):
         ('cancelled', 'Cancelled')
     ], string='State', default='draft', tracking=True)
     
-    # Statistics
+    # ============== STATISTICS FIELDS ==============
     product_count = fields.Integer(string='Product Count', compute='_compute_product_count', store=True)
-    
-    # NEW: Category distribution
     category_distribution = fields.Text(string='Category Distribution', compute='_compute_category_distribution')
     
-    # Statistical fields
+    # ADD THESE CATEGORY TRACKING FIELDS (referenced in view)
+    total_categories = fields.Integer(string="Total Categories", compute="_compute_categories", store=True)
+    wine_count = fields.Integer(string="Wine Products", compute="_compute_categories", store=True)
+    cheese_count = fields.Integer(string="Cheese Products", compute="_compute_categories", store=True)
+    gourmet_count = fields.Integer(string="Gourmet Products", compute="_compute_categories", store=True)
+    categories_distribution = fields.Html(string="Category Distribution HTML", compute="_compute_categories")
+    
+    # Price statistics
     avg_product_price = fields.Float(string="Average Price", compute="_compute_price_statistics", store=True)
     min_product_price = fields.Float(string="Min Price", compute="_compute_price_statistics", store=True)
     max_product_price = fields.Float(string="Max Price", compute="_compute_price_statistics", store=True)
     price_std_deviation = fields.Float(string="Price Std Dev", compute="_compute_price_statistics", store=True)
-
-    # AI fields
-    compliance_status = fields.Char(string="Compliance Status", readonly=True)
-    generation_strategy = fields.Char(string="Generation Strategy", readonly=True)
-
-    # Variance fields
-    variance_amount = fields.Float(string="Variance Amount", compute="_compute_variance", store=True)
-
-    @api.depends('product_ids')
-    def _compute_price_statistics(self):
-        """Compute price statistics"""
-        for record in self:
-            if record.product_ids:
-                prices = record.product_ids.mapped('list_price')
-                record.avg_product_price = sum(prices) / len(prices) if prices else 0
-                record.min_product_price = min(prices) if prices else 0
-                record.max_product_price = max(prices) if prices else 0
-                
-                # Calculate standard deviation
-                if len(prices) > 1:
-                    avg = record.avg_product_price
-                    variance = sum((p - avg) ** 2 for p in prices) / len(prices)
-                    record.price_std_deviation = variance ** 0.5
-                else:
-                    record.price_std_deviation = 0
-            else:
-                record.avg_product_price = 0
-                record.min_product_price = 0
-                record.max_product_price = 0
-                record.price_std_deviation = 0
-
-    @api.depends('actual_cost', 'target_budget')
-    def _compute_variance(self):
-        """Compute variance amount"""
-        for record in self:
-            record.variance_amount = record.actual_cost - record.target_budget
+    
+    # ============== COMPUTED METHODS ==============
     
     @api.depends('name', 'partner_id', 'composition_type', 'experience_name')
     def _compute_display_name(self):
@@ -202,8 +181,10 @@ class GiftComposition(models.Model):
             else:
                 parts.append('🔧')
             
-            # Add reference
-            if record.name and record.name != 'New':
+            # Add reference or name
+            if record.reference:
+                parts.append(record.reference)
+            elif record.name and record.name != 'New':
                 parts.append(record.name)
             
             # Add client name
@@ -251,6 +232,16 @@ class GiftComposition(models.Model):
             else:
                 record.budget_variance = 0.0
     
+    @api.depends('actual_cost', 'target_budget')
+    def _compute_variance(self):
+        """Compute variance amount and percentage"""
+        for record in self:
+            record.variance_amount = record.actual_cost - record.target_budget
+            if record.target_budget > 0:
+                record.variance_percentage = ((record.actual_cost - record.target_budget) / record.target_budget) * 100
+            else:
+                record.variance_percentage = 0
+    
     @api.depends('product_ids', 'beverage_product_ids', 'aperitif_product_ids',
                  'foie_product_ids', 'canned_product_ids', 'charcuterie_product_ids',
                  'sweet_product_ids')
@@ -290,6 +281,80 @@ class GiftComposition(models.Model):
             
             record.category_distribution = " | ".join(distribution) if distribution else "No categorized products"
     
+    @api.depends('product_ids')
+    def _compute_categories(self):
+        """Compute category distribution with HTML visualization"""
+        for record in self:
+            categories = {}
+            wine_count = 0
+            cheese_count = 0
+            gourmet_count = 0
+            
+            for product in record.product_ids:
+                if hasattr(product, 'categ_id') and product.categ_id:
+                    cat_name = product.categ_id.name
+                    categories[cat_name] = categories.get(cat_name, 0) + 1
+                    
+                    # Count specific categories
+                    cat_lower = cat_name.lower()
+                    if any(word in cat_lower for word in ['wine', 'vino', 'champagne', 'cava']):
+                        wine_count += 1
+                    elif any(word in cat_lower for word in ['cheese', 'queso']):
+                        cheese_count += 1
+                    elif 'gourmet' in cat_lower:
+                        gourmet_count += 1
+            
+            # Build HTML distribution
+            html = "<div style='font-family: sans-serif;'>"
+            if record.product_ids:
+                for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+                    percentage = (count / len(record.product_ids) * 100)
+                    html += f"""
+                        <div style='margin: 8px 0;'>
+                            <div style='display: flex; justify-content: space-between; margin-bottom: 4px;'>
+                                <strong>{cat}:</strong>
+                                <span>{count} products ({percentage:.1f}%)</span>
+                            </div>
+                            <div style='background: #f0f0f0; height: 20px; width: 100%; border-radius: 3px; overflow: hidden;'>
+                                <div style='background: #7c7bad; height: 100%; width: {percentage}%; border-radius: 3px; transition: width 0.3s;'></div>
+                            </div>
+                        </div>
+                    """
+            else:
+                html += "<p>No products selected yet</p>"
+            html += "</div>"
+            
+            record.categories_distribution = html
+            record.total_categories = len(categories)
+            record.wine_count = wine_count
+            record.cheese_count = cheese_count
+            record.gourmet_count = gourmet_count
+    
+    @api.depends('product_ids')
+    def _compute_price_statistics(self):
+        """Compute price statistics"""
+        for record in self:
+            if record.product_ids:
+                prices = record.product_ids.mapped('list_price')
+                record.avg_product_price = sum(prices) / len(prices) if prices else 0
+                record.min_product_price = min(prices) if prices else 0
+                record.max_product_price = max(prices) if prices else 0
+                
+                # Calculate standard deviation
+                if len(prices) > 1:
+                    avg = record.avg_product_price
+                    variance = sum((p - avg) ** 2 for p in prices) / len(prices)
+                    record.price_std_deviation = variance ** 0.5
+                else:
+                    record.price_std_deviation = 0
+            else:
+                record.avg_product_price = 0
+                record.min_product_price = 0
+                record.max_product_price = 0
+                record.price_std_deviation = 0
+    
+    # ============== CREATE/WRITE METHODS ==============
+    
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
@@ -302,10 +367,20 @@ class GiftComposition(models.Model):
                     'custom': 'CST'
                 }.get(comp_type, 'GFT')
                 
-                # Generate sequence - simpler approach
-                vals['name'] = self.env['ir.sequence'].next_by_code('gift.composition') or f'{prefix}/001'
+                # Generate sequence
+                sequence = self.env['ir.sequence'].next_by_code('gift.composition')
+                if sequence:
+                    vals['name'] = sequence
+                    vals['reference'] = sequence
+                else:
+                    # Fallback if no sequence exists
+                    import random
+                    vals['name'] = f'{prefix}{random.randint(1000, 9999)}'
+                    vals['reference'] = vals['name']
         
         return super().create(vals_list)
+    
+    # ============== ACTION METHODS ==============
     
     def action_confirm(self):
         """Confirm the composition"""
