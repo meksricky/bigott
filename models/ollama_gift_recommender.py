@@ -1191,7 +1191,8 @@ Extract and return ONLY a valid JSON object with these fields:
                 if 'product' in notes_lower or 'item' in notes_lower:
                     parsed['product_count'] = num_int
             elif 100 <= num_int <= 10000:
-                if 'budget' in notes_lower or '€' in notes or '
+                if 'budget' in notes_lower or '€' in notes or '$' in notes:
+                    parsed['budget'] = num_int
     
     def _apply_basic_transformation(self, last_products):
         """Basic transformation when business rules engine unavailable"""
