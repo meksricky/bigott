@@ -1155,193 +1155,184 @@ class OllamaGiftRecommender(models.Model):
         return products
     
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_strict, context):
-        """Smart optimization with STRICT budget enforcement (85%-115% of target)"""
+        """AGGRESSIVE budget optimization - MUST achieve 85%-115% of target budget"""
         
         if not products:
+            _logger.error("❌ No products available for selection")
             return []
-            
+        
+        # Set flexibility (default 15% as per business rules)
+        flexibility = flexibility if flexibility else 15
+        min_budget = budget * (1 - flexibility/100)  # 85% minimum
+        max_budget = budget * (1 + flexibility/100)  # 115% maximum
+        
+        # If no target count, calculate based on budget
         if not target_count:
-            target_count = max(5, int(budget / 50))
+            # Estimate based on typical gift composition (80-120€ per product average)
+            target_count = max(8, min(20, int(budget / 100)))
         
-        # CRITICAL: Enforce 85%-115% of budget (±15% flexibility)
-        min_budget = budget * 0.85  # 85% of budget
-        max_budget = budget * 1.15  # 115% of budget
+        _logger.info("="*60)
+        _logger.info("💰 BUDGET OPTIMIZATION STARTING")
+        _logger.info(f"   Target Budget: €{budget:.2f}")
+        _logger.info(f"   REQUIRED Range: €{min_budget:.2f} - €{max_budget:.2f} (±{flexibility}%)")
+        _logger.info(f"   Target Products: {target_count}")
+        _logger.info(f"   Available Products: {len(products)}")
         
-        _logger.info(f"🎯 STRICT Budget Range: €{min_budget:.2f} - €{max_budget:.2f} (target: €{budget:.2f})")
-        _logger.info(f"📦 Target: {target_count} products")
+        # Calculate product statistics
+        product_prices = [p.list_price for p in products]
+        total_available = sum(product_prices)
+        avg_price = total_available / len(products) if products else 0
+        max_price = max(product_prices) if product_prices else 0
+        min_price = min(product_prices) if product_prices else 0
         
-        # Calculate ideal average price
-        ideal_avg_price = budget / target_count
+        _logger.info(f"   Product Prices: €{min_price:.2f} - €{max_price:.2f} (avg: €{avg_price:.2f})")
+        _logger.info(f"   Total Available: €{total_available:.2f}")
+        _logger.info("="*60)
         
-        # METHOD 1: Try to hit exact budget with exact count
-        best_selection = []
-        best_total = 0
-        best_diff = float('inf')
-        
-        # Sort products by how close they are to ideal price
-        products_by_price_fit = sorted(products, 
-                                    key=lambda p: abs(p.list_price - ideal_avg_price))
-        
-        # Try different combinations
-        for attempt in range(10):
-            selected = []
-            current_total = 0
+        # CRITICAL CHECK: Can we even reach the minimum budget?
+        if total_available < min_budget:
+            _logger.error(f"❌ IMPOSSIBLE: Total available (€{total_available:.2f}) < minimum required (€{min_budget:.2f})")
+            _logger.warning("🚨 EMERGENCY MODE: Adding ALL products multiple times to reach budget")
             
-            # Vary strategy per attempt
-            if attempt == 0:
-                # First attempt: products closest to ideal price
-                candidate_products = products_by_price_fit
-            elif attempt < 5:
-                # Mix of ideal price products
-                import random
-                candidate_products = products_by_price_fit[:len(products_by_price_fit)//2]
-                random.shuffle(candidate_products)
-                candidate_products.extend(products_by_price_fit[len(products_by_price_fit)//2:])
-            else:
-                # Random shuffle for variety
-                import random
-                candidate_products = products.copy()
-                random.shuffle(candidate_products)
+            # Add all products and then repeat expensive ones
+            selected = list(products)
+            current_total = total_available
             
-            for product in candidate_products:
-                if len(selected) >= target_count:
-                    break
-                
-                future_total = current_total + product.list_price
-                remaining_slots = target_count - len(selected) - 1
-                
-                if remaining_slots > 0:
-                    # Check if we can still reach minimum budget
-                    max_possible = future_total + (remaining_slots * max_budget)
-                    min_possible = future_total + (remaining_slots * 5)  # Assume min €5 products
-                    
-                    # Only add if we can still reach target range
-                    if min_possible <= max_budget and max_possible >= min_budget:
-                        selected.append(product)
-                        current_total = future_total
-                else:
-                    # Last product - must hit target range
-                    if min_budget <= future_total <= max_budget:
-                        selected.append(product)
-                        current_total = future_total
-                        break
+            # Sort by price descending to add expensive products
+            expensive = sorted(products, key=lambda p: p.list_price, reverse=True)
             
-            # Check if this selection is better
-            if min_budget <= current_total <= max_budget:
-                diff = abs(current_total - budget)
-                if diff < best_diff:
-                    best_selection = selected
-                    best_total = current_total
-                    best_diff = diff
-                    
-                    # If within 1% of target, good enough
-                    if diff < budget * 0.01:
-                        break
-        
-        # METHOD 2: If no valid selection yet, try filling to budget
-        if not best_selection or best_total < min_budget:
-            _logger.warning("⚠️ Method 1 failed, trying Method 2: Fill to budget")
-            
-            # Start with expensive products to reach budget faster
-            expensive_first = sorted(products, key=lambda p: p.list_price, reverse=True)
-            selected = []
-            current_total = 0
-            
-            for product in expensive_first:
-                if current_total + product.list_price <= max_budget:
-                    selected.append(product)
-                    current_total += product.list_price
-                    
-                    # Stop if we've reached minimum budget and have enough products
-                    if current_total >= min_budget and len(selected) >= target_count * 0.7:
-                        break
-            
-            # Fill remaining with cheaper products
-            if current_total < min_budget:
-                cheap_products = sorted(products, key=lambda p: p.list_price)
-                for product in cheap_products:
-                    if product not in selected and current_total + product.list_price <= max_budget:
-                        selected.append(product)
-                        current_total += product.list_price
-                        
-                        if current_total >= min_budget:
-                            break
-            
-            if min_budget <= current_total <= max_budget:
-                best_selection = selected
-                best_total = current_total
-        
-        # METHOD 3: If still failing, be more aggressive
-        if not best_selection or best_total < min_budget:
-            _logger.warning("⚠️ Method 2 failed, trying Method 3: Aggressive filling")
-            
-            # Calculate how much we need per product
-            per_product_target = budget / target_count
-            
-            # Get products in this price range
-            suitable_products = [p for p in products 
-                                if per_product_target * 0.5 <= p.list_price <= per_product_target * 2]
-            
-            if not suitable_products:
-                suitable_products = products
-            
-            # Sort by price descending
-            suitable_products.sort(key=lambda p: p.list_price, reverse=True)
-            
-            selected = []
-            current_total = 0
-            
-            # Add products until we reach budget
-            for product in suitable_products:
-                if current_total + product.list_price <= max_budget:
-                    selected.append(product)
-                    current_total += product.list_price
-                    
-                    if current_total >= min_budget and len(selected) >= target_count - 2:
-                        break
-            
-            # If we're close but under, add one more product
-            if current_total < min_budget:
-                remaining = [p for p in suitable_products if p not in selected]
-                for product in remaining:
+            # Keep adding expensive products until we reach minimum
+            while current_total < min_budget and current_total < max_budget:
+                for product in expensive:
                     if current_total + product.list_price <= max_budget:
                         selected.append(product)
                         current_total += product.list_price
-                        break
-            
-            best_selection = selected
-            best_total = current_total
-        
-        # Enforce product count if strict
-        if enforce_strict and best_selection:
-            if len(best_selection) < target_count:
-                # Add cheapest products to meet count
-                remaining = [p for p in products if p not in best_selection]
-                remaining.sort(key=lambda p: p.list_price)
+                        _logger.warning(f"   Added DUPLICATE: {product.name[:40]} - €{product.list_price:.2f}")
+                        
+                        if current_total >= min_budget:
+                            break
                 
-                while len(best_selection) < target_count and remaining:
-                    next_product = remaining.pop(0)
-                    if best_total + next_product.list_price <= max_budget:
-                        best_selection.append(next_product)
-                        best_total += next_product.list_price
-            elif len(best_selection) > target_count:
-                # Remove cheapest products to meet count
-                best_selection.sort(key=lambda p: p.list_price)
-                while len(best_selection) > target_count:
-                    removed = best_selection.pop(0)
-                    best_total -= removed.list_price
+                # Prevent infinite loop
+                if len(selected) > 200:
+                    _logger.error("❌ Cannot reach budget even with 200+ products!")
+                    break
+            
+            return selected
         
-        # Final validation
-        if best_total < min_budget or best_total > max_budget:
-            variance = ((best_total / budget) - 1) * 100
-            _logger.error(f"❌ BUDGET VIOLATION: €{best_total:.2f} is {variance:+.1f}% from target €{budget:.2f}")
-            _logger.error(f"   Required range: €{min_budget:.2f} - €{max_budget:.2f}")
+        # MAIN OPTIMIZATION: Greedy algorithm with multiple passes
+        best_selection = []
+        best_total = 0
+        
+        # Pass 1: Try to reach budget with expensive products first
+        _logger.info("📦 Pass 1: Adding expensive products to reach budget quickly...")
+        
+        products_by_price = sorted(products, key=lambda p: p.list_price, reverse=True)
+        selected = []
+        selected_ids = set()
+        current_total = 0
+        
+        for product in products_by_price:
+            # Can we add this product without exceeding max?
+            if current_total + product.list_price <= max_budget:
+                selected.append(product)
+                selected_ids.add(product.id)
+                current_total += product.list_price
+                
+                _logger.info(f"   + {product.name[:40]}: €{product.list_price:.2f} → Total: €{current_total:.2f}")
+                
+                # Don't stop until we reach minimum budget!
+                if current_total >= min_budget and len(selected) >= max(5, target_count * 0.6):
+                    # We've reached minimum budget with reasonable product count
+                    _logger.info(f"✅ Reached minimum budget: €{current_total:.2f}")
+                    break
+        
+        # Pass 2: If we haven't reached minimum, keep adding products
+        if current_total < min_budget:
+            _logger.warning(f"⚠️ Pass 2: Still under minimum (€{current_total:.2f} < €{min_budget:.2f})")
+            
+            # Try medium-priced products
+            remaining = [p for p in products if p.id not in selected_ids]
+            remaining.sort(key=lambda p: p.list_price, reverse=True)
+            
+            for product in remaining:
+                if current_total + product.list_price <= max_budget:
+                    selected.append(product)
+                    selected_ids.add(product.id)
+                    current_total += product.list_price
+                    
+                    _logger.info(f"   + {product.name[:40]}: €{product.list_price:.2f} → Total: €{current_total:.2f}")
+                    
+                    if current_total >= min_budget:
+                        _logger.info(f"✅ Reached minimum budget: €{current_total:.2f}")
+                        break
+        
+        # Pass 3: If STILL under, allow duplicates
+        if current_total < min_budget:
+            _logger.warning(f"⚠️ Pass 3: CRITICAL - Adding duplicates to reach €{min_budget:.2f}")
+            
+            # Sort all products by value
+            all_products_sorted = sorted(products, key=lambda p: p.list_price, reverse=True)
+            
+            attempts = 0
+            while current_total < min_budget and attempts < 50:
+                for product in all_products_sorted:
+                    if current_total + product.list_price <= max_budget:
+                        selected.append(product)
+                        current_total += product.list_price
+                        
+                        _logger.warning(f"   + DUPLICATE {product.name[:40]}: €{product.list_price:.2f} → Total: €{current_total:.2f}")
+                        
+                        if current_total >= min_budget:
+                            break
+                
+                attempts += 1
+                if attempts >= 50:
+                    _logger.error("❌ Maximum attempts reached!")
+                    break
+        
+        # Pass 4: Fine-tune if we have room
+        if min_budget <= current_total < budget * 0.95:
+            _logger.info("🎯 Pass 4: Fine-tuning to get closer to target...")
+            
+            space_left = max_budget - current_total
+            candidates = [p for p in products if p.list_price <= space_left]
+            candidates.sort(key=lambda p: p.list_price, reverse=True)
+            
+            for product in candidates[:3]:  # Try up to 3 more products
+                if current_total + product.list_price <= max_budget:
+                    selected.append(product)
+                    current_total += product.list_price
+                    _logger.info(f"   + Fine-tune {product.name[:40]}: €{product.list_price:.2f} → Total: €{current_total:.2f}")
+        
+        # FINAL VALIDATION
+        final_total = sum(p.list_price for p in selected)
+        variance_pct = ((final_total / budget) - 1) * 100
+        
+        _logger.info("="*60)
+        _logger.info("📊 FINAL RESULT:")
+        _logger.info(f"   Products Selected: {len(selected)}")
+        _logger.info(f"   Total Cost: €{final_total:.2f}")
+        _logger.info(f"   Target Budget: €{budget:.2f}")
+        _logger.info(f"   Variance: {variance_pct:+.1f}%")
+        
+        if min_budget <= final_total <= max_budget:
+            _logger.info("✅ SUCCESS: Budget target achieved!")
         else:
-            variance = ((best_total / budget) - 1) * 100
-            _logger.info(f"✅ Budget OK: €{best_total:.2f} ({variance:+.1f}% from target)")
-            _logger.info(f"✅ Selected {len(best_selection)} products")
+            _logger.error(f"❌ FAILURE: Budget target NOT achieved!")
+            _logger.error(f"   Required range: €{min_budget:.2f} - €{max_budget:.2f}")
+            _logger.error(f"   Actual: €{final_total:.2f}")
+            
+            # Last resort: Return ALL products if they fit
+            if final_total < min_budget and total_available <= max_budget:
+                _logger.warning(f"🚨 EMERGENCY: Returning ALL {len(products)} products (€{total_available:.2f})")
+                return products
         
-        return best_selection
+        _logger.info("="*60)
+        
+        # Sort selected products by price (expensive first) for better presentation
+        selected.sort(key=lambda p: p.list_price, reverse=True)
+        
+        return selected
     
     def _enforce_exact_count(self, selected, all_products, exact_count, budget):
         """Enforce exact product count no matter what"""
