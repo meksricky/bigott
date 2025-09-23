@@ -1,3 +1,4 @@
+# models/business_rules_engine.py
 from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
@@ -40,7 +41,7 @@ class BusinessRulesEngine(models.Model):
         
         # Apply rules by category
         for category, products in categorized_products.items():
-            if category in ['cava', 'champagne', 'vermouth', 'tokaj']:
+            if category in ['cava', 'champagne', 'vermouth', 'tokaj', 'tokaji']:
                 # R1: Repeat exactly
                 new_products, rule_log = self._apply_rule_r1(products)
                 result['products'].extend(new_products)
@@ -86,24 +87,35 @@ class BusinessRulesEngine(models.Model):
         categories = defaultdict(list)
         
         for product in products:
-            # Determine category based on product attributes
-            if hasattr(product, 'beverage_family'):
-                if product.beverage_family in ['cava', 'champagne', 'vermouth', 'tokaj']:
+            # R1: Exact repeat beverages
+            if hasattr(product, 'beverage_family') and product.beverage_family:
+                if product.beverage_family in ['cava', 'champagne', 'vermouth', 'tokaj', 'tokaji']:
                     categories[product.beverage_family].append(product)
-                elif product.beverage_family == 'wine':
+                elif product.beverage_family in ['wine', 'red_wine', 'white_wine', 'rose_wine']:
                     categories['wine'].append(product)
+            
+            # R3: Experience bundles
             elif hasattr(product, 'is_experience_only') and product.is_experience_only:
                 categories['experience'].append(product)
+            
+            # R4: Paletilla (MUST repeat)
             elif hasattr(product, 'is_paletilla') and product.is_paletilla:
                 categories['paletilla'].append(product)
+            
+            # R4: Other charcuterie
             elif hasattr(product, 'is_charcuterie_item') and product.is_charcuterie_item:
                 categories['charcuterie'].append(product)
+            
+            # R5: Foie Gras
             elif product.lebiggot_category == 'foie_gras':
                 categories['foie_gras'].append(product)
+            
+            # R6: Sweets
             elif product.lebiggot_category == 'sweets':
                 categories['sweets'].append(product)
+            
             else:
-                # Default category
+                # Other products by category
                 categories[product.lebiggot_category or 'other'].append(product)
         
         return categories
@@ -151,16 +163,36 @@ class BusinessRulesEngine(models.Model):
         rule_logs = []
         
         for wine in wine_products:
+            # Determine wine color
+            wine_color = wine.wine_color if hasattr(wine, 'wine_color') else None
+            if not wine_color:
+                # Try to detect from beverage_family
+                if hasattr(wine, 'beverage_family'):
+                    if wine.beverage_family == 'red_wine':
+                        wine_color = 'red'
+                    elif wine.beverage_family == 'white_wine':
+                        wine_color = 'white'
+                    elif wine.beverage_family == 'rose_wine':
+                        wine_color = 'rose'
+            
             # Search for different brand with same attributes
             substitute_domain = [
-                ('beverage_family', '=', 'wine'),
-                ('wine_color', '=', wine.wine_color),
-                ('volume_ml', '=', wine.volume_ml),
-                ('product_grade', '=', wine.product_grade),
-                ('brand', '!=', wine.brand),
+                ('lebiggot_category', '=', 'wines'),
                 ('active', '=', True),
                 ('sale_ok', '=', True)
             ]
+            
+            if wine_color:
+                substitute_domain.append(('wine_color', '=', wine_color))
+            
+            if hasattr(wine, 'volume_ml') and wine.volume_ml:
+                substitute_domain.append(('volume_ml', '=', wine.volume_ml))
+            
+            if hasattr(wine, 'product_grade') and wine.product_grade:
+                substitute_domain.append(('product_grade', '=', wine.product_grade))
+            
+            if hasattr(wine, 'brand') and wine.brand:
+                substitute_domain.append(('brand', '!=', wine.brand))
             
             substitutes = self.env['product.template'].search(substitute_domain)
             
@@ -172,9 +204,9 @@ class BusinessRulesEngine(models.Model):
                         rule_logs.append({
                             'rule': 'R2',
                             'action': 'brand_change',
-                            'original': f"{wine.name} ({wine.brand})",
+                            'original': f"{wine.name} ({wine.brand if hasattr(wine, 'brand') else 'N/A'})",
                             'substitute': f"{substitute.name} ({substitute.brand})",
-                            'attributes_maintained': f"{wine.wine_color} wine, {wine.volume_ml}ml, {wine.product_grade}"
+                            'attributes_maintained': f"{wine_color or 'unknown'} wine, {wine.volume_ml if hasattr(wine, 'volume_ml') else 'N/A'}ml, {wine.product_grade}"
                         })
                         break
                 else:
@@ -212,13 +244,18 @@ class BusinessRulesEngine(models.Model):
             new_experience = self._find_new_experience_bundle(original_count, exclude_ids=[exp_product.id])
             
             if new_experience:
-                selected_products.extend(new_experience.product_ids)
+                # Add all products from the new experience
+                if hasattr(new_experience, 'experience_product_ids'):
+                    selected_products.extend(new_experience.experience_product_ids)
+                else:
+                    selected_products.append(new_experience)
+                    
                 rule_logs.append({
                     'rule': 'R3',
                     'action': 'experience_replacement',
                     'original': exp_product.name,
                     'new_experience': new_experience.name,
-                    'product_count': len(new_experience.product_ids)
+                    'product_count': original_count
                 })
             else:
                 # Keep original if no new experience available
@@ -238,13 +275,16 @@ class BusinessRulesEngine(models.Model):
         rule_logs = []
         
         for product in charcuterie_products:
+            # Paletilla MUST be repeated
+            is_paletilla = hasattr(product, 'is_paletilla') and product.is_paletilla
+            
             if self._check_stock_availability(product):
                 selected_products.append(product)
                 rule_logs.append({
                     'rule': 'R4',
                     'action': 'repeat_exact',
                     'product': product.name,
-                    'reason': 'Charcuterie repeated exactly as per R4'
+                    'reason': f"{'Paletilla' if is_paletilla else 'Charcuterie'} repeated exactly as per R4"
                 })
             else:
                 # Find exact substitute
@@ -258,6 +298,14 @@ class BusinessRulesEngine(models.Model):
                         'substitute': substitute.name,
                         'reason': 'Stock unavailable, found exact substitute'
                     })
+                elif is_paletilla:
+                    # Paletilla is critical - log error
+                    rule_logs.append({
+                        'rule': 'R4',
+                        'action': 'CRITICAL_FAILURE',
+                        'product': product.name,
+                        'reason': 'PALETILLA NOT AVAILABLE - MUST BE RESOLVED'
+                    })
         
         return selected_products, rule_logs
     
@@ -268,7 +316,17 @@ class BusinessRulesEngine(models.Model):
         
         for foie in foie_products:
             # Determine current variant and target variant
-            current_variant = getattr(foie, 'foie_variant', 'duck')
+            current_variant = getattr(foie, 'foie_variant', None)
+            
+            if not current_variant:
+                # Try to detect from name
+                if 'duck' in foie.name.lower() or 'pato' in foie.name.lower():
+                    current_variant = 'duck'
+                elif 'goose' in foie.name.lower() or 'oca' in foie.name.lower():
+                    current_variant = 'goose'
+                else:
+                    current_variant = 'duck'  # Default assumption
+            
             target_variant = 'goose' if current_variant == 'duck' else 'duck'
             
             # Search for opposite variant
@@ -305,55 +363,110 @@ class BusinessRulesEngine(models.Model):
         return selected_products, rule_logs
     
     def _apply_rule_r6(self, sweet_products):
-        """R6: Lingote repeats exact, Turrón keeps subtype & grade but brand may change"""
+        """R6: Lingote/Trufas repeat exact, Turrón keeps subtype & grade but brand may change"""
         selected_products = []
         rule_logs = []
         
         for sweet in sweet_products:
-            sweet_subtype = getattr(sweet, 'sweets_subtype', 'other')
+            # Check if it's Lingote or Trufa leBigott (must repeat exactly)
+            is_lingote = hasattr(sweet, 'is_lingote') and sweet.is_lingote
+            is_trufa = hasattr(sweet, 'is_trufa_lebigott') and sweet.is_trufa_lebigott
             
-            if sweet_subtype == 'lingote':
-                # Repeat exactly
+            if is_lingote or is_trufa:
+                # Must repeat exactly
                 if self._check_stock_availability(sweet):
                     selected_products.append(sweet)
                     rule_logs.append({
                         'rule': 'R6',
                         'action': 'repeat_exact',
                         'product': sweet.name,
-                        'reason': 'Lingote repeated exactly as per R6'
-                    })
-                
-            elif sweet_subtype == 'turron':
-                # Keep subtype & grade, brand may change
-                substitute_domain = [
-                    ('lebiggot_category', '=', 'sweets'),
-                    ('sweets_subtype', '=', 'turron'),
-                    ('product_grade', '=', sweet.product_grade),
-                    ('brand', '!=', sweet.brand),
-                    ('active', '=', True),
-                    ('sale_ok', '=', True)
-                ]
-                
-                substitutes = self.env['product.template'].search(substitute_domain)
-                
-                if substitutes and self._check_stock_availability(substitutes[0]):
-                    selected_products.append(substitutes[0])
-                    rule_logs.append({
-                        'rule': 'R6',
-                        'action': 'turron_brand_change',
-                        'original': f"{sweet.name} ({sweet.brand})",
-                        'substitute': f"{substitutes[0].name} ({substitutes[0].brand})",
-                        'attributes_maintained': f"{sweet_subtype}, {sweet.product_grade}"
+                        'reason': f"{'Lingote' if is_lingote else 'Trufa leBigott'} repeated exactly as per R6"
                     })
                 else:
-                    # Keep original
-                    if self._check_stock_availability(sweet):
+                    # Critical - these must be available
+                    substitute = self._find_exact_substitute(sweet)
+                    if substitute:
+                        selected_products.append(substitute)
+                        rule_logs.append({
+                            'rule': 'R6',
+                            'action': 'substitute_exact',
+                            'original': sweet.name,
+                            'substitute': substitute.name,
+                            'reason': 'Found exact substitute'
+                        })
+                
+            else:
+                # Check if it's Turrón
+                sweet_subtype = getattr(sweet, 'sweets_subtype', None)
+                turron_style = getattr(sweet, 'turron_style', None)
+                
+                if sweet_subtype == 'turron' or turron_style:
+                    # Keep style & grade, brand may change
+                    substitute_domain = [
+                        ('lebiggot_category', '=', 'sweets'),
+                        ('sweets_subtype', '=', 'turron'),
+                        ('product_grade', '=', sweet.product_grade),
+                        ('active', '=', True),
+                        ('sale_ok', '=', True)
+                    ]
+                    
+                    if turron_style:
+                        substitute_domain.append(('turron_style', '=', turron_style))
+                    
+                    if hasattr(sweet, 'brand') and sweet.brand:
+                        # Try different brand first
+                        alt_domain = substitute_domain + [('brand', '!=', sweet.brand)]
+                        substitutes = self.env['product.template'].search(alt_domain)
+                    else:
+                        substitutes = self.env['product.template'].search(substitute_domain)
+                    
+                    if substitutes and self._check_stock_availability(substitutes[0]):
+                        selected_products.append(substitutes[0])
+                        rule_logs.append({
+                            'rule': 'R6',
+                            'action': 'turron_variation',
+                            'original': f"{sweet.name}",
+                            'substitute': f"{substitutes[0].name}",
+                            'attributes_maintained': f"Turrón {turron_style or 'style'}, {sweet.product_grade}"
+                        })
+                    else:
+                        # Keep original
+                        if self._check_stock_availability(sweet):
+                            selected_products.append(sweet)
+                            rule_logs.append({
+                                'rule': 'R6',
+                                'action': 'keep_original',
+                                'product': sweet.name,
+                                'reason': 'No alternative turrón available'
+                            })
+                else:
+                    # Other sweets - can be changed
+                    substitute_domain = [
+                        ('lebiggot_category', '=', 'sweets'),
+                        ('product_grade', '=', sweet.product_grade),
+                        ('id', '!=', sweet.id),
+                        ('active', '=', True),
+                        ('sale_ok', '=', True)
+                    ]
+                    
+                    substitutes = self.env['product.template'].search(substitute_domain, limit=1)
+                    
+                    if substitutes and self._check_stock_availability(substitutes[0]):
+                        selected_products.append(substitutes[0])
+                        rule_logs.append({
+                            'rule': 'R6',
+                            'action': 'sweet_variation',
+                            'original': sweet.name,
+                            'substitute': substitutes[0].name,
+                            'reason': 'Sweet product varied for freshness'
+                        })
+                    else:
                         selected_products.append(sweet)
                         rule_logs.append({
                             'rule': 'R6',
                             'action': 'keep_original',
                             'product': sweet.name,
-                            'reason': 'No alternative turrón brand available'
+                            'reason': 'Keeping original sweet'
                         })
         
         return selected_products, rule_logs
@@ -362,11 +475,17 @@ class BusinessRulesEngine(models.Model):
         """Apply global constraints: price category lock, beverage size lock, budget ±5%"""
         
         # Lock price categories
-        price_categories = [p.product_grade for p in result['products'] if p.product_grade]
+        price_categories = []
+        for p in result['products']:
+            if hasattr(p, 'product_grade') and p.product_grade:
+                price_categories.append(p.product_grade)
         result['locked_attributes']['price_categories'] = set(price_categories)
         
         # Lock beverage sizes  
-        beverage_sizes = [p.volume_ml for p in result['products'] if hasattr(p, 'volume_ml') and p.volume_ml]
+        beverage_sizes = []
+        for p in result['products']:
+            if hasattr(p, 'volume_ml') and p.volume_ml:
+                beverage_sizes.append(p.volume_ml)
         result['locked_attributes']['beverage_sizes'] = set(beverage_sizes)
         
         # Budget validation will be handled at composition level
@@ -375,8 +494,24 @@ class BusinessRulesEngine(models.Model):
     
     def _check_stock_availability(self, product, min_qty=1):
         """Check if product has sufficient stock"""
-        # Simplified stock check - extend with actual inventory integration
-        return True  # For now, assume all products are available
+        # Check has_stock computed field if available
+        if hasattr(product, 'has_stock'):
+            return product.has_stock
+        
+        # Check qty_available
+        if hasattr(product, 'qty_available'):
+            return product.qty_available >= min_qty
+        
+        # Check through variants
+        for variant in product.product_variant_ids:
+            stock_quants = self.env['stock.quant'].search([
+                ('product_id', '=', variant.id),
+                ('location_id.usage', '=', 'internal')
+            ])
+            if sum(stock_quants.mapped('available_quantity')) >= min_qty:
+                return True
+        
+        return False
     
     def _find_exact_substitute(self, product):
         """Find exact substitute (same product, different supplier/lot/vintage)"""
@@ -389,26 +524,63 @@ class BusinessRulesEngine(models.Model):
             ('sale_ok', '=', True)
         ]
         
+        # Preserve critical attributes
+        if hasattr(product, 'volume_ml') and product.volume_ml:
+            domain.append(('volume_ml', '=', product.volume_ml))
+        
+        if hasattr(product, 'is_paletilla') and product.is_paletilla:
+            domain.append(('is_paletilla', '=', True))
+        
+        if hasattr(product, 'is_lingote') and product.is_lingote:
+            domain.append(('is_lingote', '=', True))
+        
         substitutes = self.env['product.template'].search(domain, limit=1)
-        return substitutes[0] if substitutes else None
+        return substitutes[0] if substitutes and self._check_stock_availability(substitutes[0]) else None
     
     def _get_experience_product_count(self, experience_product):
         """Get number of products in an experience bundle"""
-        # This would need to be implemented based on your experience structure
+        if hasattr(experience_product, 'experience_product_count'):
+            return experience_product.experience_product_count or 3
+        
+        # Try to count from related products
+        if hasattr(experience_product, 'experience_product_ids'):
+            return len(experience_product.experience_product_ids)
+        
         return 3  # Default
     
     def _find_new_experience_bundle(self, product_count, exclude_ids=None):
         """Find new experience bundle with same product count"""
         domain = [
-            ('product_count', '=', product_count),
-            ('active', '=', True)
+            ('is_experience_only', '=', True),
+            ('experience_product_count', '=', product_count),
+            ('active', '=', True),
+            ('sale_ok', '=', True)
         ]
         
         if exclude_ids:
             domain.append(('id', 'not in', exclude_ids))
         
-        experiences = self.env['gift.experience'].search(domain, limit=1)
-        return experiences[0] if experiences else None
+        experiences = self.env['product.template'].search(domain)
+        
+        # Find one with stock
+        for exp in experiences:
+            if self._check_stock_availability(exp):
+                return exp
+        
+        return None
+    
+    def _generate_fresh_composition(self, partner_id, target_year):
+        """Generate fresh composition for new clients"""
+        return {
+            'products': [],
+            'rule_applications': [{
+                'rule': 'NEW_CLIENT',
+                'action': 'fresh_generation',
+                'reason': 'No previous history - generating fresh composition'
+            }],
+            'substitutions': [],
+            'locked_attributes': {}
+        }
     
     def validate_budget_guardrail(self, target_budget, actual_cost, tolerance=0.05):
         """Validate that actual cost is within ±5% of target budget"""
@@ -422,12 +594,13 @@ class BusinessRulesEngine(models.Model):
         report = []
         
         rule_names = {
-            'R1': 'Exact Repetition (Cava/Champagne/Vermouth/Tokaj)',
+            'R1': 'Exact Repetition (Cava/Champagne/Vermouth/Tokaji)',
             'R2': 'Wine Brand Variation (same color/size/grade)',
             'R3': 'Experience Bundle Replacement',
             'R4': 'Exact Repetition (Paletilla/Charcuterie)',
             'R5': 'Foie Gras Alternation (Duck ↔ Goose)',
-            'R6': 'Sweet Product Rules (Lingote/Turrón)'
+            'R6': 'Sweet Product Rules (Lingote/Turrón)',
+            'NEW_CLIENT': 'New Client - Fresh Composition'
         }
         
         for rule_app in rule_applications:

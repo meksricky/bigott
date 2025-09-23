@@ -8,7 +8,8 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
     
-    # State Management
+    # ================== STATE MANAGEMENT ==================
+    
     state = fields.Selection([
         ('draft', 'Draft'),
         ('generating', 'Generating'),
@@ -16,7 +17,8 @@ class OllamaRecommendationWizard(models.TransientModel):
         ('error', 'Error')
     ], string='State', default='draft')
     
-    # Basic Fields
+    # ================== CLIENT & BUDGET FIELDS ==================
+    
     partner_id = fields.Many2one(
         'res.partner', 
         string='Client', 
@@ -32,7 +34,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     target_budget = fields.Float(
         string='Target Budget',
         default=1000.0,
-        help="Leave empty to use historical average"
+        help="Leave at 0 to auto-detect from history. The system will use notes > form > history."
     )
     
     target_year = fields.Integer(
@@ -40,7 +42,8 @@ class OllamaRecommendationWizard(models.TransientModel):
         default=lambda self: fields.Date.today().year
     )
     
-    # Composition Settings
+    # ================== COMPOSITION SETTINGS ==================
+    
     engine_type = fields.Selection([
         ('custom', 'Custom'),
         ('hybrid', 'Hybrid'),
@@ -59,20 +62,22 @@ class OllamaRecommendationWizard(models.TransientModel):
         compute='_compute_composition_display_type'
     )
     
-    # Product Count Settings
+    # ================== PRODUCT COUNT SETTINGS ==================
+    
     specify_product_count = fields.Boolean(
-        string="Specify Product Count",
+        string="Specify Exact Product Count",
         default=False,
-        help="Check to enforce exact product count"
+        help="Check to enforce exact product count. This will be strictly enforced."
     )
     
     product_count = fields.Integer(
         string="Number of Products",
         default=12,
-        help="Exact number of products to include"
+        help="Exact number of products to include. Will be STRICTLY enforced if checkbox is checked."
     )
     
-    # Experience Fields
+    # ================== EXPERIENCE FIELDS (PRESERVED) ==================
+    
     experience_category_filter = fields.Selection([
         ('all', 'All Categories'),
         ('gastronomy', 'Gastronomy'),
@@ -93,30 +98,41 @@ class OllamaRecommendationWizard(models.TransientModel):
         compute='_compute_experience_preview'
     )
     
-    # Dietary Restrictions
+    # ================== DIETARY RESTRICTIONS (COMPREHENSIVE) ==================
+    
     dietary_restrictions = fields.Selection([
         ('none', 'None'),
         ('halal', 'Halal'),
         ('vegan', 'Vegan'),
+        ('vegetarian', 'Vegetarian'),
         ('gluten_free', 'Gluten Free'),
+        ('non_alcoholic', 'Non-Alcoholic'),
         ('multiple', 'Multiple Restrictions')
     ], string='Dietary Restrictions', default='none')
     
-    dietary_restrictions_text = fields.Char(
-        string='Custom Dietary Restrictions',
-        help="Enter multiple restrictions separated by commas"
+    dietary_restrictions_text = fields.Text(
+        string='Additional Dietary Details',
+        help="Enter additional restrictions separated by commas (e.g., 'no nuts, lactose-free')"
     )
     
-    # Legacy dietary fields (for compatibility)
+    # Individual dietary checkboxes (for fine control)
     is_halal = fields.Boolean(string='Halal')
     is_vegan = fields.Boolean(string='Vegan')
+    is_vegetarian = fields.Boolean(string='Vegetarian')
     is_gluten_free = fields.Boolean(string='Gluten Free')
     is_non_alcoholic = fields.Boolean(string='Non-Alcoholic')
     
-    # Client Information
+    # ================== CLIENT NOTES & HISTORY ==================
+    
     client_notes = fields.Text(
-        string='Client Notes',
-        help="Any special requests or preferences. You can specify composition type, budget, product count here."
+        string='Client Notes & Preferences',
+        placeholder="You can specify:\n"
+                   "• Budget (overrides form value)\n"
+                   "• Product count (e.g., '23 products')\n"
+                   "• Categories (e.g., 'include 3 wines, 2 cheeses')\n"
+                   "• Special requests\n"
+                   "• Exclusions (e.g., 'no chocolate')",
+        help="These notes are intelligently parsed and take PRECEDENCE over form values"
     )
     
     client_info = fields.Html(
@@ -130,12 +146,33 @@ class OllamaRecommendationWizard(models.TransientModel):
     )
     
     client_history_summary = fields.Html(
-        string="Client History",
+        string="Client History & Recommendations",
         compute='_compute_client_history',
         readonly=True
     )
     
-    # Results
+    # ================== BUSINESS RULES AWARENESS ==================
+    
+    has_previous_orders = fields.Boolean(
+        compute='_compute_has_previous_orders'
+    )
+    
+    has_last_year_data = fields.Boolean(
+        compute='_compute_has_last_year_data'
+    )
+    
+    business_rules_applicable = fields.Boolean(
+        string='Business Rules Applicable',
+        compute='_compute_business_rules_applicable'
+    )
+    
+    expected_strategy = fields.Char(
+        string='Expected Strategy',
+        compute='_compute_expected_strategy'
+    )
+    
+    # ================== RESULTS ==================
+    
     composition_id = fields.Many2one(
         'gift.composition',
         string='Generated Composition'
@@ -148,6 +185,11 @@ class OllamaRecommendationWizard(models.TransientModel):
     
     total_cost = fields.Float(
         string='Total Cost',
+        compute='_compute_totals'
+    )
+    
+    product_count_actual = fields.Integer(
+        string='Actual Product Count',
         compute='_compute_totals'
     )
     
@@ -164,14 +206,71 @@ class OllamaRecommendationWizard(models.TransientModel):
         string='Error Message'
     )
     
-    # Recommender Settings
+    # ================== RECOMMENDER SETTINGS ==================
+    
     recommender_id = fields.Many2one(
         'ollama.gift.recommender',
         string='Recommender Engine',
         default=lambda self: self.env['ollama.gift.recommender'].get_or_create_recommender()
     )
     
+    ollama_status = fields.Char(
+        string='Ollama Status',
+        compute='_compute_ollama_status'
+    )
+    
     # ================== COMPUTED FIELDS ==================
+    
+    @api.depends('recommender_id')
+    def _compute_ollama_status(self):
+        for wizard in self:
+            if wizard.recommender_id:
+                if wizard.recommender_id.ollama_enabled:
+                    wizard.ollama_status = '🟢 Ollama Enabled (Advanced parsing active)'
+                else:
+                    wizard.ollama_status = '🟡 Ollama Disabled (Using basic parsing)'
+            else:
+                wizard.ollama_status = '🔴 No recommender configured'
+    
+    @api.depends('partner_id')
+    def _compute_has_previous_orders(self):
+        for wizard in self:
+            if not wizard.partner_id:
+                wizard.has_previous_orders = False
+            else:
+                orders = self.env['sale.order'].search([
+                    ('partner_id', '=', wizard.partner_id.id),
+                    ('state', 'in', ['sale', 'done'])
+                ], limit=1)
+                wizard.has_previous_orders = bool(orders)
+    
+    @api.depends('partner_id', 'recommender_id')
+    def _compute_has_last_year_data(self):
+        for wizard in self:
+            if not wizard.partner_id or not wizard.recommender_id:
+                wizard.has_last_year_data = False
+            else:
+                last_products = wizard.recommender_id._get_last_year_products(wizard.partner_id.id)
+                wizard.has_last_year_data = bool(last_products)
+    
+    @api.depends('has_last_year_data', 'has_previous_orders')
+    def _compute_business_rules_applicable(self):
+        for wizard in self:
+            wizard.business_rules_applicable = wizard.has_last_year_data
+    
+    @api.depends('business_rules_applicable', 'has_previous_orders', 'client_notes')
+    def _compute_expected_strategy(self):
+        for wizard in self:
+            notes_lower = wizard.client_notes.lower() if wizard.client_notes else ""
+            
+            if 'all new' in notes_lower or 'completely different' in notes_lower:
+                wizard.expected_strategy = '🆕 Fresh Generation (requested in notes)'
+            elif wizard.business_rules_applicable:
+                wizard.expected_strategy = '📋 Business Rules + 80/20 Rule'
+            elif wizard.has_previous_orders:
+                wizard.expected_strategy = '📊 Pattern-Based Generation'
+            else:
+                wizard.expected_strategy = '👥 Similar Clients Analysis'
     
     @api.depends('composition_type', 'engine_type')
     def _compute_composition_display_type(self):
@@ -224,14 +323,6 @@ class OllamaRecommendationWizard(models.TransientModel):
                         <tr>
                             <td><b>Location:</b></td>
                             <td>{exp.experience_location}</td>
-                        </tr>
-                    """
-                
-                if hasattr(exp, 'max_participants') and exp.max_participants:
-                    html += f"""
-                        <tr>
-                            <td><b>Max Participants:</b></td>
-                            <td>{exp.max_participants}</td>
                         </tr>
                     """
                 
@@ -324,23 +415,28 @@ class OllamaRecommendationWizard(models.TransientModel):
             else:
                 wizard.client_dietary_history = "No previous dietary restrictions"
     
-    @api.depends('partner_id')
+    @api.depends('partner_id', 'recommender_id')
     def _compute_client_history(self):
-        """Compute client history summary for display"""
+        """Compute comprehensive client history with patterns and recommendations"""
         for wizard in self:
-            if not wizard.partner_id:
+            if not wizard.partner_id or not wizard.recommender_id:
                 wizard.client_history_summary = '<p style="color: #666;">Select a client to see history</p>'
                 continue
             
             try:
-                recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
-                patterns = recommender._analyze_client_purchase_patterns(wizard.partner_id.id)
+                # Get patterns analysis
+                patterns = wizard.recommender_id._analyze_client_purchase_patterns(wizard.partner_id.id)
+                
+                # Check for last year data
+                last_products = wizard.recommender_id._get_last_year_products(wizard.partner_id.id)
                 
                 if not patterns or patterns.get('total_orders', 0) == 0:
                     wizard.client_history_summary = '''
                     <div style="background: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
-                        <h4 style="margin-top: 0; color: #856404;">📋 No Purchase History</h4>
-                        <p style="margin-bottom: 0; color: #856404;">This is a new client with no previous orders.</p>
+                        <h4 style="margin-top: 0; color: #856404;">📋 New Client - No Purchase History</h4>
+                        <p style="margin-bottom: 0; color: #856404;">
+                            Will use similar clients analysis or fresh generation.
+                        </p>
                     </div>
                     '''
                 else:
@@ -348,19 +444,17 @@ class OllamaRecommendationWizard(models.TransientModel):
                     favorites_count = len(patterns.get('favorite_products', []))
                     top_categories = list(patterns.get('preferred_categories', {}).keys())[:3]
                     
-                    # Determine recommendation
+                    # Determine budget trend
                     suggested_budget = patterns.get('avg_order_value', 1000)
-                    if patterns.get('budget_trend') == 'increasing':
+                    trend = patterns.get('budget_trend', 'stable')
+                    if trend == 'increasing':
                         suggested_budget *= 1.1
                         trend_icon = '📈'
-                        trend_text = 'increasing'
-                    elif patterns.get('budget_trend') == 'decreasing':
+                    elif trend == 'decreasing':
                         suggested_budget *= 0.95
                         trend_icon = '📉'
-                        trend_text = 'decreasing'
                     else:
                         trend_icon = '➡️'
-                        trend_text = 'stable'
                     
                     html = f'''
                     <div style="background: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;">
@@ -380,7 +474,7 @@ class OllamaRecommendationWizard(models.TransientModel):
                             </tr>
                             <tr>
                                 <td><b>Budget Trend:</b></td>
-                                <td>{trend_icon} {trend_text.upper()}</td>
+                                <td>{trend_icon} {trend.upper()}</td>
                             </tr>
                             <tr>
                                 <td><b>Favorite Products:</b></td>
@@ -390,16 +484,41 @@ class OllamaRecommendationWizard(models.TransientModel):
                                 <td><b>Top Categories:</b></td>
                                 <td>{', '.join(top_categories) if top_categories else 'Various'}</td>
                             </tr>
+                    '''
+                    
+                    # Add price range if available
+                    if patterns.get('preferred_price_range'):
+                        price_range = patterns['preferred_price_range']
+                        html += f'''
+                            <tr>
+                                <td><b>Price Range:</b></td>
+                                <td>€{price_range.get('min', 0):.0f} - €{price_range.get('max', 0):.0f}</td>
+                            </tr>
+                        '''
+                    
+                    html += f'''
                         </table>
                         <hr style="border-color: #c3e6cb;">
-                        <p style="margin-bottom: 0; color: #155724;">
-                            <b>💡 Suggested Configuration:</b><br>
-                            Budget: <b>€{suggested_budget:.0f}</b> | 
-                            Products: <b>{patterns.get('avg_product_count', 12):.0f}</b> items
+                        <p style="margin-bottom: 10px; color: #155724;">
+                            <b>💡 AI Recommendations:</b><br>
+                            • Suggested Budget: <b>€{suggested_budget:.0f}</b><br>
+                            • Suggested Products: <b>{patterns.get('avg_product_count', 12):.0f}</b> items
                         </p>
-                    </div>
                     '''
+                    
+                    # Add business rules preview if applicable
+                    if last_products:
+                        html += f'''
+                        <div style="background: #c3e6cb; padding: 10px; border-radius: 3px; margin-top: 10px;">
+                            <b>🔧 Business Rules Ready:</b><br>
+                            Found {len(last_products)} products from last year.<br>
+                            Rules R1-R6 will be applied with 80/20 transformation.
+                        </div>
+                        '''
+                    
+                    html += '</div>'
                     wizard.client_history_summary = html
+                    
             except Exception as e:
                 _logger.error(f"Error computing client history: {e}")
                 wizard.client_history_summary = f'<p style="color: red;">Error loading history: {str(e)}</p>'
@@ -408,19 +527,19 @@ class OllamaRecommendationWizard(models.TransientModel):
     def _compute_totals(self):
         for wizard in self:
             wizard.total_cost = sum(wizard.recommended_products.mapped('list_price'))
+            wizard.product_count_actual = len(wizard.recommended_products)
     
     # ================== ONCHANGE METHODS ==================
     
     @api.onchange('partner_id')
     def _onchange_partner_id(self):
         """Auto-fill suggestions based on client history"""
-        if self.partner_id:
+        if self.partner_id and self.recommender_id:
             try:
-                recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
-                patterns = recommender._analyze_client_purchase_patterns(self.partner_id.id)
+                patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
                 
                 if patterns and patterns.get('total_orders', 0) > 0:
-                    # Suggest budget based on history
+                    # Suggest budget based on history and trend
                     suggested_budget = patterns.get('avg_order_value', 0)
                     if patterns.get('budget_trend') == 'increasing':
                         suggested_budget *= 1.1
@@ -431,31 +550,52 @@ class OllamaRecommendationWizard(models.TransientModel):
                     if not self.target_budget or self.target_budget == 1000.0:
                         self.target_budget = suggested_budget
                     
-                    # Suggest product count
-                    if patterns.get('avg_product_count') and not self.specify_product_count:
+                    # Suggest product count (don't enforce by default)
+                    if patterns.get('avg_product_count'):
                         self.product_count = int(round(patterns['avg_product_count']))
+                        # Don't auto-check specify_product_count - let user decide
             except:
                 pass  # Silently fail, don't disrupt the UI
     
     @api.onchange('dietary_restrictions')
     def _onchange_dietary_restrictions(self):
-        """Update legacy fields based on selection"""
+        """Update individual checkboxes based on selection"""
         if self.dietary_restrictions == 'halal':
             self.is_halal = True
+            self.is_non_alcoholic = True  # Halal implies no alcohol
             self.is_vegan = False
+            self.is_vegetarian = False
             self.is_gluten_free = False
         elif self.dietary_restrictions == 'vegan':
             self.is_vegan = True
             self.is_halal = False
+            self.is_vegetarian = False
             self.is_gluten_free = False
+            self.is_non_alcoholic = False
+        elif self.dietary_restrictions == 'vegetarian':
+            self.is_vegetarian = True
+            self.is_halal = False
+            self.is_vegan = False
+            self.is_gluten_free = False
+            self.is_non_alcoholic = False
         elif self.dietary_restrictions == 'gluten_free':
             self.is_gluten_free = True
             self.is_halal = False
             self.is_vegan = False
+            self.is_vegetarian = False
+            self.is_non_alcoholic = False
+        elif self.dietary_restrictions == 'non_alcoholic':
+            self.is_non_alcoholic = True
+            self.is_halal = False
+            self.is_vegan = False
+            self.is_vegetarian = False
+            self.is_gluten_free = False
         elif self.dietary_restrictions == 'none':
             self.is_halal = False
             self.is_vegan = False
+            self.is_vegetarian = False
             self.is_gluten_free = False
+            self.is_non_alcoholic = False
     
     @api.onchange('engine_type')
     def _onchange_engine_type(self):
@@ -467,7 +607,6 @@ class OllamaRecommendationWizard(models.TransientModel):
     def _onchange_experience_category_filter(self):
         """Filter experiences based on category"""
         if self.experience_category_filter and self.experience_category_filter != 'all':
-            # Update domain for selected_experience field
             return {
                 'domain': {
                     'selected_experience': [
@@ -486,7 +625,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ================== ACTION METHODS ==================
     
     def action_generate_recommendation(self):
-        """Generate recommendation with complete data merging"""
+        """Generate recommendation using the integrated recommender"""
         self.ensure_one()
         
         # Validate inputs
@@ -497,20 +636,21 @@ class OllamaRecommendationWizard(models.TransientModel):
         self.state = 'generating'
         
         try:
-            # Prepare dietary restrictions
+            # Prepare dietary restrictions (comprehensive)
             dietary = self._prepare_dietary_restrictions()
             
-            # Build notes with all specifications
+            # Build final notes (will be parsed by Ollama in recommender)
             final_notes = self._prepare_final_notes()
             
             # Log the generation request
             self._log_generation_request(dietary, final_notes)
             
-            # Include selected experience if applicable
-            if self.composition_type == 'experience' and self.selected_experience:
-                final_notes += f" Include experience: {self.selected_experience.name}"
-            
-            # Generate recommendation with all data
+            # Generate recommendation
+            # The recommender will:
+            # 1. Parse notes with Ollama
+            # 2. Merge requirements from all sources
+            # 3. Apply business rules if applicable
+            # 4. Enforce product count and budget
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget if self.target_budget else 0,
@@ -541,48 +681,74 @@ class OllamaRecommendationWizard(models.TransientModel):
             raise
     
     def _prepare_dietary_restrictions(self):
-        """Prepare dietary restrictions list"""
+        """Prepare comprehensive dietary restrictions list"""
         dietary = []
         
         # From selection field
         if self.dietary_restrictions == 'halal':
-            dietary.append('halal')
+            dietary.extend(['halal', 'no_pork', 'no_alcohol', 'no_iberian'])
         elif self.dietary_restrictions == 'vegan':
             dietary.append('vegan')
+        elif self.dietary_restrictions == 'vegetarian':
+            dietary.append('vegetarian')
         elif self.dietary_restrictions == 'gluten_free':
             dietary.append('gluten_free')
+        elif self.dietary_restrictions == 'non_alcoholic':
+            dietary.append('non_alcoholic')
         elif self.dietary_restrictions == 'multiple' and self.dietary_restrictions_text:
-            # Parse multiple restrictions
+            # Parse multiple restrictions from text
             restrictions = self.dietary_restrictions_text.split(',')
             dietary.extend([r.strip().lower() for r in restrictions])
         
-        # Also check legacy fields
+        # Also check individual checkboxes (union)
         if self.is_halal and 'halal' not in dietary:
-            dietary.append('halal')
+            dietary.extend(['halal', 'no_pork', 'no_alcohol', 'no_iberian'])
         if self.is_vegan and 'vegan' not in dietary:
             dietary.append('vegan')
+        if self.is_vegetarian and 'vegetarian' not in dietary:
+            dietary.append('vegetarian')
         if self.is_gluten_free and 'gluten_free' not in dietary:
             dietary.append('gluten_free')
         if self.is_non_alcoholic and 'non_alcoholic' not in dietary:
             dietary.append('non_alcoholic')
         
-        return dietary
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_dietary = []
+        for item in dietary:
+            if item not in seen:
+                seen.add(item)
+                unique_dietary.append(item)
+        
+        return unique_dietary
     
     def _prepare_final_notes(self):
-        """Prepare final notes including product count if specified"""
-        final_notes = self.client_notes or ""
+        """Prepare final notes that will be parsed by Ollama"""
+        notes_parts = []
         
-        # Only add product count to notes if user explicitly checked the box
+        # Add original client notes (highest priority)
+        if self.client_notes:
+            notes_parts.append(self.client_notes)
+        
+        # Add product count ONLY if explicitly specified
         if self.specify_product_count and self.product_count:
-            count_instruction = f"Must have exactly {self.product_count} products."
-            if final_notes:
-                # Check if count is already mentioned in notes
-                if not any(word in final_notes.lower() for word in ['product', 'item', 'piece']):
-                    final_notes += f" {count_instruction}"
-            else:
-                final_notes = count_instruction
+            # This will be parsed by Ollama and enforced
+            count_instruction = f"I need exactly {self.product_count} products."
+            notes_parts.append(count_instruction)
+            _logger.info(f"🎯 Adding product count to notes: {self.product_count}")
+        
+        # Add composition type preference
+        if self.composition_type == 'hybrid':
+            notes_parts.append("Prefer wine-focused hybrid composition")
+        elif self.composition_type == 'experience':
+            notes_parts.append("Include experience-based products")
             
-            _logger.info(f"🎯 User explicitly requested {self.product_count} products via form checkbox")
+            # Add selected experience if specified
+            if self.selected_experience:
+                notes_parts.append(f"Include this experience: {self.selected_experience.name}")
+        
+        # Join all parts
+        final_notes = ". ".join(notes_parts)
         
         return final_notes
     
@@ -591,13 +757,15 @@ class OllamaRecommendationWizard(models.TransientModel):
         _logger.info(f"""
         ========== GENERATION REQUEST ==========
         Client: {self.partner_id.name}
-        Budget (Form): €{self.target_budget:.2f} {'(provided)' if self.target_budget else '(empty)'}
-        Product Count (Form): {self.product_count if self.specify_product_count else 'Not specified'}
+        Budget (Form): €{self.target_budget:.2f} {'(will check history if 0)' if not self.target_budget else ''}
+        Product Count (Form): {self.product_count if self.specify_product_count else 'Auto-detect'}
+        Enforce Count: {self.specify_product_count}
         Dietary (Form): {dietary if dietary else 'None'}
         Composition Type: {self.composition_type}
-        Engine Type: {self.engine_type}
-        Experience: {self.selected_experience.name if self.selected_experience else 'None'}
-        Notes: {final_notes[:100]}{'...' if len(final_notes) > 100 else ''}
+        Expected Strategy: {self.expected_strategy}
+        Business Rules: {'Yes' if self.business_rules_applicable else 'No'}
+        Notes Length: {len(final_notes)} chars
+        Full Notes: {final_notes[:200]}{'...' if len(final_notes) > 200 else ''}
         ========================================
         """)
     
@@ -610,30 +778,88 @@ class OllamaRecommendationWizard(models.TransientModel):
         if self.composition_id:
             self.recommended_products = [(6, 0, self.composition_id.product_ids.ids)]
         
-        self.total_cost = result.get('total_cost', 0)
         self.confidence_score = result.get('confidence_score', 0)
         
-        # Build result message
+        # Build detailed result message
+        method = result.get('method', 'unknown')
+        method_display = {
+            'business_rules_with_enforcement': '📋 Business Rules + Requirements',
+            'business_rules_transformation': '📋 Business Rules Applied',
+            '8020_rule': '📊 80/20 Rule Applied',
+            'pattern_based_enhanced': '🔍 Pattern-Based Generation',
+            'similar_clients': '👥 Similar Clients Analysis',
+            'universal_enforcement': '🎯 Universal Generation',
+            'fresh_generation': '🆕 Fresh Composition'
+        }.get(method, method)
+        
+        # Check compliance
+        actual_count = result.get('product_count', 0)
+        actual_cost = result.get('total_cost', 0)
+        target_count = self.product_count if self.specify_product_count else None
+        
+        count_compliance = '✅' if not target_count or actual_count == target_count else '⚠️'
+        budget_variance = ((actual_cost - self.target_budget) / self.target_budget * 100) if self.target_budget else 0
+        budget_compliance = '✅' if abs(budget_variance) <= 15 else '⚠️'
+        
         self.result_message = f"""
         <div style="background: #d4edda; padding: 15px; border-radius: 5px;">
             <h4 style="color: #155724;">✅ Recommendation Generated Successfully!</h4>
-            <ul style="color: #155724;">
-                <li><b>Method:</b> {result.get('method', 'unknown')}</li>
-                <li><b>Products:</b> {result.get('product_count', 0)}</li>
-                <li><b>Total Cost:</b> €{result.get('total_cost', 0):.2f}</li>
-                <li><b>Confidence:</b> {result.get('confidence_score', 0)*100:.0f}%</li>
-                <li><b>Message:</b> {result.get('message', '')}</li>
-            </ul>
-        </div>
+            
+            <div style="margin-top: 10px;">
+                <b>Generation Method:</b> {method_display}<br>
+                <b>Confidence Score:</b> {result.get('confidence_score', 0)*100:.0f}%
+            </div>
+            
+            <table style="width: 100%; margin-top: 15px; color: #155724;">
+                <tr style="background: #c3e6cb;">
+                    <th style="padding: 5px; text-align: left;">Requirement</th>
+                    <th style="padding: 5px; text-align: center;">Target</th>
+                    <th style="padding: 5px; text-align: center;">Actual</th>
+                    <th style="padding: 5px; text-align: center;">Status</th>
+                </tr>
+                <tr>
+                    <td style="padding: 5px;"><b>Products</b></td>
+                    <td style="padding: 5px; text-align: center;">{target_count if target_count else 'Auto'}</td>
+                    <td style="padding: 5px; text-align: center;">{actual_count}</td>
+                    <td style="padding: 5px; text-align: center;">{count_compliance}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px;"><b>Budget</b></td>
+                    <td style="padding: 5px; text-align: center;">€{self.target_budget:.2f}</td>
+                    <td style="padding: 5px; text-align: center;">€{actual_cost:.2f}</td>
+                    <td style="padding: 5px; text-align: center;">{budget_compliance} ({budget_variance:+.1f}%)</td>
+                </tr>
+            </table>
         """
+        
+        # Add rules summary if applicable
+        if result.get('rules_applied'):
+            rules_count = len(result['rules_applied'])
+            self.result_message += f"""
+            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #c3e6cb;">
+                <b>Business Rules Applied:</b> {rules_count} transformations
+            </div>
+            """
+        
+        # Add message from result
+        if result.get('message'):
+            self.result_message += f"""
+            <div style="margin-top: 10px; padding: 10px; background: #c3e6cb; border-radius: 3px;">
+                <b>Details:</b> {result['message']}
+            </div>
+            """
+        
+        self.result_message += "</div>"
         
         # Log success
         _logger.info(f"""
         ========== GENERATION SUCCESS ==========
-        Method: {result.get('method', 'unknown')}
-        Products: {result.get('product_count', 0)}
-        Total Cost: €{result.get('total_cost', 0):.2f}
+        Method: {method_display}
+        Products: {actual_count} {'✅' if count_compliance == '✅' else '⚠️ (target: ' + str(target_count) + ')'}
+        Total Cost: €{actual_cost:.2f}
+        Variance: {budget_variance:+.1f}%
         Confidence: {result.get('confidence_score', 0)*100:.0f}%
+        Rules Applied: {len(result.get('rules_applied', []))}
         ========================================
         """)
     
