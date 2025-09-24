@@ -467,45 +467,61 @@ class GiftComposition(models.Model):
         }
     
     def action_regenerate(self):
-        """Open wizard to regenerate the composition"""
+        """Open wizard to regenerate the composition with NEW products"""
         self.ensure_one()
+        
+        if self.state == 'approved':
+            raise UserError("Cannot regenerate approved compositions. Please create a new draft version.")
+        
+        _logger.info(f"🔄 Starting regeneration for Gift Composition: {self.name} (ID: {self.id})")
         
         # Prepare dietary restrictions for wizard
         dietary = 'none'
         if self.dietary_restriction_type:
             dietary = self.dietary_restriction_type
         elif self.dietary_restrictions:
-            # Try to parse from text
-            if 'halal' in self.dietary_restrictions.lower():
+            # Try to parse dietary restrictions
+            restrictions = self.dietary_restrictions.lower()
+            if 'halal' in restrictions:
                 dietary = 'halal'
-            elif 'vegan' in self.dietary_restrictions.lower():
+            elif 'vegan' in restrictions:
                 dietary = 'vegan'
-            elif 'vegetarian' in self.dietary_restrictions.lower():
+            elif 'vegetarian' in restrictions:
                 dietary = 'vegetarian'
+            elif 'alcohol' in restrictions:
+                dietary = 'non_alcoholic'
         
+        # Open the recommendation wizard with current values
         wizard_vals = {
             'partner_id': self.partner_id.id,
             'target_budget': self.target_budget,
             'target_year': self.target_year,
             'dietary_restrictions': dietary,
-            'dietary_restrictions_text': self.dietary_restrictions,
-            'client_notes': self.client_notes,
-            'engine_type': self.composition_type if self.composition_type != 'custom' else 'custom',
+            'composition_type': self.composition_type,
+            'regenerate_composition_id': self.id,  # Pass current composition ID
+            'additional_notes': self.notes if hasattr(self, 'notes') else '',
         }
         
-        # Only add experience code if it exists
-        if self.experience_code:
-            wizard_vals['selected_experience'] = self.experience_code
-        
+        # Create wizard
         wizard = self.env['ollama.recommendation.wizard'].create(wizard_vals)
         
+        # Return action to open wizard
         return {
             'type': 'ir.actions.act_window',
-            'name': 'Regenerate Composition',
+            'name': 'Regenerate Gift Composition',
             'res_model': 'ollama.recommendation.wizard',
-            'res_id': wizard.id,
             'view_mode': 'form',
+            'res_id': wizard.id,
             'target': 'new',
+            'context': {
+                'default_partner_id': self.partner_id.id,
+                'default_target_budget': self.target_budget,
+                'default_target_year': self.target_year,
+                'default_dietary_restrictions': dietary,
+                'default_composition_type': self.composition_type,
+                'regeneration_mode': True,
+                'original_composition_id': self.id,
+            }
         }
     
     def get_categorized_products(self):

@@ -3,6 +3,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 import logging
 from collections import defaultdict
+from typing import List, Dict, Any, Optional
 
 _logger = logging.getLogger(__name__)
 
@@ -32,14 +33,30 @@ class BusinessRulesEngine(models.Model):
             'substitutions': [],
             'locked_attributes': {
                 'price_categories': set(),
-                'beverage_sizes': set()
+                'beverage_sizes': set(),
+                # Items that belong to an Experience and must not be reused elsewhere
+                'experience_item_ids': set(),
+                # Flag to indicate if selected Experience already contains Foie
+                'experience_has_foie': False,
             }
         }
         
         # Categorize last year's products
         categorized_products = self._categorize_products(last_products)
         
-        # Apply rules by category
+        # 1) Handle Experiences FIRST to derive dependencies (e.g., Foie suppression)
+        experience_products = categorized_products.get('experience', [])
+        if experience_products:
+            new_products, rule_log, exp_meta = self._apply_rule_r3_with_meta(experience_products)
+            result['products'].extend(new_products)
+            result['rule_applications'].extend(rule_log)
+            # Track experience items and foie presence
+            result['locked_attributes']['experience_item_ids'].update(p.id for p in new_products)
+            result['locked_attributes']['experience_has_foie'] = bool(exp_meta.get('has_foie'))
+            # Remove to avoid double-processing
+            categorized_products.pop('experience', None)
+        
+        # 2) Apply rules for remaining categories
         for category, products in categorized_products.items():
             if category in ['cava', 'champagne', 'vermouth', 'tokaj', 'tokaji']:
                 # R1: Repeat exactly
@@ -53,12 +70,6 @@ class BusinessRulesEngine(models.Model):
                 result['products'].extend(new_products)
                 result['rule_applications'].extend(rule_log)
                 
-            elif category == 'experience':
-                # R3: Replace with new same-size bundles from pool
-                new_products, rule_log = self._apply_rule_r3(products)
-                result['products'].extend(new_products)
-                result['rule_applications'].extend(rule_log)
-                
             elif category in ['paletilla', 'charcuterie']:
                 # R4: Repeat exactly
                 new_products, rule_log = self._apply_rule_r4(products)
@@ -67,15 +78,22 @@ class BusinessRulesEngine(models.Model):
                 
             elif category == 'foie_gras':
                 # R5: Alternate Duck ↔ Goose
-                new_products, rule_log = self._apply_rule_r5(products)
-                result['products'].extend(new_products)
-                result['rule_applications'].extend(rule_log)
+                # If Experience already includes Foie, DO NOT add separate Foie
+                if not result['locked_attributes'].get('experience_has_foie'):
+                    new_products, rule_log = self._apply_rule_r5(products)
+                    result['products'].extend(new_products)
+                    result['rule_applications'].extend(rule_log)
                 
             elif category == 'sweets':
                 # R6: Lingote exact, Turrón keeps subtype & grade
                 new_products, rule_log = self._apply_rule_r6(products)
                 result['products'].extend(new_products)
                 result['rule_applications'].extend(rule_log)
+        
+        # Apply ordering for Experience-controlled placement
+        result['products'] = self._apply_experience_placement_order(
+            result['products'], result['locked_attributes'].get('experience_item_ids', set())
+        )
         
         # Apply global constraints
         result = self._apply_global_constraints(result)
@@ -238,18 +256,29 @@ class BusinessRulesEngine(models.Model):
         rule_logs = []
         
         for exp_product in experience_products:
-            # Find new experience bundle with same product count
+            # Determine target pack size
             original_count = self._get_experience_product_count(exp_product)
             
-            new_experience = self._find_new_experience_bundle(original_count, exclude_ids=[exp_product.id])
+            # Prefer wizard-defined experiences dictionary if available
+            experience_items = self._choose_experience_from_dictionary(original_count)
+            if experience_items:
+                selected_products.extend(experience_items)
+                rule_logs.append({
+                    'rule': 'R3',
+                    'action': 'experience_replacement',
+                    'original': exp_product.name,
+                    'new_experience': 'Wizard: EXPERIENCES_DATA',
+                    'product_count': original_count
+                })
+                continue
             
+            # Fallback to product-based bundles in database
+            new_experience = self._find_new_experience_bundle(original_count, exclude_ids=[exp_product.id])
             if new_experience:
-                # Add all products from the new experience
                 if hasattr(new_experience, 'experience_product_ids'):
                     selected_products.extend(new_experience.experience_product_ids)
                 else:
                     selected_products.append(new_experience)
-                    
                 rule_logs.append({
                     'rule': 'R3',
                     'action': 'experience_replacement',
@@ -258,7 +287,6 @@ class BusinessRulesEngine(models.Model):
                     'product_count': original_count
                 })
             else:
-                # Keep original if no new experience available
                 selected_products.append(exp_product)
                 rule_logs.append({
                     'rule': 'R3',
@@ -268,6 +296,19 @@ class BusinessRulesEngine(models.Model):
                 })
         
         return selected_products, rule_logs
+
+    def _apply_rule_r3_with_meta(self, experience_products):
+        """Like _apply_rule_r3 but returns metadata: {'has_foie': bool}"""
+        selected_products, rule_logs = self._apply_rule_r3(experience_products)
+        has_foie = False
+        for p in selected_products:
+            try:
+                if getattr(p, 'lebiggot_category', None) == 'foie_gras':
+                    has_foie = True
+                    break
+            except Exception:
+                pass
+        return selected_products, rule_logs, {'has_foie': has_foie}
     
     def _apply_rule_r4(self, charcuterie_products):
         """R4: Paletilla & Charcuterie repeated exactly"""
@@ -491,6 +532,89 @@ class BusinessRulesEngine(models.Model):
         # Budget validation will be handled at composition level
         
         return result
+
+    # ===================== EXPERIENCE HELPERS (Wizard Dictionary) =====================
+    def _load_experiences_data(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Load EXPERIENCES_DATA dict from the wizard module if available."""
+        try:
+            from odoo.addons.lebigott_ai_recommendations_14.wizard.ollama_recommendation_wizard import (
+                OllamaRecommendationWizard,
+            )
+            return getattr(OllamaRecommendationWizard, 'EXPERIENCES_DATA', None)
+        except Exception:
+            try:
+                # Fallback based on relative import when module name differs
+                from ..wizard.ollama_recommendation_wizard import OllamaRecommendationWizard  # type: ignore
+                return getattr(OllamaRecommendationWizard, 'EXPERIENCES_DATA', None)
+            except Exception:
+                _logger.warning("EXPERIENCES_DATA not found in wizard; falling back to DB bundles if any.")
+                return None
+
+    def _resolve_experience_products(self, product_codes: List[str]) -> List[Any]:
+        """Resolve list of default_code strings to product.template records."""
+        resolved: List[Any] = []
+        Product = self.env['product.template'].sudo()
+        for code in product_codes:
+            product = Product.search([('default_code', '=', code), ('sale_ok', '=', True), ('active', '=', True)], limit=1)
+            if not product:
+                # Fallback: try name ilike
+                product = Product.search([('name', 'ilike', code), ('sale_ok', '=', True), ('active', '=', True)], limit=1)
+            if product and self._check_stock_availability(product):
+                resolved.append(product)
+        return resolved
+
+    def _choose_experience_from_dictionary(self, target_size: int) -> List[Any]:
+        """Pick a different experience with the same number of items from EXPERIENCES_DATA."""
+        data = self._load_experiences_data()
+        if not data:
+            return []
+        # Build candidates by size
+        candidates: List[List[Any]] = []
+        for key, exp in data.items():
+            products_list = exp.get('products') or []
+            if not isinstance(products_list, list):
+                continue
+            if len(products_list) == target_size:
+                resolved = self._resolve_experience_products(products_list)
+                if len(resolved) == target_size:
+                    candidates.append(resolved)
+        # Pick first viable candidate for determinism
+        return candidates[0] if candidates else []
+
+    def _apply_experience_placement_order(self, products: List[Any], experience_item_ids: set) -> List[Any]:
+        """Ensure experience items appear before others in their category and apply specific ordering.
+
+        Specific sequence within experience items by keywords:
+        1) fish loins (ventresca/loin/loin-like)
+        2) goose foie block/mousse (oca/goose + foie)
+        3) cheesecake
+        4) anchovies
+        """
+        def specific_rank(p: Any) -> int:
+            name = (getattr(p, 'name', '') or '').lower()
+            if any(k in name for k in ['ventresca', 'loin', 'lomo de atún', 'fish loin']):
+                return 0
+            if ('foie' in name) and any(k in name for k in ['oca', 'goose', 'bloc', 'mousse']):
+                return 1
+            if 'cheesecake' in name:
+                return 2
+            if any(k in name for k in ['anchoa', 'anchovy', 'anchovies']):
+                return 3
+            return 9
+
+        def category_key(p: Any) -> str:
+            # Coarse grouping to place experience items before others in same broad category
+            cat = getattr(p, 'lebiggot_category', '') or ''
+            return cat
+
+        def sort_key(p: Any):
+            in_exp = 0 if p.id in experience_item_ids else 1
+            return (category_key(p), in_exp, specific_rank(p))
+
+        try:
+            return sorted(products, key=sort_key)
+        except Exception:
+            return products
     
     def _check_stock_availability(self, product, min_qty=1):
         """Check if product has sufficient stock"""

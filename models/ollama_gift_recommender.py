@@ -263,9 +263,18 @@ class OllamaGiftRecommender(models.Model):
                 partner, requirements, notes, context
             )
         
+        # Extract locked attributes from transformation (experience items, foie presence)
+        locked_attributes = transformation.get('locked_attributes', {}) or {}
+        experience_has_foie = bool(locked_attributes.get('experience_has_foie', False))
+        
         # 2. Apply dietary filters
         filtered_products = self._filter_products_by_dietary(
             transformation['products'], requirements.get('dietary', [])
+        )
+        
+        # 2a. Enforce Tokaji ↔ Foie pairing if needed (Tokaji requires Foie)
+        filtered_products = self._ensure_tokaji_foie_pairing(
+            filtered_products, experience_has_foie, requirements.get('dietary', [])
         )
         
         # 3. CRITICAL: Enforce requirements from notes
@@ -274,6 +283,14 @@ class OllamaGiftRecommender(models.Model):
             filtered_products = self._enforce_exact_product_count(
                 filtered_products, requirements['product_count'], requirements['budget']
             )
+        else:
+            # If last year data exists, preserve same number of items by default
+            if last_products:
+                target_count = len(last_products)
+                _logger.info(f"📋 Defaulting to last year's product count: {target_count}")
+                filtered_products = self._enforce_exact_product_count(
+                    filtered_products, target_count, requirements['budget']
+                )
         
         # 4. Apply budget optimization
         optimized_products = self._smart_optimize_selection(
@@ -282,9 +299,29 @@ class OllamaGiftRecommender(models.Model):
             requirements['budget'],
             requirements['budget_flexibility'],
             requirements['enforce_count'],
-            context
+            {**context, 'locked_attributes': locked_attributes}
         )
         
+        # 4a. Enforce same category counts as last year, when data exists
+        if last_products:
+            target_counts = self._compute_category_counts(last_products)
+            optimized_products = self._enforce_category_counts(
+                optimized_products,
+                target_counts,
+                requirements['budget'],
+                requirements.get('dietary', []),
+                {**context, 'locked_attributes': locked_attributes}
+            )
+
+        # 4b. Strict budget guardrail ±5% at the end
+        optimized_products = self._enforce_budget_guardrail(
+            optimized_products,
+            requirements['budget'],
+            tolerance=0.05,
+            dietary=requirements.get('dietary', []),
+            context={**context, 'locked_attributes': locked_attributes}
+        )
+
         # 5. Calculate total cost
         total_cost = sum(p.list_price for p in optimized_products)
         
@@ -338,6 +375,140 @@ class OllamaGiftRecommender(models.Model):
                 transformed.append(product)
         
         return {'products': transformed, 'rule_applications': []}
+
+    # ===================== ENFORCEMENT HELPERS =====================
+    def _compute_category_counts(self, products):
+        counts = {
+            'beverage': 0,
+            'aperitif': 0,
+            'foie': 0,
+            'canned': 0,
+            'charcuterie': 0,
+            'sweet': 0,
+            'other': 0,
+        }
+        for p in products:
+            cat = (getattr(p, 'lebiggot_category', '') or '').lower()
+            bevfam = getattr(p, 'beverage_family', '') or ''
+            name = (getattr(p, 'name', '') or '').lower()
+            if bevfam in ['cava', 'champagne', 'vermouth', 'tokaj', 'tokaji', 'wine', 'red_wine', 'white_wine', 'rose_wine', 'beer', 'spirits_high']:
+                counts['beverage'] += 1
+            elif cat == 'foie_gras' or 'foie' in name:
+                counts['foie'] += 1
+            elif cat in ['preserves'] or any(k in name for k in ['conserva', 'lata', 'anchoa', 'bonito', 'sardina', 'mejillón', 'ventresca']):
+                counts['canned'] += 1
+            elif cat in ['charcuterie', 'cheese']:
+                counts['charcuterie'] += 1
+            elif cat in ['sweets', 'chocolates']:
+                counts['sweet'] += 1
+            elif bevfam in ['spirits_high'] or any(k in name for k in ['vermouth', 'vermut', 'tokaji', 'beer', 'cerveza', 'whisky', 'gin', 'vodka', 'brandy', 'cognac', 'licor']):
+                counts['aperitif'] += 1
+            else:
+                counts['other'] += 1
+        return counts
+
+    def _enforce_category_counts(self, products, target_counts, budget, dietary, context):
+        if not products:
+            return products
+        locked_ids = set((context.get('locked_attributes') or {}).get('experience_item_ids', set()) or [])
+        current_counts = self._compute_category_counts(products)
+        if current_counts == target_counts:
+            return products
+        exclude_ids = [p.id for p in products] + list(locked_ids)
+        pool = self._get_smart_product_pool(budget, dietary, {**context, 'exclude_ids': exclude_ids})
+        def cat_of(p):
+            tmp = self._compute_category_counts([p])
+            for k in ['beverage', 'aperitif', 'foie', 'canned', 'charcuterie', 'sweet']:
+                if tmp.get(k, 0) == 1:
+                    return k
+            return 'other'
+        products_mut = list(products)
+        for cat in ['beverage','aperitif','foie','canned','charcuterie','sweet']:
+            deficit = max(0, target_counts.get(cat, 0) - current_counts.get(cat, 0))
+            while deficit > 0:
+                candidate = None
+                for p in pool:
+                    if p.id in exclude_ids:
+                        continue
+                    if cat_of(p) == cat and self._check_dietary_compliance(p, dietary):
+                        candidate = p
+                        break
+                if not candidate:
+                    break
+                replace_idx = None
+                for i, existing in enumerate(products_mut):
+                    if existing.id in locked_ids:
+                        continue
+                    ex_cat = cat_of(existing)
+                    if current_counts.get(ex_cat, 0) > target_counts.get(ex_cat, 0):
+                        replace_idx = i
+                        current_counts[ex_cat] -= 1
+                        break
+                if replace_idx is None:
+                    break
+                products_mut[replace_idx] = candidate
+                exclude_ids.append(candidate.id)
+                current_counts[cat] = current_counts.get(cat, 0) + 1
+                deficit -= 1
+        return products_mut
+
+    def _enforce_budget_guardrail(self, products, budget, tolerance, dietary, context):
+        if not products or budget <= 0:
+            return products
+        min_budget = budget * (1 - tolerance)
+        max_budget = budget * (1 + tolerance)
+        total = sum(p.list_price for p in products)
+        if min_budget <= total <= max_budget:
+            return products
+        locked_ids = set((context.get('locked_attributes') or {}).get('experience_item_ids', set()) or [])
+        exclude_ids = [p.id for p in products] + list(locked_ids)
+        pool = self._get_smart_product_pool(budget, dietary, {**context, 'exclude_ids': exclude_ids})
+        products_mut = list(products)
+        pool_sorted_low = sorted(pool, key=lambda p: p.list_price)
+        pool_sorted_high = list(reversed(pool_sorted_low))
+        max_iters = 20
+        it = 0
+        while (total < min_budget or total > max_budget) and it < max_iters:
+            it += 1
+            replace_idx = None
+            if total > max_budget:
+                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: ip[1].list_price, reverse=True)
+                if not sorted_existing:
+                    break
+                replace_idx, to_replace = sorted_existing[0]
+                candidate = next((p for p in pool_sorted_low if p.list_price < to_replace.list_price and self._check_dietary_compliance(p, dietary)), None)
+            else:
+                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: ip[1].list_price)
+                if not sorted_existing:
+                    break
+                replace_idx, to_replace = sorted_existing[0]
+                candidate = next((p for p in pool_sorted_high if p.list_price > to_replace.list_price and self._check_dietary_compliance(p, dietary)), None)
+            if not candidate:
+                break
+            total -= products_mut[replace_idx].list_price
+            products_mut[replace_idx] = candidate
+            total += candidate.list_price
+            exclude_ids.append(candidate.id)
+        return products_mut
+
+    def _ensure_tokaji_foie_pairing(self, products, experience_has_foie, dietary):
+        if experience_has_foie:
+            return products
+        has_tokaji = any(getattr(p, 'beverage_family', '') in ['tokaj', 'tokaji'] for p in products)
+        has_foie = any((getattr(p, 'lebiggot_category', '') or '') == 'foie_gras' for p in products)
+        if not has_tokaji or has_foie:
+            return products
+        tokaji_grades = [getattr(p, 'product_grade', None) for p in products if getattr(p, 'beverage_family', '') in ['tokaj','tokaji']]
+        preferred_grade = tokaji_grades[0] if tokaji_grades and tokaji_grades[0] else None
+        domain = [('lebiggot_category', '=', 'foie_gras'), ('active', '=', True), ('sale_ok', '=', True)]
+        if preferred_grade:
+            domain.append(('product_grade', '=', preferred_grade))
+        foie_candidates = self.env['product.template'].sudo().search(domain)
+        for foie in foie_candidates:
+            if self._check_dietary_compliance(foie, dietary):
+                _logger.info("🦆 Added Foie pairing for Tokaji rule")
+                return products + [foie]
+        return products
     
     def _enforce_exact_product_count(self, products, target_count, budget):
         """Enforce exact product count requirement"""
@@ -1303,53 +1474,62 @@ Extract and return ONLY a valid JSON object with these fields:
     # All methods remain the same as in the original implementation
     
     def _get_smart_product_pool(self, budget, dietary, context):
-        """Get intelligently filtered product pool based on context"""
+        """Get intelligently filtered product pool - EXCLUDING ZERO-PRICE ITEMS"""
         
         patterns = context.get('patterns', {})
         
-        # Determine price range based on patterns or defaults
+        # CRITICAL FIX: Never allow zero price
+        min_price = max(1.0, budget * 0.01)  # At least €1, never 0
+        max_price = budget * 0.4  # Single product shouldn't exceed 40% of budget
+        
+        # If patterns have price range, use it but never allow 0
         if patterns and patterns.get('preferred_price_range'):
-            min_price = patterns['preferred_price_range'].get('min', budget * 0.01)
-            max_price = patterns['preferred_price_range'].get('max', budget * 0.4)
-        else:
-            min_price = max(5, budget * 0.01)  # At least €5
-            max_price = budget * 0.4  # Max 40% of budget for single item
+            pattern_min = patterns['preferred_price_range'].get('min', min_price)
+            pattern_max = patterns['preferred_price_range'].get('max', max_price)
+            min_price = max(1.0, pattern_min)  # NEVER allow 0
+            max_price = min(budget * 0.4, pattern_max)
         
         domain = [
             ('sale_ok', '=', True),
+            ('active', '=', True),
+            ('list_price', '>', 0),  # CRITICAL: Exclude zero prices
             ('list_price', '>=', min_price),
             ('list_price', '<=', max_price),
+            ('default_code', '!=', False),  # Must have internal reference
         ]
         
-        # Add dietary filters
-        if dietary:
-            if 'halal' in dietary:
-                if 'is_halal_compatible' in self.env['product.template']._fields:
-                    domain.append(('is_halal_compatible', '!=', False))
-                if 'contains_pork' in self.env['product.template']._fields:
-                    domain.append(('contains_pork', '=', False))
-                if 'contains_alcohol' in self.env['product.template']._fields:
-                    domain.append(('contains_alcohol', '=', False))
+        # Add dietary filters for halal
+        if dietary and 'halal' in dietary:
+            domain.extend([
+                '|', '|',
+                ('categ_id.complete_name', 'not ilike', 'IBERICOS'),
+                ('categ_id.complete_name', 'not ilike', 'ALCOHOL'),
+                ('name', 'not ilike', 'pork')
+            ])
+        
+        # Exclude explicitly provided ids (e.g., experience items or already selected)
+        exclude_ids = list(set((context or {}).get('exclude_ids', []) or []))
+        locked_attrs = (context or {}).get('locked_attributes') or {}
+        exp_item_ids = list(set(locked_attrs.get('experience_item_ids', set()) or []))
+        exclude_ids.extend(exp_item_ids)
+        if exclude_ids:
+            domain.append(('id', 'not in', exclude_ids))
         
         products = self.env['product.template'].sudo().search(domain, limit=1000)
         
-        # Filter by stock
-        available = []
-        for product in products:
-            if self._has_stock(product):
-                available.append(product)
+        # Double-check: Filter out any 0-price products that slipped through
+        valid_products = products.filtered(lambda p: p.list_price > 0)
         
-        # Score products based on patterns
-        if patterns and patterns.get('favorite_products'):
-            scored = []
-            for product in available:
-                score = 10 if product.id in patterns['favorite_products'] else 1
-                scored.append((product, score))
-            scored.sort(key=lambda x: x[1], reverse=True)
-            available = [p for p, s in scored]
+        # Add randomization to avoid same product selection
+        if len(valid_products) > 20:
+            import random
+            product_list = list(valid_products)
+            random.shuffle(product_list)
+            valid_products = self.env['product.template'].browse([p.id for p in product_list])
         
-        _logger.info(f"📦 Product pool: {len(available)} products (€{min_price:.2f}-€{max_price:.2f})")
-        return available
+        _logger.info(f"Smart pool: {len(valid_products)} products (€{min_price:.2f} - €{max_price:.2f})")
+        
+        return valid_products
     
     def _check_dietary_compliance(self, product, dietary_restrictions):
         """Check if product complies with dietary restrictions"""
@@ -1362,11 +1542,27 @@ Extract and return ONLY a valid JSON object with these fields:
                     return False
                 if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
                     return False
+                if hasattr(product, 'is_iberian_product') and product.is_iberian_product:
+                    return False
             elif restriction == 'vegan':
                 if hasattr(product, 'is_vegan') and not product.is_vegan:
                     return False
+            elif restriction == 'vegetarian':
+                # Basic heuristic: allow if vegan or not meat/foie/charcuterie
+                cat = (getattr(product, 'lebiggot_category', '') or '').lower()
+                if cat in ['charcuterie', 'foie_gras']:
+                    return False
             elif restriction == 'gluten_free':
                 if hasattr(product, 'contains_gluten') and product.contains_gluten:
+                    return False
+            elif restriction in ['non_alcoholic', 'no_alcohol']:
+                if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
+                    return False
+            elif restriction == 'no_pork':
+                if hasattr(product, 'contains_pork') and product.contains_pork:
+                    return False
+            elif restriction == 'no_iberian':
+                if hasattr(product, 'is_iberian_product') and product.is_iberian_product:
                     return False
         
         return True

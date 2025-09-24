@@ -8,6 +8,61 @@ class OllamaRecommendationWizard(models.TransientModel):
     _name = 'ollama.recommendation.wizard'
     _description = 'Ollama Gift Recommendation Wizard'
     
+    # Complete EXPERIENCIAS_DATA from EXPERIENCIAS 2025
+    EXPERIENCES_DATA = {
+        'X-EXP-HALAL': {
+            'name': 'HALAL',
+            'products': ['TOKAJ-MUSCAT', 'PATO-130', 'BACALAO-200', 'ASADA-250', 'PIMIENTO-95', 'BLANCOS-4FRUTOS', 'ACEITE-VIRGEN'],
+            'category': 'halal',
+            'dietary': ['halal'],
+            'price': 72.60,
+            'description': 'Complete halal-compliant premium selection from IDOM'
+        },
+        'X-EXP-BACALAO': {
+            'name': 'Experiencia Gastronómica de Bacalao Personalizada Idom',
+            'products': ['BACALAO-200', 'ACEITE-OLIVA-200', 'ASADA-CARBON-250', 'GELEE-PIMIENTO-95'],
+            'category': 'seafood',
+            'price': 64.48,
+            'description': 'Premium cod experience with artisanal accompaniments'
+        },
+        'X-EXP-VEGETARIANA': {
+            'name': 'Experiencia Gastronómica Vegetariana Personalizada Idom',
+            'products': ['ALCACHOFA-180', 'BERENJENA-90', 'HIERBAS-PROVENZA-180', 'TORTA-CASAR-100', 'PERLAS-CHOCOLATE', 'COOKIES-CHOCOLATE', 'PASTAS-VEGANAS'],
+            'category': 'vegetarian',
+            'dietary': ['vegetarian'],
+            'price': 64.48,
+            'description': 'Gourmet vegetarian selection'
+        },
+        'X-EXP-CHEESECAKE': {
+            'name': 'Experiencia Gastronómica Cheesecake',
+            'products': ['CHEESECAKE-130', 'GRANADA-70', 'WAFFLE-200', 'CAJA-CARTON'],
+            'category': 'dessert',
+            'price': 45.00,
+            'description': 'Artisanal cheesecake experience'
+        },
+        'X-EXP-GILDA': {
+            'name': 'EXP- GILDA',
+            'products': ['ANCHOA-CONSORCIO', 'LB-ACEITU-140', 'GUIN-AGIN212'],
+            'category': 'aperitif',
+            'price': 0.46,
+            'description': 'Traditional Basque gilda experience'
+        },
+        'X-EXP-LUBINA': {
+            'name': 'EXP LUBINA',
+            'products': ['LUB-CV200', 'ENSA-MIX-EMP135', 'LB-CHU-PIMAMA95'],
+            'category': 'seafood',
+            'price': 0.46,
+            'description': 'Premium sea bass experience'
+        },
+        'X-EXP-BON-TOMATE': {
+            'name': 'EXP BONITO',
+            'products': ['BONITO', 'LB-SALSA-TOMATE', 'LB-HONGO-BOL212'],
+            'category': 'seafood',
+            'price': 0.46,
+            'description': 'Bonito tuna with tomato and boletus'
+        }
+    }
+    
     # ================== STATE MANAGEMENT ==================
     
     state = fields.Selection([
