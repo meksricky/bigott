@@ -62,7 +62,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             'description': 'Bonito tuna with tomato and boletus'
         }
     }
-    
+
     # ================== STATE MANAGEMENT ==================
     
     state = fields.Selection([
@@ -680,32 +680,38 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ================== ACTION METHODS ==================
     
     def action_generate_recommendation(self):
-        """Generate recommendation using the integrated recommender"""
+        """Generate recommendation with strict validation"""
         self.ensure_one()
         
         # Validate inputs
         if not self.partner_id:
             raise UserError("Please select a client")
         
+        if self.target_budget and self.target_budget < 50:
+            raise UserError("Minimum budget is €50")
+        
         # Update state
         self.state = 'generating'
         
         try:
-            # Prepare dietary restrictions (comprehensive)
+            # Prepare dietary restrictions
             dietary = self._prepare_dietary_restrictions()
             
-            # Build final notes (will be parsed by Ollama in recommender)
+            # Build final notes
             final_notes = self._prepare_final_notes()
             
             # Log the generation request
-            self._log_generation_request(dietary, final_notes)
+            _logger.info(f"""
+            ========== GENERATION REQUEST ==========
+            Client: {self.partner_id.name}
+            Budget: €{self.target_budget:.2f}
+            Product Count: {self.product_count if self.specify_product_count else 'Auto'}
+            Dietary: {dietary}
+            Composition Type: {self.composition_type}
+            ========================================
+            """)
             
             # Generate recommendation
-            # The recommender will:
-            # 1. Parse notes with Ollama
-            # 2. Merge requirements from all sources
-            # 3. Apply business rules if applicable
-            # 4. Enforce product count and budget
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget if self.target_budget else 0,
@@ -714,7 +720,94 @@ class OllamaRecommendationWizard(models.TransientModel):
                 composition_type=self.composition_type
             )
             
+            # CRITICAL: Validate the result before accepting it
             if result.get('success'):
+                composition_id = result.get('composition_id')
+                
+                # Load the composition and validate it
+                composition = self.env['gift.composition'].browse(composition_id)
+                
+                # Check 1: Validate actual cost
+                actual_cost = composition.actual_cost or 0
+                if actual_cost == 0:
+                    # Calculate from products
+                    actual_cost = sum(p.list_price for p in composition.product_ids)
+                
+                # Check 2: Validate against target budget
+                if self.target_budget > 0:
+                    variance = abs(actual_cost - self.target_budget) / self.target_budget
+                    
+                    # If variance is more than 50%, something is wrong
+                    if variance > 0.5:
+                        _logger.error(f"""
+                        ❌ INVALID COMPOSITION DETECTED:
+                        Target: €{self.target_budget:.2f}
+                        Actual: €{actual_cost:.2f}
+                        Variance: {variance*100:.1f}%
+                        """)
+                        
+                        # Check for zero-price products
+                        zero_price_products = []
+                        for product in composition.product_ids:
+                            if product.list_price < 10:
+                                zero_price_products.append(f"{product.name}: €{product.list_price:.2f}")
+                        
+                        if zero_price_products:
+                            error_msg = f"""
+                            ⚠️ Products with invalid prices detected:
+                            {chr(10).join(zero_price_products[:5])}
+                            
+                            Please run the database fix to update product prices.
+                            """
+                            
+                            # Delete the invalid composition
+                            composition.unlink()
+                            
+                            raise UserError(error_msg)
+                        else:
+                            # Try again with stricter parameters
+                            _logger.warning("Retrying with stricter price filters...")
+                            
+                            # Add minimum price requirement to notes
+                            enhanced_notes = final_notes + " Minimum price per product: €10."
+                            
+                            # Retry generation
+                            retry_result = self.recommender_id.generate_gift_recommendations(
+                                partner_id=self.partner_id.id,
+                                target_budget=self.target_budget,
+                                client_notes=enhanced_notes,
+                                dietary_restrictions=dietary,
+                                composition_type=self.composition_type
+                            )
+                            
+                            if retry_result.get('success'):
+                                # Delete the first invalid composition
+                                composition.unlink()
+                                result = retry_result
+                            else:
+                                raise UserError(f"""
+                                Generation failed: Budget target €{self.target_budget:.2f} cannot be met.
+                                Actual result was only €{actual_cost:.2f}.
+                                
+                                Please check that products have valid prices in the database.
+                                """)
+                
+                # Check 3: Validate product count
+                actual_count = len(composition.product_ids)
+                if self.specify_product_count and self.product_count:
+                    if actual_count != self.product_count:
+                        _logger.warning(f"Product count mismatch: {actual_count} vs {self.product_count}")
+                
+                # Check 4: Log each product for debugging
+                _logger.info("=== FINAL PRODUCTS ===")
+                total_price = 0
+                for i, product in enumerate(composition.product_ids, 1):
+                    price = product.list_price
+                    total_price += price
+                    _logger.info(f"{i}. {product.name[:40]}: €{price:.2f}")
+                _logger.info(f"TOTAL: €{total_price:.2f}")
+                
+                # If we got here, the composition is valid
                 self._process_success_result(result)
                 
                 # Show success and open the composition
@@ -733,7 +826,24 @@ class OllamaRecommendationWizard(models.TransientModel):
             _logger.error(f"Generation failed with exception: {e}")
             self.state = 'error'
             self.error_message = str(e)
-            raise
+            
+            # Provide helpful error message
+            if "invalid prices" in str(e).lower():
+                raise UserError(f"""
+                {str(e)}
+                
+                Quick Fix:
+                1. Go to Products → Products
+                2. Filter for: Sale OK = Yes, List Price < 10
+                3. Update all prices to at least €10
+                
+                Or run this SQL:
+                UPDATE product_template 
+                SET list_price = 10 
+                WHERE sale_ok = true AND list_price < 10;
+                """)
+            else:
+                raise
     
     def _prepare_dietary_restrictions(self):
         """Prepare comprehensive dietary restrictions list"""
