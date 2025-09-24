@@ -457,14 +457,16 @@ class OllamaGiftRecommender(models.Model):
             return products
         min_budget = budget * (1 - tolerance)
         max_budget = budget * (1 + tolerance)
-        total = sum(p.list_price for p in products)
+        # Remove any zero or negative price items before enforcing
+        products = [p for p in products if float(getattr(p, 'list_price', 0) or 0) > 0]
+        total = sum(float(p.list_price) for p in products)
         if min_budget <= total <= max_budget:
             return products
         locked_ids = set((context.get('locked_attributes') or {}).get('experience_item_ids', set()) or [])
         exclude_ids = [p.id for p in products] + list(locked_ids)
         pool = self._get_smart_product_pool(budget, dietary, {**context, 'exclude_ids': exclude_ids})
         products_mut = list(products)
-        pool_sorted_low = sorted(pool, key=lambda p: p.list_price)
+        pool_sorted_low = sorted(pool, key=lambda p: float(p.list_price))
         pool_sorted_high = list(reversed(pool_sorted_low))
         max_iters = 20
         it = 0
@@ -472,22 +474,22 @@ class OllamaGiftRecommender(models.Model):
             it += 1
             replace_idx = None
             if total > max_budget:
-                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: ip[1].list_price, reverse=True)
+                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: float(ip[1].list_price), reverse=True)
                 if not sorted_existing:
                     break
                 replace_idx, to_replace = sorted_existing[0]
-                candidate = next((p for p in pool_sorted_low if p.list_price < to_replace.list_price and self._check_dietary_compliance(p, dietary)), None)
+                candidate = next((p for p in pool_sorted_low if float(p.list_price) < float(to_replace.list_price) and self._check_dietary_compliance(p, dietary)), None)
             else:
-                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: ip[1].list_price)
+                sorted_existing = sorted([(i, p) for i,p in enumerate(products_mut) if p.id not in locked_ids], key=lambda ip: float(ip[1].list_price))
                 if not sorted_existing:
                     break
                 replace_idx, to_replace = sorted_existing[0]
-                candidate = next((p for p in pool_sorted_high if p.list_price > to_replace.list_price and self._check_dietary_compliance(p, dietary)), None)
+                candidate = next((p for p in pool_sorted_high if float(p.list_price) > float(to_replace.list_price) and self._check_dietary_compliance(p, dietary)), None)
             if not candidate:
                 break
-            total -= products_mut[replace_idx].list_price
+            total -= float(products_mut[replace_idx].list_price)
             products_mut[replace_idx] = candidate
-            total += candidate.list_price
+            total += float(candidate.list_price)
             exclude_ids.append(candidate.id)
         return products_mut
 
@@ -1224,6 +1226,12 @@ class OllamaGiftRecommender(models.Model):
             _logger.error("❌ No products available for selection")
             return []
         
+        # Remove any zero or negative price items before optimizing
+        products = [p for p in products if float(getattr(p, 'list_price', 0) or 0) > 0]
+        if not products:
+            _logger.error("❌ No valid (priced) products available after filtering")
+            return []
+        
         # Critical budget enforcement
         flexibility = flexibility if flexibility else 15
         min_budget = budget * 0.85  # HARD MINIMUM: 85% of target
@@ -1507,7 +1515,7 @@ Extract and return ONLY a valid JSON object with these fields:
                 ('name', 'not ilike', 'pork')
             ])
         
-        # Exclude explicitly provided ids (e.g., experience items or already selected)
+        # Exclude explicitly provided ids (experience items / reused)
         exclude_ids = list(set((context or {}).get('exclude_ids', []) or []))
         locked_attrs = (context or {}).get('locked_attributes') or {}
         exp_item_ids = list(set(locked_attrs.get('experience_item_ids', set()) or []))
@@ -1518,7 +1526,7 @@ Extract and return ONLY a valid JSON object with these fields:
         products = self.env['product.template'].sudo().search(domain, limit=1000)
         
         # Double-check: Filter out any 0-price products that slipped through
-        valid_products = products.filtered(lambda p: p.list_price > 0)
+        valid_products = products.filtered(lambda p: float(getattr(p, 'list_price', 0) or 0) > 0)
         
         # Add randomization to avoid same product selection
         if len(valid_products) > 20:

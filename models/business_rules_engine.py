@@ -555,10 +555,20 @@ class BusinessRulesEngine(models.Model):
         resolved: List[Any] = []
         Product = self.env['product.template'].sudo()
         for code in product_codes:
-            product = Product.search([('default_code', '=', code), ('sale_ok', '=', True), ('active', '=', True)], limit=1)
+            product = Product.search([
+                ('default_code', '=', code),
+                ('sale_ok', '=', True),
+                ('active', '=', True),
+                ('list_price', '>', 0)
+            ], limit=1)
             if not product:
                 # Fallback: try name ilike
-                product = Product.search([('name', 'ilike', code), ('sale_ok', '=', True), ('active', '=', True)], limit=1)
+                product = Product.search([
+                    ('name', 'ilike', code),
+                    ('sale_ok', '=', True),
+                    ('active', '=', True),
+                    ('list_price', '>', 0)
+                ], limit=1)
             if product and self._check_stock_availability(product):
                 resolved.append(product)
         return resolved
