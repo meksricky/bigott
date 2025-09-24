@@ -11,6 +11,15 @@ class BusinessRulesEngine(models.Model):
     _name = 'business.rules.engine'
     _description = 'Le Biggot Business Rules Engine for Gift Compositions'
     
+    def _validate_product_price(self, product):
+        """CRITICAL: Validate product has a meaningful price"""
+        try:
+            price = float(product.list_price)
+            return price >= 10.0  # Minimum €10 per product
+        except (ValueError, TypeError, AttributeError):
+            _logger.warning(f"Invalid price for product {product.name if product else 'unknown'}")
+            return False
+    
     def apply_composition_rules(self, partner_id, target_year, last_composition_products=None):
         """
         Apply business rules R1-R6 for gift composition
@@ -19,10 +28,30 @@ class BusinessRulesEngine(models.Model):
         
         if not last_composition_products:
             # New client or no history - generate fresh composition
-            return self._generate_fresh_composition(partner_id, target_year)
+            result = self._generate_fresh_composition(partner_id, target_year)
+        else:
+            # Existing client - apply transformation rules
+            result = self._apply_transformation_rules(partner_id, target_year, last_composition_products)
         
-        # Existing client - apply transformation rules
-        return self._apply_transformation_rules(partner_id, target_year, last_composition_products)
+        # CRITICAL: Final validation - remove any zero-price products that slipped through
+        valid_products = []
+        removed_count = 0
+        for product in result.get('products', []):
+            if self._validate_product_price(product):
+                valid_products.append(product)
+            else:
+                _logger.error(f"FINAL CHECK: Removing {product.name} with invalid price €{product.list_price}")
+                removed_count += 1
+        
+        result['products'] = valid_products
+        
+        # Log summary
+        total = sum(p.list_price for p in valid_products)
+        _logger.info(f"Business Rules Result: {len(valid_products)} products, Total: €{total:.2f}")
+        if removed_count > 0:
+            _logger.warning(f"Removed {removed_count} products with invalid prices")
+        
+        return result
     
     def _apply_transformation_rules(self, partner_id, target_year, last_products):
         """Apply R1-R6 transformation rules to last year's composition"""
@@ -105,6 +134,11 @@ class BusinessRulesEngine(models.Model):
         categories = defaultdict(list)
         
         for product in products:
+            # Skip products with invalid prices
+            if not self._validate_product_price(product):
+                _logger.warning(f"Skipping categorization for {product.name} - invalid price €{product.list_price}")
+                continue
+                
             # R1: Exact repeat beverages
             if hasattr(product, 'beverage_family') and product.beverage_family:
                 if product.beverage_family in ['cava', 'champagne', 'vermouth', 'tokaj', 'tokaji']:
@@ -139,23 +173,38 @@ class BusinessRulesEngine(models.Model):
         return categories
     
     def _apply_rule_r1(self, products):
-        """R1: Repeat exact products for Cava/Champagne/Vermouth/Tokaj"""
+        """R1: Repeat exact products for Cava/Champagne/Vermouth/Tokaj - WITH PRICE VALIDATION"""
         selected_products = []
         rule_logs = []
         
         for product in products:
-            # Check stock availability
-            if self._check_stock_availability(product):
+            # CRITICAL: Check price first
+            if not self._validate_product_price(product):
+                _logger.error(f"R1: Skipping {product.name} - invalid price €{product.list_price}")
+                # Find substitute with valid price
+                substitute = self._find_exact_substitute_with_price(product)
+                if substitute:
+                    selected_products.append(substitute)
+                    rule_logs.append({
+                        'rule': 'R1',
+                        'action': 'substitute_price',
+                        'original': product.name,
+                        'substitute': substitute.name,
+                        'price': substitute.list_price,
+                        'reason': f'Original had invalid price, substituted'
+                    })
+            elif self._check_stock_availability(product):
                 selected_products.append(product)
                 rule_logs.append({
                     'rule': 'R1',
                     'action': 'repeat_exact',
                     'product': product.name,
+                    'price': product.list_price,
                     'reason': f'Repeated exact {product.beverage_family} as per R1'
                 })
             else:
                 # Find exact substitute (same product, different supplier/vintage)
-                substitute = self._find_exact_substitute(product)
+                substitute = self._find_exact_substitute_with_price(product)
                 if substitute:
                     selected_products.append(substitute)
                     rule_logs.append({
@@ -163,6 +212,7 @@ class BusinessRulesEngine(models.Model):
                         'action': 'substitute_exact',
                         'original': product.name,
                         'substitute': substitute.name,
+                        'price': substitute.list_price,
                         'reason': 'Stock unavailable, found exact substitute'
                     })
                 else:
@@ -170,17 +220,22 @@ class BusinessRulesEngine(models.Model):
                         'rule': 'R1',
                         'action': 'failed',
                         'product': product.name,
-                        'reason': 'No exact substitute available'
+                        'reason': 'No exact substitute available with valid price'
                     })
         
         return selected_products, rule_logs
     
     def _apply_rule_r2(self, wine_products):
-        """R2: Wines - same color, different brand, same size & grade"""
+        """R2: Wines - same color, different brand, same size & grade - WITH PRICE VALIDATION"""
         selected_products = []
         rule_logs = []
         
         for wine in wine_products:
+            # CRITICAL: Skip wines with invalid prices
+            if not self._validate_product_price(wine):
+                _logger.error(f"R2: Wine {wine.name} has invalid price €{wine.list_price}")
+                continue
+                
             # Determine wine color
             wine_color = wine.wine_color if hasattr(wine, 'wine_color') else None
             if not wine_color:
@@ -193,11 +248,13 @@ class BusinessRulesEngine(models.Model):
                     elif wine.beverage_family == 'rose_wine':
                         wine_color = 'rose'
             
-            # Search for different brand with same attributes
+            # Search for different brand with same attributes AND valid price
             substitute_domain = [
                 ('lebiggot_category', '=', 'wines'),
                 ('active', '=', True),
-                ('sale_ok', '=', True)
+                ('sale_ok', '=', True),
+                ('list_price', '>=', max(10.0, wine.list_price * 0.7)),  # Similar price range
+                ('list_price', '<=', wine.list_price * 1.3)
             ]
             
             if wine_color:
@@ -215,36 +272,39 @@ class BusinessRulesEngine(models.Model):
             substitutes = self.env['product.template'].search(substitute_domain)
             
             if substitutes:
-                # Pick first available substitute
+                # Pick first available substitute with valid price
                 for substitute in substitutes:
-                    if self._check_stock_availability(substitute):
+                    if self._validate_product_price(substitute) and self._check_stock_availability(substitute):
                         selected_products.append(substitute)
                         rule_logs.append({
                             'rule': 'R2',
                             'action': 'brand_change',
                             'original': f"{wine.name} ({wine.brand if hasattr(wine, 'brand') else 'N/A'})",
                             'substitute': f"{substitute.name} ({substitute.brand})",
+                            'price': substitute.list_price,
                             'attributes_maintained': f"{wine_color or 'unknown'} wine, {wine.volume_ml if hasattr(wine, 'volume_ml') else 'N/A'}ml, {wine.product_grade}"
                         })
                         break
                 else:
-                    # No substitute available, keep original if in stock
-                    if self._check_stock_availability(wine):
+                    # No substitute available, keep original if in stock and has valid price
+                    if self._validate_product_price(wine) and self._check_stock_availability(wine):
                         selected_products.append(wine)
                         rule_logs.append({
                             'rule': 'R2',
                             'action': 'keep_original',
                             'product': wine.name,
-                            'reason': 'No alternative brand available'
+                            'price': wine.list_price,
+                            'reason': 'No alternative brand available with valid price'
                         })
             else:
                 # Keep original if no alternatives exist
-                if self._check_stock_availability(wine):
+                if self._validate_product_price(wine) and self._check_stock_availability(wine):
                     selected_products.append(wine)
                     rule_logs.append({
                         'rule': 'R2',
                         'action': 'keep_original',
                         'product': wine.name,
+                        'price': wine.list_price,
                         'reason': 'No alternative brands found'
                     })
         
@@ -262,21 +322,27 @@ class BusinessRulesEngine(models.Model):
             # Prefer wizard-defined experiences dictionary if available
             experience_items = self._choose_experience_from_dictionary(original_count)
             if experience_items:
-                selected_products.extend(experience_items)
-                rule_logs.append({
-                    'rule': 'R3',
-                    'action': 'experience_replacement',
-                    'original': exp_product.name,
-                    'new_experience': 'Wizard: EXPERIENCES_DATA',
-                    'product_count': original_count
-                })
-                continue
+                # Validate all items have valid prices
+                all_valid = all(self._validate_product_price(item) for item in experience_items)
+                if all_valid:
+                    selected_products.extend(experience_items)
+                    rule_logs.append({
+                        'rule': 'R3',
+                        'action': 'experience_replacement',
+                        'original': exp_product.name,
+                        'new_experience': 'Wizard: EXPERIENCES_DATA',
+                        'product_count': original_count,
+                        'total_price': sum(item.list_price for item in experience_items)
+                    })
+                    continue
             
             # Fallback to product-based bundles in database
             new_experience = self._find_new_experience_bundle(original_count, exclude_ids=[exp_product.id])
-            if new_experience:
+            if new_experience and self._validate_product_price(new_experience):
                 if hasattr(new_experience, 'experience_product_ids'):
-                    selected_products.extend(new_experience.experience_product_ids)
+                    # Validate all products in bundle
+                    if all(self._validate_product_price(p) for p in new_experience.experience_product_ids):
+                        selected_products.extend(new_experience.experience_product_ids)
                 else:
                     selected_products.append(new_experience)
                 rule_logs.append({
@@ -284,16 +350,20 @@ class BusinessRulesEngine(models.Model):
                     'action': 'experience_replacement',
                     'original': exp_product.name,
                     'new_experience': new_experience.name,
-                    'product_count': original_count
+                    'product_count': original_count,
+                    'price': new_experience.list_price
                 })
             else:
-                selected_products.append(exp_product)
-                rule_logs.append({
-                    'rule': 'R3',
-                    'action': 'keep_original',
-                    'product': exp_product.name,
-                    'reason': 'No new experience bundle available'
-                })
+                # Keep original if valid price
+                if self._validate_product_price(exp_product):
+                    selected_products.append(exp_product)
+                    rule_logs.append({
+                        'rule': 'R3',
+                        'action': 'keep_original',
+                        'product': exp_product.name,
+                        'price': exp_product.list_price,
+                        'reason': 'No new experience bundle available with valid price'
+                    })
         
         return selected_products, rule_logs
 
@@ -311,7 +381,7 @@ class BusinessRulesEngine(models.Model):
         return selected_products, rule_logs, {'has_foie': has_foie}
     
     def _apply_rule_r4(self, charcuterie_products):
-        """R4: Paletilla & Charcuterie repeated exactly"""
+        """R4: Paletilla & Charcuterie repeated exactly - WITH PRICE VALIDATION"""
         selected_products = []
         rule_logs = []
         
@@ -319,17 +389,38 @@ class BusinessRulesEngine(models.Model):
             # Paletilla MUST be repeated
             is_paletilla = hasattr(product, 'is_paletilla') and product.is_paletilla
             
-            if self._check_stock_availability(product):
+            # Check price first
+            if not self._validate_product_price(product):
+                substitute = self._find_exact_substitute_with_price(product)
+                if substitute:
+                    selected_products.append(substitute)
+                    rule_logs.append({
+                        'rule': 'R4',
+                        'action': 'substitute_price',
+                        'original': product.name,
+                        'substitute': substitute.name,
+                        'price': substitute.list_price,
+                        'reason': 'Invalid price, found substitute'
+                    })
+                elif is_paletilla:
+                    rule_logs.append({
+                        'rule': 'R4',
+                        'action': 'CRITICAL_FAILURE',
+                        'product': product.name,
+                        'reason': 'PALETILLA WITH INVALID PRICE - MUST BE RESOLVED'
+                    })
+            elif self._check_stock_availability(product):
                 selected_products.append(product)
                 rule_logs.append({
                     'rule': 'R4',
                     'action': 'repeat_exact',
                     'product': product.name,
+                    'price': product.list_price,
                     'reason': f"{'Paletilla' if is_paletilla else 'Charcuterie'} repeated exactly as per R4"
                 })
             else:
                 # Find exact substitute
-                substitute = self._find_exact_substitute(product)
+                substitute = self._find_exact_substitute_with_price(product)
                 if substitute:
                     selected_products.append(substitute)
                     rule_logs.append({
@@ -337,6 +428,7 @@ class BusinessRulesEngine(models.Model):
                         'action': 'substitute_exact',
                         'original': product.name,
                         'substitute': substitute.name,
+                        'price': substitute.list_price,
                         'reason': 'Stock unavailable, found exact substitute'
                     })
                 elif is_paletilla:
@@ -351,11 +443,16 @@ class BusinessRulesEngine(models.Model):
         return selected_products, rule_logs
     
     def _apply_rule_r5(self, foie_products):
-        """R5: Foie alternates Duck ↔ Goose"""
+        """R5: Foie alternates Duck ↔ Goose - WITH PRICE VALIDATION"""
         selected_products = []
         rule_logs = []
         
         for foie in foie_products:
+            # Skip products with invalid prices
+            if not self._validate_product_price(foie):
+                _logger.error(f"R5: Foie {foie.name} has invalid price €{foie.list_price}")
+                continue
+                
             # Determine current variant and target variant
             current_variant = getattr(foie, 'foie_variant', None)
             
@@ -370,45 +467,60 @@ class BusinessRulesEngine(models.Model):
             
             target_variant = 'goose' if current_variant == 'duck' else 'duck'
             
-            # Search for opposite variant
+            # Search for opposite variant with valid price
             substitute_domain = [
                 ('lebiggot_category', '=', 'foie_gras'),
                 ('foie_variant', '=', target_variant),
                 ('product_grade', '=', foie.product_grade),
                 ('active', '=', True),
-                ('sale_ok', '=', True)
+                ('sale_ok', '=', True),
+                ('list_price', '>=', 10.0)  # Minimum price
             ]
             
             substitutes = self.env['product.template'].search(substitute_domain)
             
-            if substitutes and self._check_stock_availability(substitutes[0]):
-                selected_products.append(substitutes[0])
+            # Find substitute with valid price
+            selected = None
+            for sub in substitutes:
+                if self._validate_product_price(sub) and self._check_stock_availability(sub):
+                    selected = sub
+                    break
+            
+            if selected:
+                selected_products.append(selected)
                 rule_logs.append({
                     'rule': 'R5',
                     'action': 'foie_alternation',
                     'original': f"{foie.name} ({current_variant})",
-                    'substitute': f"{substitutes[0].name} ({target_variant})",
+                    'substitute': f"{selected.name} ({target_variant})",
+                    'price': selected.list_price,
                     'reason': f'Alternated from {current_variant} to {target_variant}'
                 })
             else:
-                # Keep original if no alternative
-                if self._check_stock_availability(foie):
+                # Keep original if no alternative and has valid price
+                if self._validate_product_price(foie) and self._check_stock_availability(foie):
                     selected_products.append(foie)
                     rule_logs.append({
                         'rule': 'R5',
                         'action': 'keep_original',
                         'product': foie.name,
-                        'reason': f'No {target_variant} variant available'
+                        'price': foie.list_price,
+                        'reason': f'No {target_variant} variant available with valid price'
                     })
         
         return selected_products, rule_logs
     
     def _apply_rule_r6(self, sweet_products):
-        """R6: Lingote/Trufas repeat exact, Turrón keeps subtype & grade but brand may change"""
+        """R6: Lingote/Trufas repeat exact, Turrón keeps subtype & grade but brand may change - WITH PRICE VALIDATION"""
         selected_products = []
         rule_logs = []
         
         for sweet in sweet_products:
+            # Skip products with invalid prices
+            if not self._validate_product_price(sweet):
+                _logger.error(f"R6: Sweet {sweet.name} has invalid price €{sweet.list_price}")
+                continue
+                
             # Check if it's Lingote or Trufa leBigott (must repeat exactly)
             is_lingote = hasattr(sweet, 'is_lingote') and sweet.is_lingote
             is_trufa = hasattr(sweet, 'is_trufa_lebigott') and sweet.is_trufa_lebigott
@@ -421,11 +533,12 @@ class BusinessRulesEngine(models.Model):
                         'rule': 'R6',
                         'action': 'repeat_exact',
                         'product': sweet.name,
+                        'price': sweet.list_price,
                         'reason': f"{'Lingote' if is_lingote else 'Trufa leBigott'} repeated exactly as per R6"
                     })
                 else:
                     # Critical - these must be available
-                    substitute = self._find_exact_substitute(sweet)
+                    substitute = self._find_exact_substitute_with_price(sweet)
                     if substitute:
                         selected_products.append(substitute)
                         rule_logs.append({
@@ -433,6 +546,7 @@ class BusinessRulesEngine(models.Model):
                             'action': 'substitute_exact',
                             'original': sweet.name,
                             'substitute': substitute.name,
+                            'price': substitute.list_price,
                             'reason': 'Found exact substitute'
                         })
                 
@@ -448,7 +562,8 @@ class BusinessRulesEngine(models.Model):
                         ('sweets_subtype', '=', 'turron'),
                         ('product_grade', '=', sweet.product_grade),
                         ('active', '=', True),
-                        ('sale_ok', '=', True)
+                        ('sale_ok', '=', True),
+                        ('list_price', '>=', 10.0)  # Minimum price
                     ]
                     
                     if turron_style:
@@ -461,13 +576,21 @@ class BusinessRulesEngine(models.Model):
                     else:
                         substitutes = self.env['product.template'].search(substitute_domain)
                     
-                    if substitutes and self._check_stock_availability(substitutes[0]):
-                        selected_products.append(substitutes[0])
+                    # Find substitute with valid price
+                    selected = None
+                    for sub in substitutes:
+                        if self._validate_product_price(sub) and self._check_stock_availability(sub):
+                            selected = sub
+                            break
+                    
+                    if selected:
+                        selected_products.append(selected)
                         rule_logs.append({
                             'rule': 'R6',
                             'action': 'turron_variation',
                             'original': f"{sweet.name}",
-                            'substitute': f"{substitutes[0].name}",
+                            'substitute': f"{selected.name}",
+                            'price': selected.list_price,
                             'attributes_maintained': f"Turrón {turron_style or 'style'}, {sweet.product_grade}"
                         })
                     else:
@@ -478,6 +601,7 @@ class BusinessRulesEngine(models.Model):
                                 'rule': 'R6',
                                 'action': 'keep_original',
                                 'product': sweet.name,
+                                'price': sweet.list_price,
                                 'reason': 'No alternative turrón available'
                             })
                 else:
@@ -487,18 +611,27 @@ class BusinessRulesEngine(models.Model):
                         ('product_grade', '=', sweet.product_grade),
                         ('id', '!=', sweet.id),
                         ('active', '=', True),
-                        ('sale_ok', '=', True)
+                        ('sale_ok', '=', True),
+                        ('list_price', '>=', 10.0)  # Minimum price
                     ]
                     
-                    substitutes = self.env['product.template'].search(substitute_domain, limit=1)
+                    substitutes = self.env['product.template'].search(substitute_domain, limit=5)
                     
-                    if substitutes and self._check_stock_availability(substitutes[0]):
-                        selected_products.append(substitutes[0])
+                    # Find substitute with valid price
+                    selected = None
+                    for sub in substitutes:
+                        if self._validate_product_price(sub) and self._check_stock_availability(sub):
+                            selected = sub
+                            break
+                    
+                    if selected:
+                        selected_products.append(selected)
                         rule_logs.append({
                             'rule': 'R6',
                             'action': 'sweet_variation',
                             'original': sweet.name,
-                            'substitute': substitutes[0].name,
+                            'substitute': selected.name,
+                            'price': selected.list_price,
                             'reason': 'Sweet product varied for freshness'
                         })
                     else:
@@ -507,6 +640,7 @@ class BusinessRulesEngine(models.Model):
                             'rule': 'R6',
                             'action': 'keep_original',
                             'product': sweet.name,
+                            'price': sweet.list_price,
                             'reason': 'Keeping original sweet'
                         })
         
@@ -559,7 +693,7 @@ class BusinessRulesEngine(models.Model):
                 ('default_code', '=', code),
                 ('sale_ok', '=', True),
                 ('active', '=', True),
-                ('list_price', '>', 0)
+                ('list_price', '>=', 10.0)  # CRITICAL: Minimum price
             ], limit=1)
             if not product:
                 # Fallback: try name ilike
@@ -567,9 +701,9 @@ class BusinessRulesEngine(models.Model):
                     ('name', 'ilike', code),
                     ('sale_ok', '=', True),
                     ('active', '=', True),
-                    ('list_price', '>', 0)
+                    ('list_price', '>=', 10.0)  # CRITICAL: Minimum price
                 ], limit=1)
-            if product and self._check_stock_availability(product):
+            if product and self._validate_product_price(product) and self._check_stock_availability(product):
                 resolved.append(product)
         return resolved
 
@@ -587,7 +721,9 @@ class BusinessRulesEngine(models.Model):
             if len(products_list) == target_size:
                 resolved = self._resolve_experience_products(products_list)
                 if len(resolved) == target_size:
-                    candidates.append(resolved)
+                    # Validate all products have valid prices
+                    if all(self._validate_product_price(p) for p in resolved):
+                        candidates.append(resolved)
         # Pick first viable candidate for determinism
         return candidates[0] if candidates else []
 
@@ -627,7 +763,12 @@ class BusinessRulesEngine(models.Model):
             return products
     
     def _check_stock_availability(self, product, min_qty=1):
-        """Check if product has sufficient stock"""
+        """Check if product has sufficient stock - WITH PRICE VALIDATION"""
+        # FIRST check if product has valid price
+        if not self._validate_product_price(product):
+            _logger.warning(f"❌ Product {product.name} has invalid price: €{product.list_price}")
+            return False
+            
         # Check has_stock computed field if available
         if hasattr(product, 'has_stock'):
             return product.has_stock
@@ -648,19 +789,29 @@ class BusinessRulesEngine(models.Model):
         return False
     
     def _find_exact_substitute(self, product):
-        """Find exact substitute (same product, different supplier/lot/vintage)"""
+        """Find exact substitute (same product, different supplier/lot/vintage) - DEPRECATED"""
+        # Use the new method with price validation
+        return self._find_exact_substitute_with_price(product)
+    
+    def _find_exact_substitute_with_price(self, product):
+        """Find substitute with VALID PRICE (min €10)"""
         domain = [
             ('name', '=', product.name),
             ('lebiggot_category', '=', product.lebiggot_category),
             ('product_grade', '=', product.product_grade),
             ('id', '!=', product.id),
             ('active', '=', True),
-            ('sale_ok', '=', True)
+            ('sale_ok', '=', True),
+            ('list_price', '>=', 10.0),  # CRITICAL: Minimum price
+            ('qty_available', '>', 0)
         ]
         
         # Preserve critical attributes
         if hasattr(product, 'volume_ml') and product.volume_ml:
             domain.append(('volume_ml', '=', product.volume_ml))
+        
+        if hasattr(product, 'beverage_family') and product.beverage_family:
+            domain.append(('beverage_family', '=', product.beverage_family))
         
         if hasattr(product, 'is_paletilla') and product.is_paletilla:
             domain.append(('is_paletilla', '=', True))
@@ -668,8 +819,13 @@ class BusinessRulesEngine(models.Model):
         if hasattr(product, 'is_lingote') and product.is_lingote:
             domain.append(('is_lingote', '=', True))
         
-        substitutes = self.env['product.template'].search(domain, limit=1)
-        return substitutes[0] if substitutes and self._check_stock_availability(substitutes[0]) else None
+        substitutes = self.env['product.template'].search(domain, limit=5)
+        
+        for sub in substitutes:
+            if self._validate_product_price(sub) and self._check_stock_availability(sub):
+                return sub
+        
+        return None
     
     def _get_experience_product_count(self, experience_product):
         """Get number of products in an experience bundle"""
@@ -683,12 +839,13 @@ class BusinessRulesEngine(models.Model):
         return 3  # Default
     
     def _find_new_experience_bundle(self, product_count, exclude_ids=None):
-        """Find new experience bundle with same product count"""
+        """Find new experience bundle with same product count - WITH PRICE VALIDATION"""
         domain = [
             ('is_experience_only', '=', True),
             ('experience_product_count', '=', product_count),
             ('active', '=', True),
-            ('sale_ok', '=', True)
+            ('sale_ok', '=', True),
+            ('list_price', '>=', 10.0)  # Minimum price
         ]
         
         if exclude_ids:
@@ -696,25 +853,108 @@ class BusinessRulesEngine(models.Model):
         
         experiences = self.env['product.template'].search(domain)
         
-        # Find one with stock
+        # Find one with stock and valid price
         for exp in experiences:
-            if self._check_stock_availability(exp):
+            if self._validate_product_price(exp) and self._check_stock_availability(exp):
                 return exp
         
         return None
     
     def _generate_fresh_composition(self, partner_id, target_year):
-        """Generate fresh composition for new clients"""
+        """Generate fresh composition for new clients - WITH STRICT PRICE VALIDATION"""
+        
+        budget = 1000  # Default budget
+        min_price = 10.0  # Never select products under €10
+        max_price = budget * 0.4  # No single product over 40% of budget
+        
+        domain = [
+            ('sale_ok', '=', True),
+            ('active', '=', True),
+            ('list_price', '>=', min_price),
+            ('list_price', '<=', max_price),
+            ('qty_available', '>', 0)
+        ]
+        
+        products = self.env['product.template'].sudo().search(domain, limit=500)
+        
+        # CRITICAL: Double-validate prices
+        valid_products = []
+        for p in products:
+            if self._validate_product_price(p) and self._check_stock_availability(p):
+                valid_products.append(p)
+        
+        if not valid_products:
+            _logger.error("No valid products found for fresh composition!")
+            return {
+                'products': [],
+                'rule_applications': [{
+                    'rule': 'NEW_CLIENT',
+                    'action': 'failed',
+                    'reason': 'No products with valid prices found'
+                }],
+                'substitutions': [],
+                'locked_attributes': {}
+            }
+        
+        # Select a balanced mix
+        selected = []
+        categories_needed = {
+            'wine': 3,
+            'foie_gras': 1,
+            'charcuterie': 2,
+            'experience': 1,
+            'sweets': 2,
+            'other': 3
+        }
+        
+        for category, count in categories_needed.items():
+            cat_products = [p for p in valid_products if self._get_product_category(p) == category]
+            for product in cat_products[:count]:
+                if self._validate_product_price(product):
+                    selected.append(product)
+        
+        # If not enough products, add more from any category
+        while len(selected) < 12:
+            for p in valid_products:
+                if p not in selected and self._validate_product_price(p):
+                    selected.append(p)
+                    if len(selected) >= 12:
+                        break
+        
+        total = sum(p.list_price for p in selected)
+        
         return {
-            'products': [],
+            'products': selected,
             'rule_applications': [{
                 'rule': 'NEW_CLIENT',
                 'action': 'fresh_generation',
-                'reason': 'No previous history - generating fresh composition'
+                'reason': 'No previous history - generating fresh composition',
+                'product_count': len(selected),
+                'total_price': total
             }],
             'substitutions': [],
             'locked_attributes': {}
         }
+    
+    def _get_product_category(self, product):
+        """Categorize product for rules application"""
+        if hasattr(product, 'beverage_family'):
+            if product.beverage_family in ['wine', 'red_wine', 'white_wine', 'rose_wine']:
+                return 'wine'
+            elif product.beverage_family in ['cava', 'champagne']:
+                return 'champagne'
+        
+        if hasattr(product, 'lebiggot_category'):
+            if product.lebiggot_category == 'foie_gras':
+                return 'foie_gras'
+            elif product.lebiggot_category == 'charcuterie':
+                return 'charcuterie'
+            elif product.lebiggot_category == 'sweets':
+                return 'sweets'
+            elif product.lebiggot_category == 'experience':
+                return 'experience'
+        
+        return 'other'
     
     def validate_budget_guardrail(self, target_budget, actual_cost, tolerance=0.05):
         """Validate that actual cost is within ±5% of target budget"""
