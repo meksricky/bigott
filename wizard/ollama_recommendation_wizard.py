@@ -1,6 +1,7 @@
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import logging
+import json
 
 _logger = logging.getLogger(__name__)
 
@@ -13,66 +14,129 @@ class OllamaRecommendationWizard(models.TransientModel):
         'X-EXP-HALAL': {
             'name': 'HALAL',
             'products': ['TOKAJ-MUSCAT', 'PATO-130', 'BACALAO-200', 'ASADA-250', 'PIMIENTO-95', 'BLANCOS-4FRUTOS', 'ACEITE-VIRGEN'],
-            'category': 'halal',
-            'dietary': ['halal'],
+            'category': 'gastronomy',
+            'subcategory': 'halal',
+            'dietary': ['halal', 'no_pork', 'no_alcohol'],
             'price': 72.60,
-            'description': 'Complete halal-compliant premium selection from IDOM'
+            'description': 'Complete halal-compliant premium selection from IDOM',
+            'icon': '🥘',
+            'tags': ['halal', 'premium', 'cultural']
         },
         'X-EXP-BACALAO': {
             'name': 'Experiencia Gastronómica de Bacalao Personalizada Idom',
             'products': ['BACALAO-200', 'ACEITE-OLIVA-200', 'ASADA-CARBON-250', 'GELEE-PIMIENTO-95'],
-            'category': 'seafood',
+            'category': 'gastronomy',
+            'subcategory': 'seafood',
             'price': 64.48,
-            'description': 'Premium cod experience with artisanal accompaniments'
+            'description': 'Premium cod experience with artisanal accompaniments',
+            'icon': '🐟',
+            'tags': ['seafood', 'gourmet', 'artisanal']
         },
         'X-EXP-VEGETARIANA': {
             'name': 'Experiencia Gastronómica Vegetariana Personalizada Idom',
             'products': ['ALCACHOFA-180', 'BERENJENA-90', 'HIERBAS-PROVENZA-180', 'TORTA-CASAR-100', 'PERLAS-CHOCOLATE', 'COOKIES-CHOCOLATE', 'PASTAS-VEGANAS'],
-            'category': 'vegetarian',
+            'category': 'gastronomy',
+            'subcategory': 'vegetarian',
             'dietary': ['vegetarian'],
             'price': 64.48,
-            'description': 'Gourmet vegetarian selection'
+            'description': 'Gourmet vegetarian selection with artisanal treats',
+            'icon': '🥗',
+            'tags': ['vegetarian', 'healthy', 'sustainable']
         },
         'X-EXP-CHEESECAKE': {
             'name': 'Experiencia Gastronómica Cheesecake',
             'products': ['CHEESECAKE-130', 'GRANADA-70', 'WAFFLE-200', 'CAJA-CARTON'],
-            'category': 'dessert',
+            'category': 'gastronomy',
+            'subcategory': 'dessert',
             'price': 45.00,
-            'description': 'Artisanal cheesecake experience'
+            'description': 'Artisanal cheesecake experience with premium accompaniments',
+            'icon': '🍰',
+            'tags': ['dessert', 'sweet', 'artisanal']
         },
         'X-EXP-GILDA': {
             'name': 'EXP- GILDA',
             'products': ['ANCHOA-CONSORCIO', 'LB-ACEITU-140', 'GUIN-AGIN212'],
-            'category': 'aperitif',
-            'price': 0.46,
-            'description': 'Traditional Basque gilda experience'
+            'category': 'gastronomy',
+            'subcategory': 'aperitif',
+            'price': 34.50,
+            'description': 'Traditional Basque gilda experience with premium ingredients',
+            'icon': '🍢',
+            'tags': ['basque', 'traditional', 'aperitif']
         },
         'X-EXP-LUBINA': {
             'name': 'EXP LUBINA',
             'products': ['LUB-CV200', 'ENSA-MIX-EMP135', 'LB-CHU-PIMAMA95'],
-            'category': 'seafood',
-            'price': 0.46,
-            'description': 'Premium sea bass experience'
+            'category': 'gastronomy',
+            'subcategory': 'seafood',
+            'price': 48.75,
+            'description': 'Premium sea bass experience with gourmet sides',
+            'icon': '🐟',
+            'tags': ['seafood', 'mediterranean', 'fresh']
         },
         'X-EXP-BON-TOMATE': {
             'name': 'EXP BONITO',
             'products': ['BONITO', 'LB-SALSA-TOMATE', 'LB-HONGO-BOL212'],
-            'category': 'seafood',
-            'price': 0.46,
-            'description': 'Bonito tuna with tomato and boletus'
+            'category': 'gastronomy',
+            'subcategory': 'seafood',
+            'price': 52.30,
+            'description': 'Bonito tuna with tomato and boletus mushrooms',
+            'icon': '🍅',
+            'tags': ['seafood', 'mediterranean', 'seasonal']
+        },
+        # Wellness Experiences
+        'X-EXP-SPA-RELAX': {
+            'name': 'Spa & Relaxation Experience',
+            'products': [],
+            'category': 'wellness',
+            'subcategory': 'spa',
+            'price': 150.00,
+            'description': '2-hour spa session with massage and thermal circuit',
+            'icon': '💆',
+            'tags': ['spa', 'relaxation', 'wellness']
+        },
+        # Adventure Experiences
+        'X-EXP-WINE-TOUR': {
+            'name': 'Wine Tasting Tour',
+            'products': [],
+            'category': 'adventure',
+            'subcategory': 'wine',
+            'price': 85.00,
+            'description': 'Guided tour through premium wineries with tasting session',
+            'icon': '🍷',
+            'tags': ['wine', 'tour', 'tasting']
+        },
+        # Cultural Experiences
+        'X-EXP-MUSEUM': {
+            'name': 'Museum & Art Gallery Pass',
+            'products': [],
+            'category': 'culture',
+            'subcategory': 'art',
+            'price': 60.00,
+            'description': 'Annual pass to major museums and galleries',
+            'icon': '🎨',
+            'tags': ['culture', 'art', 'education']
         }
     }
 
-    # ================== STATE MANAGEMENT ==================
+    # ================== WIZARD STEP MANAGEMENT ==================
+    
+    wizard_step = fields.Selection([
+        ('client', 'Client Selection'),
+        ('budget', 'Budget & Requirements'),
+        ('composition', 'Composition Type'),
+        ('dietary', 'Dietary & Preferences'),
+        ('preview', 'Preview & Generate')
+    ], string='Current Step', default='client')
     
     state = fields.Selection([
         ('draft', 'Draft'),
+        ('preview', 'Preview'),
         ('generating', 'Generating'),
         ('done', 'Done'),
         ('error', 'Error')
     ], string='State', default='draft')
     
-    # ================== CLIENT & BUDGET FIELDS ==================
+    # ================== CLIENT FIELDS ==================
     
     partner_id = fields.Many2one(
         'res.partner', 
@@ -81,149 +145,169 @@ class OllamaRecommendationWizard(models.TransientModel):
         help="Select the client for whom to generate recommendations"
     )
     
+    client_segment = fields.Selection([
+        ('vip', '⭐ VIP Client'),
+        ('corporate', '🏢 Corporate'),
+        ('regular', '👤 Regular'),
+        ('new', '🆕 New Client')
+    ], string='Client Segment', compute='_compute_client_segment')
+    
+    # ================== BUDGET FIELDS ==================
+    
     currency_id = fields.Many2one(
         'res.currency',
         default=lambda self: self.env.company.currency_id
     )
     
+    budget_source = fields.Selection([
+        ('manual', 'Manual Entry'),
+        ('history', 'From History'),
+        ('notes', 'From Notes')
+    ], string='Budget Source', default='manual')
+    
     target_budget = fields.Float(
         string='Target Budget',
         default=1000.0,
-        help="Leave at 0 to auto-detect from history. The system will use notes > form > history."
+        help="Target budget for the gift composition"
     )
+    
+    budget_flexibility = fields.Selection([
+        ('strict', '±5% - Strict'),
+        ('normal', '±10% - Normal'),
+        ('flexible', '±15% - Flexible')
+    ], string='Budget Flexibility', default='normal')
     
     target_year = fields.Integer(
         string='Target Year',
         default=lambda self: fields.Date.today().year
     )
     
-    # ================== COMPOSITION SETTINGS ==================
+    # ================== COMPOSITION TYPE ==================
     
-    engine_type = fields.Selection([
-        ('custom', 'Custom'),
-        ('hybrid', 'Hybrid'),
-        ('experience', 'Experience')
-    ], string='Engine Type', default='custom')
+    composition_strategy = fields.Selection([
+        ('auto', '🤖 AI Auto-Select'),
+        ('custom', '🎨 Custom Mix'),
+        ('hybrid', '🍷 Wine-Focused'),
+        ('experience', '🎭 Experience-Based'),
+        ('seasonal', '🎄 Seasonal'),
+        ('themed', '🎪 Themed')
+    ], string='Composition Strategy', default='auto')
     
-    composition_type = fields.Selection([
-        ('custom', 'Custom'),
-        ('hybrid', 'Hybrid'),
-        ('experience', 'Experience')
-    ], string="Composition Type", default='custom',
-       help="Custom: Mixed products | Hybrid: Wine-focused | Experience: Activity-focused")
+    # Experience Selection
+    experience_category = fields.Selection([
+        ('gastronomy', '🍽️ Gastronomy'),
+        ('wellness', '💆 Wellness & Spa'),
+        ('adventure', '🎯 Adventure'),
+        ('culture', '🎨 Culture & Arts'),
+        ('luxury', '💎 Luxury')
+    ], string='Experience Category')
     
-    composition_display_type = fields.Char(
-        string='Composition Type',
-        compute='_compute_composition_display_type'
+    selected_experience_key = fields.Selection(
+        selection='_get_experience_selection',
+        string='Pre-defined Experience'
     )
     
-    # ================== PRODUCT COUNT SETTINGS ==================
-    
-    specify_product_count = fields.Boolean(
-        string="Specify Exact Product Count",
-        default=False,
-        help="Check to enforce exact product count. This will be strictly enforced."
-    )
-    
-    product_count = fields.Integer(
-        string="Number of Products",
-        default=12,
-        help="Exact number of products to include. Will be STRICTLY enforced if checkbox is checked."
-    )
-    
-    # ================== EXPERIENCE FIELDS (PRESERVED) ==================
-    
-    experience_category_filter = fields.Selection([
-        ('all', 'All Categories'),
-        ('gastronomy', 'Gastronomy'),
-        ('wellness', 'Wellness & Spa'),
-        ('adventure', 'Adventure'),
-        ('culture', 'Culture & Arts'),
-        ('luxury', 'Luxury Experiences')
-    ], string='Experience Category', default='all')
-    
-    selected_experience = fields.Many2one(
+    custom_experience_id = fields.Many2one(
         'product.template',
-        string='Selected Experience',
+        string='Custom Experience',
         domain="[('is_experience', '=', True)]"
     )
     
-    experience_preview = fields.Html(
-        string='Experience Preview',
-        compute='_compute_experience_preview'
+    # Theme Selection
+    gift_theme = fields.Selection([
+        ('christmas', '🎄 Christmas'),
+        ('corporate', '🏢 Corporate'),
+        ('birthday', '🎂 Birthday'),
+        ('anniversary', '💍 Anniversary'),
+        ('thank_you', '🙏 Thank You'),
+        ('celebration', '🎉 Celebration')
+    ], string='Gift Theme')
+    
+    # ================== PRODUCT REQUIREMENTS ==================
+    
+    product_count_mode = fields.Selection([
+        ('auto', 'Auto (12-15)'),
+        ('exact', 'Exact Count'),
+        ('range', 'Range')
+    ], string='Product Count Mode', default='auto')
+    
+    product_count_exact = fields.Integer(
+        string="Exact Count",
+        default=12
     )
     
-    # ================== DIETARY RESTRICTIONS (COMPREHENSIVE) ==================
-    
-    dietary_restrictions = fields.Selection([
-        ('none', 'None'),
-        ('halal', 'Halal'),
-        ('vegan', 'Vegan'),
-        ('vegetarian', 'Vegetarian'),
-        ('gluten_free', 'Gluten Free'),
-        ('non_alcoholic', 'Non-Alcoholic'),
-        ('multiple', 'Multiple Restrictions')
-    ], string='Dietary Restrictions', default='none')
-    
-    dietary_restrictions_text = fields.Text(
-        string='Additional Dietary Details',
-        help="Enter additional restrictions separated by commas (e.g., 'no nuts, lactose-free')"
+    product_count_min = fields.Integer(
+        string="Min Products",
+        default=10
     )
     
-    # Individual dietary checkboxes (for fine control)
-    is_halal = fields.Boolean(string='Halal')
-    is_vegan = fields.Boolean(string='Vegan')
-    is_vegetarian = fields.Boolean(string='Vegetarian')
-    is_gluten_free = fields.Boolean(string='Gluten Free')
-    is_non_alcoholic = fields.Boolean(string='Non-Alcoholic')
-    
-    # ================== CLIENT NOTES & HISTORY ==================
-    
-    client_notes = fields.Text(
-        string='Client Notes & Preferences',
-        placeholder="You can specify:\n"
-                   "• Budget (overrides form value)\n"
-                   "• Product count (e.g., '23 products')\n"
-                   "• Categories (e.g., 'include 3 wines, 2 cheeses')\n"
-                   "• Special requests\n"
-                   "• Exclusions (e.g., 'no chocolate')",
-        help="These notes are intelligently parsed and take PRECEDENCE over form values"
+    product_count_max = fields.Integer(
+        string="Max Products",
+        default=15
     )
     
-    client_info = fields.Html(
-        string='Client Information',
-        compute='_compute_client_info'
+    # ================== DIETARY & PREFERENCES ==================
+    
+    dietary_profile = fields.Selection([
+        ('none', '✅ No Restrictions'),
+        ('halal', '☪️ Halal'),
+        ('vegan', '🌱 Vegan'),
+        ('vegetarian', '🥬 Vegetarian'),
+        ('gluten_free', '🌾 Gluten Free'),
+        ('non_alcoholic', '🚫 Non-Alcoholic'),
+        ('custom', '⚙️ Custom Mix')
+    ], string='Dietary Profile', default='none')
+    
+    dietary_details = fields.Text(
+        string='Dietary Details',
+        placeholder="Specify any allergies, restrictions, or preferences..."
     )
     
-    client_dietary_history = fields.Char(
-        string='Previous Dietary Restrictions',
-        compute='_compute_client_dietary_history'
+    # Category Preferences
+    include_wine = fields.Boolean(string='Include Wine', default=True)
+    include_spirits = fields.Boolean(string='Include Spirits')
+    include_gourmet = fields.Boolean(string='Include Gourmet Food', default=True)
+    include_sweets = fields.Boolean(string='Include Sweets', default=True)
+    include_experiences = fields.Boolean(string='Include Experiences')
+    
+    # ================== CLIENT CONTEXT ==================
+    
+    occasion_notes = fields.Text(
+        string='Occasion & Context',
+        placeholder="What's the occasion? Any special requirements?"
     )
     
-    client_history_summary = fields.Html(
-        string="Client History & Recommendations",
-        compute='_compute_client_history',
+    client_preferences = fields.Text(
+        string='Known Preferences',
+        compute='_compute_client_preferences'
+    )
+    
+    # ================== PREVIEW FIELDS ==================
+    
+    preview_generated = fields.Boolean(
+        string='Preview Generated',
+        default=False
+    )
+    
+    preview_html = fields.Html(
+        string='Composition Preview',
         readonly=True
     )
     
-    # ================== BUSINESS RULES AWARENESS ==================
-    
-    has_previous_orders = fields.Boolean(
-        compute='_compute_has_previous_orders'
+    preview_products = fields.Many2many(
+        'product.template',
+        'wizard_preview_products_rel',
+        string='Preview Products'
     )
     
-    has_last_year_data = fields.Boolean(
-        compute='_compute_has_last_year_data'
+    preview_total = fields.Float(
+        string='Preview Total',
+        compute='_compute_preview_total'
     )
     
-    business_rules_applicable = fields.Boolean(
-        string='Business Rules Applicable',
-        compute='_compute_business_rules_applicable'
-    )
-    
-    expected_strategy = fields.Char(
-        string='Expected Strategy',
-        compute='_compute_expected_strategy'
+    preview_confidence = fields.Float(
+        string='Preview Confidence',
+        default=0.0
     )
     
     # ================== RESULTS ==================
@@ -233,35 +317,15 @@ class OllamaRecommendationWizard(models.TransientModel):
         string='Generated Composition'
     )
     
-    recommended_products = fields.Many2many(
-        'product.template',
-        string='Recommended Products'
-    )
-    
-    total_cost = fields.Float(
-        string='Total Cost',
-        compute='_compute_totals'
-    )
-    
-    product_count_actual = fields.Integer(
-        string='Actual Product Count',
-        compute='_compute_totals'
-    )
-    
-    confidence_score = fields.Float(
-        string='Confidence Score',
-        default=0.0
+    generation_method = fields.Char(
+        string='Generation Method'
     )
     
     result_message = fields.Html(
-        string='Result Message'
+        string='Result'
     )
     
-    error_message = fields.Text(
-        string='Error Message'
-    )
-    
-    # ================== RECOMMENDER SETTINGS ==================
+    # ================== SYSTEM STATUS ==================
     
     recommender_id = fields.Many2one(
         'ollama.gift.recommender',
@@ -269,785 +333,571 @@ class OllamaRecommendationWizard(models.TransientModel):
         default=lambda self: self.env['ollama.gift.recommender'].get_or_create_recommender()
     )
     
-    ollama_status = fields.Char(
-        string='Ollama Status',
-        compute='_compute_ollama_status'
+    ai_status = fields.Html(
+        string='AI Status',
+        compute='_compute_ai_status'
     )
     
     # ================== COMPUTED FIELDS ==================
     
-    @api.depends('recommender_id')
-    def _compute_ollama_status(self):
-        for wizard in self:
-            if wizard.recommender_id:
-                if wizard.recommender_id.ollama_enabled:
-                    wizard.ollama_status = '🟢 Ollama Enabled (Advanced parsing active)'
-                else:
-                    wizard.ollama_status = '🟡 Ollama Disabled (Using basic parsing)'
-            else:
-                wizard.ollama_status = '🔴 No recommender configured'
-    
     @api.depends('partner_id')
-    def _compute_has_previous_orders(self):
+    def _compute_client_segment(self):
         for wizard in self:
             if not wizard.partner_id:
-                wizard.has_previous_orders = False
+                wizard.client_segment = 'new'
             else:
                 orders = self.env['sale.order'].search([
                     ('partner_id', '=', wizard.partner_id.id),
                     ('state', 'in', ['sale', 'done'])
-                ], limit=1)
-                wizard.has_previous_orders = bool(orders)
-    
-    @api.depends('partner_id', 'recommender_id')
-    def _compute_has_last_year_data(self):
-        for wizard in self:
-            if not wizard.partner_id or not wizard.recommender_id:
-                wizard.has_last_year_data = False
-            else:
-                last_products = wizard.recommender_id._get_last_year_products(wizard.partner_id.id)
-                wizard.has_last_year_data = bool(last_products)
-    
-    @api.depends('has_last_year_data', 'has_previous_orders')
-    def _compute_business_rules_applicable(self):
-        for wizard in self:
-            wizard.business_rules_applicable = wizard.has_last_year_data
-    
-    @api.depends('business_rules_applicable', 'has_previous_orders', 'client_notes')
-    def _compute_expected_strategy(self):
-        for wizard in self:
-            notes_lower = wizard.client_notes.lower() if wizard.client_notes else ""
-            
-            if 'all new' in notes_lower or 'completely different' in notes_lower:
-                wizard.expected_strategy = '🆕 Fresh Generation (requested in notes)'
-            elif wizard.business_rules_applicable:
-                wizard.expected_strategy = '📋 Business Rules + 80/20 Rule'
-            elif wizard.has_previous_orders:
-                wizard.expected_strategy = '📊 Pattern-Based Generation'
-            else:
-                wizard.expected_strategy = '👥 Similar Clients Analysis'
-    
-    @api.depends('composition_type', 'engine_type')
-    def _compute_composition_display_type(self):
-        for wizard in self:
-            if wizard.engine_type:
-                wizard.composition_display_type = dict(
-                    self._fields['engine_type'].selection
-                ).get(wizard.engine_type, wizard.engine_type)
-            else:
-                wizard.composition_display_type = 'Custom'
-    
-    @api.depends('selected_experience')
-    def _compute_experience_preview(self):
-        for wizard in self:
-            if wizard.selected_experience:
-                exp = wizard.selected_experience
-                html = f"""
-                <div style="border: 1px solid #ddd; padding: 15px; border-radius: 5px; background: #f9f9f9;">
-                    <h4 style="margin: 0 0 10px 0; color: #333;">{exp.name}</h4>
-                    <table style="width: 100%;">
-                        <tr>
-                            <td style="width: 30%;"><b>Price:</b></td>
-                            <td>€{exp.list_price:.2f}</td>
-                        </tr>
-                        <tr>
-                            <td><b>Category:</b></td>
-                            <td>{exp.categ_id.name if exp.categ_id else 'N/A'}</td>
-                        </tr>
-                """
+                ])
                 
-                # Add experience-specific fields if they exist
-                if hasattr(exp, 'experience_category') and exp.experience_category:
-                    html += f"""
-                        <tr>
-                            <td><b>Experience Type:</b></td>
-                            <td>{dict(exp._fields['experience_category'].selection).get(exp.experience_category, exp.experience_category)}</td>
-                        </tr>
-                    """
+                total_value = sum(orders.mapped('amount_untaxed'))
                 
-                if hasattr(exp, 'experience_duration') and exp.experience_duration:
-                    html += f"""
-                        <tr>
-                            <td><b>Duration:</b></td>
-                            <td>{exp.experience_duration} hours</td>
-                        </tr>
-                    """
-                
-                if hasattr(exp, 'experience_location') and exp.experience_location:
-                    html += f"""
-                        <tr>
-                            <td><b>Location:</b></td>
-                            <td>{exp.experience_location}</td>
-                        </tr>
-                    """
-                
-                html += f"""
-                    </table>
-                    <div style="margin-top: 10px;">
-                        <b>Description:</b><br/>
-                        {exp.description_sale or 'No description available'}
-                    </div>
-                </div>
-                """
-                
-                wizard.experience_preview = html
-            else:
-                wizard.experience_preview = False
+                if total_value > 10000:
+                    wizard.client_segment = 'vip'
+                elif wizard.partner_id.is_company:
+                    wizard.client_segment = 'corporate'
+                elif len(orders) > 0:
+                    wizard.client_segment = 'regular'
+                else:
+                    wizard.client_segment = 'new'
     
     @api.depends('partner_id')
-    def _compute_client_info(self):
+    def _compute_client_preferences(self):
         for wizard in self:
             if not wizard.partner_id:
-                wizard.client_info = '<p>Select a client to see their information</p>'
+                wizard.client_preferences = ''
                 continue
             
-            partner = wizard.partner_id
+            # Analyze historical preferences
+            prefs = []
             
-            # Get order statistics
-            orders = self.env['sale.order'].search([
-                ('partner_id', '=', partner.id),
-                ('state', 'in', ['sale', 'done'])
-            ])
-            
-            total_orders = len(orders)
-            total_value = sum(orders.mapped('amount_untaxed'))
-            avg_value = total_value / total_orders if total_orders > 0 else 0
-            
-            # Get last order date
-            last_order = orders[0] if orders else None
-            last_order_date = last_order.date_order.strftime('%d/%m/%Y') if last_order else 'N/A'
-            
-            html = f"""
-            <div style="padding: 10px; background: #f9f9f9; border-radius: 5px;">
-                <h4 style="margin-top: 0;">{partner.name}</h4>
-                <table style="width: 100%;">
-                    <tr>
-                        <td><b>Email:</b></td>
-                        <td>{partner.email or 'N/A'}</td>
-                    </tr>
-                    <tr>
-                        <td><b>Phone:</b></td>
-                        <td>{partner.phone or partner.mobile or 'N/A'}</td>
-                    </tr>
-                    <tr>
-                        <td><b>Total Orders:</b></td>
-                        <td>{total_orders}</td>
-                    </tr>
-                    <tr>
-                        <td><b>Average Order:</b></td>
-                        <td>€{avg_value:.2f}</td>
-                    </tr>
-                    <tr>
-                        <td><b>Last Order:</b></td>
-                        <td>{last_order_date}</td>
-                    </tr>
-                </table>
-            </div>
-            """
-            
-            wizard.client_info = html
-    
-    @api.depends('partner_id')
-    def _compute_client_dietary_history(self):
-        for wizard in self:
-            if not wizard.partner_id:
-                wizard.client_dietary_history = ''
-                continue
-            
-            # Get previous compositions
+            # Get last compositions
             compositions = self.env['gift.composition'].search([
                 ('partner_id', '=', wizard.partner_id.id)
-            ], limit=5, order='create_date desc')
+            ], limit=3, order='create_date desc')
             
-            dietary_set = set()
-            for comp in compositions:
-                if comp.dietary_restrictions:
-                    restrictions = comp.dietary_restrictions.split(',')
-                    dietary_set.update([r.strip() for r in restrictions])
+            if compositions:
+                # Analyze product patterns
+                all_products = compositions.mapped('product_ids')
+                categories = {}
+                for product in all_products:
+                    cat = product.categ_id.name if product.categ_id else 'Other'
+                    categories[cat] = categories.get(cat, 0) + 1
+                
+                top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:3]
+                if top_categories:
+                    prefs.append(f"Prefers: {', '.join([c[0] for c in top_categories])}")
+                
+                # Check dietary history
+                dietary_history = set()
+                for comp in compositions:
+                    if comp.dietary_restrictions:
+                        dietary_history.add(comp.dietary_restrictions)
+                
+                if dietary_history:
+                    prefs.append(f"Previous dietary: {', '.join(dietary_history)}")
             
-            if dietary_set:
-                wizard.client_dietary_history = f"Previously used: {', '.join(dietary_set)}"
+            wizard.client_preferences = ' | '.join(prefs) if prefs else 'No history available'
+    
+    @api.depends('preview_products')
+    def _compute_preview_total(self):
+        for wizard in self:
+            wizard.preview_total = sum(wizard.preview_products.mapped('list_price'))
+    
+    @api.depends('recommender_id')
+    def _compute_ai_status(self):
+        for wizard in self:
+            if wizard.recommender_id and wizard.recommender_id.ollama_enabled:
+                status = """
+                <div style="background: #d4edda; padding: 10px; border-radius: 5px; border-left: 4px solid #28a745;">
+                    <span style="color: #155724;">
+                        <b>🟢 AI Enhanced Mode</b><br>
+                        Ollama is connected and ready for intelligent parsing
+                    </span>
+                </div>
+                """
             else:
-                wizard.client_dietary_history = "No previous dietary restrictions"
+                status = """
+                <div style="background: #fff3cd; padding: 10px; border-radius: 5px; border-left: 4px solid #ffc107;">
+                    <span style="color: #856404;">
+                        <b>🟡 Basic Mode</b><br>
+                        Using rule-based engine (Ollama not connected)
+                    </span>
+                </div>
+                """
+            wizard.ai_status = status
     
-    @api.depends('partner_id', 'recommender_id')
-    def _compute_client_history(self):
-        """Compute comprehensive client history with patterns and recommendations"""
-        for wizard in self:
-            if not wizard.partner_id or not wizard.recommender_id:
-                wizard.client_history_summary = '<p style="color: #666;">Select a client to see history</p>'
-                continue
+    # ================== SELECTION METHODS ==================
+    
+    def _get_experience_selection(self):
+        """Get experience selection based on category"""
+        selections = []
+        
+        for key, exp in self.EXPERIENCES_DATA.items():
+            category_label = {
+                'gastronomy': '🍽️',
+                'wellness': '💆',
+                'adventure': '🎯',
+                'culture': '🎨',
+                'luxury': '💎'
+            }.get(exp['category'], '📦')
             
-            try:
-                # Get patterns analysis
-                patterns = wizard.recommender_id._analyze_client_purchase_patterns(wizard.partner_id.id)
-                
-                # Check for last year data
-                last_products = wizard.recommender_id._get_last_year_products(wizard.partner_id.id)
-                
-                if not patterns or patterns.get('total_orders', 0) == 0:
-                    wizard.client_history_summary = '''
-                    <div style="background: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
-                        <h4 style="margin-top: 0; color: #856404;">📋 New Client - No Purchase History</h4>
-                        <p style="margin-bottom: 0; color: #856404;">
-                            Will use similar clients analysis or fresh generation.
-                        </p>
-                    </div>
-                    '''
-                else:
-                    # Build rich history summary
-                    favorites_count = len(patterns.get('favorite_products', []))
-                    top_categories = list(patterns.get('preferred_categories', {}).keys())[:3]
-                    
-                    # Determine budget trend
-                    suggested_budget = patterns.get('avg_order_value', 1000)
-                    trend = patterns.get('budget_trend', 'stable')
-                    if trend == 'increasing':
-                        suggested_budget *= 1.1
-                        trend_icon = '📈'
-                    elif trend == 'decreasing':
-                        suggested_budget *= 0.95
-                        trend_icon = '📉'
-                    else:
-                        trend_icon = '➡️'
-                    
-                    html = f'''
-                    <div style="background: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;">
-                        <h4 style="margin-top: 0; color: #155724;">📊 Client History Analysis</h4>
-                        <table style="width: 100%; color: #155724;">
-                            <tr>
-                                <td><b>Total Orders:</b></td>
-                                <td>{patterns.get('total_orders', 0)}</td>
-                            </tr>
-                            <tr>
-                                <td><b>Avg Order Value:</b></td>
-                                <td>€{patterns.get('avg_order_value', 0):.2f}</td>
-                            </tr>
-                            <tr>
-                                <td><b>Avg Products/Order:</b></td>
-                                <td>{patterns.get('avg_product_count', 0):.0f} items</td>
-                            </tr>
-                            <tr>
-                                <td><b>Budget Trend:</b></td>
-                                <td>{trend_icon} {trend.upper()}</td>
-                            </tr>
-                            <tr>
-                                <td><b>Favorite Products:</b></td>
-                                <td>{favorites_count} recurring items</td>
-                            </tr>
-                            <tr>
-                                <td><b>Top Categories:</b></td>
-                                <td>{', '.join(top_categories) if top_categories else 'Various'}</td>
-                            </tr>
-                    '''
-                    
-                    # Add price range if available
-                    if patterns.get('preferred_price_range'):
-                        price_range = patterns['preferred_price_range']
-                        html += f'''
-                            <tr>
-                                <td><b>Price Range:</b></td>
-                                <td>€{price_range.get('min', 0):.0f} - €{price_range.get('max', 0):.0f}</td>
-                            </tr>
-                        '''
-                    
-                    html += f'''
-                        </table>
-                        <hr style="border-color: #c3e6cb;">
-                        <p style="margin-bottom: 10px; color: #155724;">
-                            <b>💡 AI Recommendations:</b><br>
-                            • Suggested Budget: <b>€{suggested_budget:.0f}</b><br>
-                            • Suggested Products: <b>{patterns.get('avg_product_count', 12):.0f}</b> items
-                        </p>
-                    '''
-                    
-                    # Add business rules preview if applicable
-                    if last_products:
-                        html += f'''
-                        <div style="background: #c3e6cb; padding: 10px; border-radius: 3px; margin-top: 10px;">
-                            <b>🔧 Business Rules Ready:</b><br>
-                            Found {len(last_products)} products from last year.<br>
-                            Rules R1-R6 will be applied with 80/20 transformation.
-                        </div>
-                        '''
-                    
-                    html += '</div>'
-                    wizard.client_history_summary = html
-                    
-            except Exception as e:
-                _logger.error(f"Error computing client history: {e}")
-                wizard.client_history_summary = f'<p style="color: red;">Error loading history: {str(e)}</p>'
-    
-    @api.depends('recommended_products')
-    def _compute_totals(self):
-        for wizard in self:
-            wizard.total_cost = sum(wizard.recommended_products.mapped('list_price'))
-            wizard.product_count_actual = len(wizard.recommended_products)
+            label = f"{category_label} {exp['name']} (€{exp['price']:.2f})"
+            selections.append((key, label))
+        
+        return selections
     
     # ================== ONCHANGE METHODS ==================
     
     @api.onchange('partner_id')
     def _onchange_partner_id(self):
-        """Auto-fill suggestions based on client history"""
+        """Auto-fill based on client history"""
         if self.partner_id and self.recommender_id:
-            try:
-                patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
-                
-                if patterns and patterns.get('total_orders', 0) > 0:
-                    # Suggest budget based on history and trend
-                    suggested_budget = patterns.get('avg_order_value', 0)
-                    if patterns.get('budget_trend') == 'increasing':
-                        suggested_budget *= 1.1
-                    elif patterns.get('budget_trend') == 'decreasing':
-                        suggested_budget *= 0.95
-                    
-                    # Only update if user hasn't manually set a budget
-                    if not self.target_budget or self.target_budget == 1000.0:
-                        self.target_budget = suggested_budget
-                    
-                    # Suggest product count (don't enforce by default)
-                    if patterns.get('avg_product_count'):
-                        self.product_count = int(round(patterns['avg_product_count']))
-                        # Don't auto-check specify_product_count - let user decide
-            except:
-                pass  # Silently fail, don't disrupt the UI
+            # Get client patterns
+            patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
+            
+            if patterns and patterns.get('total_orders', 0) > 0:
+                # Suggest budget
+                avg_budget = patterns.get('avg_order_value', 0)
+                if patterns.get('budget_trend') == 'increasing':
+                    self.target_budget = avg_budget * 1.1
+                    self.budget_source = 'history'
+                elif patterns.get('budget_trend') == 'decreasing':
+                    self.target_budget = avg_budget * 0.95
+                    self.budget_source = 'history'
+                else:
+                    self.target_budget = avg_budget
+                    self.budget_source = 'history'
     
-    @api.onchange('dietary_restrictions')
-    def _onchange_dietary_restrictions(self):
-        """Update individual checkboxes based on selection"""
-        if self.dietary_restrictions == 'halal':
-            self.is_halal = True
-            self.is_non_alcoholic = True  # Halal implies no alcohol
-            self.is_vegan = False
-            self.is_vegetarian = False
-            self.is_gluten_free = False
-        elif self.dietary_restrictions == 'vegan':
-            self.is_vegan = True
-            self.is_halal = False
-            self.is_vegetarian = False
-            self.is_gluten_free = False
-            self.is_non_alcoholic = False
-        elif self.dietary_restrictions == 'vegetarian':
-            self.is_vegetarian = True
-            self.is_halal = False
-            self.is_vegan = False
-            self.is_gluten_free = False
-            self.is_non_alcoholic = False
-        elif self.dietary_restrictions == 'gluten_free':
-            self.is_gluten_free = True
-            self.is_halal = False
-            self.is_vegan = False
-            self.is_vegetarian = False
-            self.is_non_alcoholic = False
-        elif self.dietary_restrictions == 'non_alcoholic':
-            self.is_non_alcoholic = True
-            self.is_halal = False
-            self.is_vegan = False
-            self.is_vegetarian = False
-            self.is_gluten_free = False
-        elif self.dietary_restrictions == 'none':
-            self.is_halal = False
-            self.is_vegan = False
-            self.is_vegetarian = False
-            self.is_gluten_free = False
-            self.is_non_alcoholic = False
-    
-    @api.onchange('engine_type')
-    def _onchange_engine_type(self):
-        """Update composition type to match engine type"""
-        if self.engine_type:
-            self.composition_type = self.engine_type
-    
-    @api.onchange('experience_category_filter')
-    def _onchange_experience_category_filter(self):
-        """Filter experiences based on category"""
-        if self.experience_category_filter and self.experience_category_filter != 'all':
+    @api.onchange('experience_category')
+    def _onchange_experience_category(self):
+        """Filter experiences by category"""
+        if self.experience_category:
+            # Reset selection when category changes
+            self.selected_experience_key = False
+            
+            # Update domain for custom experience
             return {
                 'domain': {
-                    'selected_experience': [
+                    'custom_experience_id': [
                         ('is_experience', '=', True),
-                        ('experience_category', '=', self.experience_category_filter)
+                        ('experience_category', '=', self.experience_category)
                     ]
                 }
             }
-        else:
-            return {
-                'domain': {
-                    'selected_experience': [('is_experience', '=', True)]
-                }
-            }
     
-    # ================== ACTION METHODS ==================
+    @api.onchange('composition_strategy')
+    def _onchange_composition_strategy(self):
+        """Update fields based on strategy"""
+        if self.composition_strategy == 'experience':
+            self.include_experiences = True
+        elif self.composition_strategy == 'hybrid':
+            self.include_wine = True
     
-    def action_generate_recommendation(self):
-        """Generate recommendation with smart validation"""
+    @api.onchange('dietary_profile')
+    def _onchange_dietary_profile(self):
+        """Update category preferences based on dietary profile"""
+        if self.dietary_profile == 'halal':
+            self.include_wine = False
+            self.include_spirits = False
+            self.dietary_details = "Halal certified products only. No alcohol, no pork."
+        elif self.dietary_profile == 'vegan':
+            self.dietary_details = "Vegan products only. No animal products."
+        elif self.dietary_profile == 'vegetarian':
+            self.dietary_details = "Vegetarian products. No meat or fish."
+        elif self.dietary_profile == 'non_alcoholic':
+            self.include_wine = False
+            self.include_spirits = False
+            self.dietary_details = "No alcoholic beverages."
+    
+    # ================== WIZARD NAVIGATION ==================
+    
+    def action_next_step(self):
+        """Move to next wizard step"""
         self.ensure_one()
         
-        # Validate inputs
+        steps = ['client', 'budget', 'composition', 'dietary', 'preview']
+        current_index = steps.index(self.wizard_step)
+        
+        if current_index < len(steps) - 1:
+            self.wizard_step = steps[current_index + 1]
+        
+        return {'type': 'ir.actions.do_nothing'}
+    
+    def action_previous_step(self):
+        """Move to previous wizard step"""
+        self.ensure_one()
+        
+        steps = ['client', 'budget', 'composition', 'dietary', 'preview']
+        current_index = steps.index(self.wizard_step)
+        
+        if current_index > 0:
+            self.wizard_step = steps[current_index - 1]
+        
+        return {'type': 'ir.actions.do_nothing'}
+    
+    # ================== PREVIEW METHODS ==================
+    
+    def action_generate_preview(self):
+        """Generate a preview before final generation"""
+        self.ensure_one()
+        
+        if not self.partner_id:
+            raise UserError("Please select a client first")
+        
+        self.state = 'preview'
+        
+        try:
+            # Prepare parameters
+            params = self._prepare_generation_params()
+            
+            # Call recommender for preview (dry run)
+            preview_result = self.recommender_id.generate_preview(
+                partner_id=self.partner_id.id,
+                params=params
+            )
+            
+            if preview_result.get('success'):
+                self._display_preview(preview_result)
+                self.preview_generated = True
+                self.preview_confidence = preview_result.get('confidence', 0.85)
+            else:
+                raise UserError(f"Preview failed: {preview_result.get('error', 'Unknown error')}")
+            
+        except Exception as e:
+            _logger.error(f"Preview generation failed: {str(e)}")
+            raise UserError(f"Could not generate preview: {str(e)}")
+        
+        return {'type': 'ir.actions.do_nothing'}
+    
+    def _display_preview(self, preview_result):
+        """Display the preview in HTML format"""
+        products = preview_result.get('products', [])
+        total_cost = preview_result.get('total_cost', 0)
+        method = preview_result.get('method', 'auto')
+        
+        # Build preview HTML
+        html = f"""
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <div style="background: white; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                <h3 style="margin-top: 0; color: #2c3e50;">
+                    <span style="font-size: 24px;">🎁</span> Gift Composition Preview
+                </h3>
+                
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0;">
+                    <div style="text-align: center; padding: 10px; background: #e8f4fd; border-radius: 5px;">
+                        <div style="font-size: 24px; color: #1976d2;">📦</div>
+                        <div style="font-weight: bold; margin-top: 5px;">{len(products)}</div>
+                        <div style="font-size: 12px; color: #666;">Products</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: #e8f5e9; border-radius: 5px;">
+                        <div style="font-size: 24px; color: #4caf50;">💰</div>
+                        <div style="font-weight: bold; margin-top: 5px;">€{total_cost:.2f}</div>
+                        <div style="font-size: 12px; color: #666;">Total Value</div>
+                    </div>
+                    <div style="text-align: center; padding: 10px; background: #fff3e0; border-radius: 5px;">
+                        <div style="font-size: 24px; color: #ff9800;">📊</div>
+                        <div style="font-weight: bold; margin-top: 5px;">{self.preview_confidence*100:.0f}%</div>
+                        <div style="font-size: 12px; color: #666;">Match Score</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: white; padding: 15px; border-radius: 5px;">
+                <h4 style="margin-top: 0; color: #495057;">Product Selection</h4>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+        """
+        
+        # Add products to preview
+        for i, product in enumerate(products[:20], 1):
+            category_icon = self._get_category_icon(product.get('category', ''))
+            html += f"""
+                <div style="padding: 8px; background: #f8f9fa; border-radius: 4px; display: flex; align-items: center;">
+                    <span style="font-size: 20px; margin-right: 10px;">{category_icon}</span>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500; font-size: 14px;">{product.get('name', 'Product')[:40]}</div>
+                        <div style="color: #28a745; font-size: 12px;">€{product.get('price', 0):.2f}</div>
+                    </div>
+                </div>
+            """
+        
+        html += """
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 15px; background: #d1ecf1; border-radius: 5px; border-left: 4px solid #17a2b8;">
+                <div style="color: #0c5460;">
+                    <b>💡 Generation Method:</b> {method_display}<br>
+                    <b>✅ Ready to Generate:</b> Click "Generate Composition" to create the final gift
+                </div>
+            </div>
+        </div>
+        """.format(method_display=self._get_method_display(method))
+        
+        self.preview_html = html
+        
+        # Store preview products for reference
+        if products:
+            product_ids = []
+            for p in products:
+                if p.get('id'):
+                    product_ids.append(p['id'])
+            
+            if product_ids:
+                self.preview_products = [(6, 0, product_ids)]
+    
+    def _get_category_icon(self, category):
+        """Get icon for product category"""
+        icons = {
+            'wine': '🍷',
+            'spirits': '🥃',
+            'gourmet': '🧀',
+            'sweets': '🍫',
+            'experience': '🎭',
+            'seafood': '🐟',
+            'meat': '🥩',
+            'vegetarian': '🥗',
+            'oil': '🫒',
+            'sauce': '🥫',
+            'cheese': '🧀',
+            'chocolate': '🍫'
+        }
+        
+        category_lower = category.lower()
+        for key, icon in icons.items():
+            if key in category_lower:
+                return icon
+        return '📦'
+    
+    def _get_method_display(self, method):
+        """Get display name for generation method"""
+        methods = {
+            'business_rules': '📋 Business Rules Applied',
+            'pattern_based': '📊 Pattern-Based Selection',
+            'similar_clients': '👥 Similar Clients Analysis',
+            'fresh': '🆕 Fresh Generation',
+            'auto': '🤖 AI Auto-Selection'
+        }
+        return methods.get(method, method)
+    
+    # ================== GENERATION METHODS ==================
+    
+    def action_generate_composition(self):
+        """Generate final composition"""
+        self.ensure_one()
+        
         if not self.partner_id:
             raise UserError("Please select a client")
         
-        # Update state
         self.state = 'generating'
         
         try:
-            # Prepare dietary restrictions
-            dietary = self._prepare_dietary_restrictions()
+            # Prepare parameters
+            params = self._prepare_generation_params()
             
-            # Build final notes  
-            final_notes = self._prepare_final_notes()
-            
-            # Log the generation request
+            # Log generation request
             _logger.info(f"""
-            ========================================
-            🎁 GIFT RECOMMENDATION GENERATION
-            ========================================
+            ═══════════════════════════════════════
+            🎁 GIFT COMPOSITION GENERATION
+            ═══════════════════════════════════════
             Client: {self.partner_id.name}
             Budget: €{self.target_budget:.2f}
-            Range (±5%): €{self.target_budget*0.95:.2f} - €{self.target_budget*1.05:.2f}
-            Products: {self.product_count if self.specify_product_count else 'Auto (12)'}
-            Dietary: {dietary if dietary else 'None'}
-            Type: {self.composition_type}
-            ========================================
+            Strategy: {self.composition_strategy}
+            Products: {self._get_product_count_display()}
+            Dietary: {self.dietary_profile}
+            ═══════════════════════════════════════
             """)
             
-            # Generate recommendation
+            # Generate composition
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=self.target_budget if self.target_budget else 1000,  # Default to €1000
-                client_notes=final_notes,
-                dietary_restrictions=dietary,
-                composition_type=self.composition_type
+                target_budget=self.target_budget,
+                client_notes=params.get('notes', ''),
+                dietary_restrictions=params.get('dietary', []),
+                composition_type=params.get('composition_type', 'custom')
             )
             
             if result.get('success'):
-                composition_id = result.get('composition_id')
-                composition = self.env['gift.composition'].browse(composition_id)
-                
-                # Calculate actual cost
-                actual_cost = composition.actual_cost or sum(p.list_price for p in composition.product_ids)
-                
-                # Check variance (should be within ±5%)
-                if self.target_budget > 0:
-                    variance = (actual_cost - self.target_budget) / self.target_budget * 100
-                    
-                    # Log the result
-                    _logger.info(f"""
-                    ========================================
-                    ✅ GENERATION SUCCESSFUL
-                    ========================================
-                    Composition ID: {composition.id}
-                    Products: {len(composition.product_ids)}
-                    Total Cost: €{actual_cost:.2f}
-                    Target: €{self.target_budget:.2f}
-                    Variance: {variance:+.1f}%
-                    Status: {'✅ IN RANGE' if abs(variance) <= 5 else '⚠️ OUTSIDE ±5%'}
-                    ========================================
-                    """)
-                    
-                    # List products with prices
-                    for i, product in enumerate(composition.product_ids[:12], 1):
-                        _logger.info(f"  {i}. {product.name[:40]}: €{product.list_price:.2f}")
-                    
-                    # Check for inappropriately priced products
-                    if self.target_budget >= 1000:
-                        min_appropriate_price = 20.0
-                    elif self.target_budget >= 500:
-                        min_appropriate_price = 15.0
-                    elif self.target_budget >= 200:
-                        min_appropriate_price = 10.0
-                    else:
-                        min_appropriate_price = 5.0
-                    
-                    low_price_products = [p for p in composition.product_ids if p.list_price < min_appropriate_price]
-                    
-                    if low_price_products:
-                        _logger.warning(f"""
-                        ⚠️ Found {len(low_price_products)} products below €{min_appropriate_price:.2f}:
-                        {', '.join([f'{p.name[:20]} (€{p.list_price:.2f})' for p in low_price_products[:3]])}
-                        These should be excluded in future generations for €{self.target_budget:.2f} budgets.
-                        """)
-                    
-                    # If variance is too high, log but don't fail
-                    if abs(variance) > 10:
-                        _logger.warning(f"⚠️ High variance: {variance:+.1f}%. Consider adjusting product selection logic.")
-                
-                # Process success
-                self._process_success_result(result)
+                self._process_success(result)
                 
                 # Open the composition
                 return {
                     'type': 'ir.actions.act_window',
                     'name': 'Generated Gift Composition',
                     'res_model': 'gift.composition',
-                    'res_id': composition_id,
+                    'res_id': result.get('composition_id'),
                     'view_mode': 'form',
                     'target': 'current',
                 }
             else:
-                self._process_error_result(result)
-                
+                raise UserError(f"Generation failed: {result.get('error', 'Unknown error')}")
+            
         except Exception as e:
-            _logger.error(f"❌ Generation failed: {str(e)}")
+            _logger.error(f"Generation failed: {str(e)}")
             self.state = 'error'
-            self.error_message = str(e)
             raise
     
-    def _prepare_dietary_restrictions(self):
-        """Prepare comprehensive dietary restrictions list"""
+    def _prepare_generation_params(self):
+        """Prepare parameters for generation"""
+        params = {
+            'budget': self.target_budget,
+            'flexibility': self.budget_flexibility,
+            'composition_type': self.composition_strategy,
+            'dietary': [],
+            'notes': '',
+            'categories': {}
+        }
+        
+        # Process dietary restrictions
         dietary = []
+        if self.dietary_profile == 'halal':
+            dietary = ['halal', 'no_pork', 'no_alcohol', 'no_iberian']
+        elif self.dietary_profile == 'vegan':
+            dietary = ['vegan']
+        elif self.dietary_profile == 'vegetarian':
+            dietary = ['vegetarian']
+        elif self.dietary_profile == 'gluten_free':
+            dietary = ['gluten_free']
+        elif self.dietary_profile == 'non_alcoholic':
+            dietary = ['non_alcoholic']
+        elif self.dietary_profile == 'custom' and self.dietary_details:
+            dietary = [d.strip() for d in self.dietary_details.split(',')]
         
-        # From selection field
-        if self.dietary_restrictions == 'halal':
-            dietary.extend(['halal', 'no_pork', 'no_alcohol', 'no_iberian'])
-        elif self.dietary_restrictions == 'vegan':
-            dietary.append('vegan')
-        elif self.dietary_restrictions == 'vegetarian':
-            dietary.append('vegetarian')
-        elif self.dietary_restrictions == 'gluten_free':
-            dietary.append('gluten_free')
-        elif self.dietary_restrictions == 'non_alcoholic':
-            dietary.append('non_alcoholic')
-        elif self.dietary_restrictions == 'multiple' and self.dietary_restrictions_text:
-            # Parse multiple restrictions from text
-            restrictions = self.dietary_restrictions_text.split(',')
-            dietary.extend([r.strip().lower() for r in restrictions])
+        params['dietary'] = dietary
         
-        # Also check individual checkboxes (union)
-        if self.is_halal and 'halal' not in dietary:
-            dietary.extend(['halal', 'no_pork', 'no_alcohol', 'no_iberian'])
-        if self.is_vegan and 'vegan' not in dietary:
-            dietary.append('vegan')
-        if self.is_vegetarian and 'vegetarian' not in dietary:
-            dietary.append('vegetarian')
-        if self.is_gluten_free and 'gluten_free' not in dietary:
-            dietary.append('gluten_free')
-        if self.is_non_alcoholic and 'non_alcoholic' not in dietary:
-            dietary.append('non_alcoholic')
-        
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_dietary = []
-        for item in dietary:
-            if item not in seen:
-                seen.add(item)
-                unique_dietary.append(item)
-        
-        return unique_dietary
-    
-    def _prepare_final_notes(self):
-        """Prepare final notes that will be parsed by Ollama"""
+        # Build notes
         notes_parts = []
         
-        # Add original client notes (highest priority)
-        if self.client_notes:
-            notes_parts.append(self.client_notes)
+        # Add product count requirement
+        if self.product_count_mode == 'exact':
+            notes_parts.append(f"Must have exactly {self.product_count_exact} products")
+        elif self.product_count_mode == 'range':
+            notes_parts.append(f"Include {self.product_count_min} to {self.product_count_max} products")
         
-        # Add product count ONLY if explicitly specified
-        if self.specify_product_count and self.product_count:
-            # This will be parsed by Ollama and enforced
-            count_instruction = f"I need exactly {self.product_count} products."
-            notes_parts.append(count_instruction)
-            _logger.info(f"🎯 Adding product count to notes: {self.product_count}")
+        # Add category preferences
+        categories = []
+        if self.include_wine:
+            categories.append('wine')
+        if self.include_spirits:
+            categories.append('spirits')
+        if self.include_gourmet:
+            categories.append('gourmet food')
+        if self.include_sweets:
+            categories.append('sweets and chocolates')
+        if self.include_experiences:
+            categories.append('experiences')
         
-        # Add composition type preference
-        if self.composition_type == 'hybrid':
-            notes_parts.append("Prefer wine-focused hybrid composition")
-        elif self.composition_type == 'experience':
-            notes_parts.append("Include experience-based products")
-            
-            # Add selected experience if specified
-            if self.selected_experience:
-                notes_parts.append(f"Include this experience: {self.selected_experience.name}")
+        if categories:
+            notes_parts.append(f"Include: {', '.join(categories)}")
         
-        # Join all parts
-        final_notes = ". ".join(notes_parts)
+        # Add experience if selected
+        if self.composition_strategy == 'experience':
+            if self.selected_experience_key:
+                exp_data = self.EXPERIENCES_DATA.get(self.selected_experience_key, {})
+                notes_parts.append(f"Include {exp_data.get('name', 'selected experience')}")
+            elif self.custom_experience_id:
+                notes_parts.append(f"Include experience: {self.custom_experience_id.name}")
         
-        return final_notes
+        # Add theme if selected
+        if self.gift_theme:
+            theme_name = dict(self._fields['gift_theme'].selection).get(self.gift_theme, '')
+            notes_parts.append(f"Theme: {theme_name}")
+        
+        # Add occasion notes
+        if self.occasion_notes:
+            notes_parts.append(self.occasion_notes)
+        
+        params['notes'] = ". ".join(notes_parts)
+        
+        return params
     
-    def _log_generation_request(self, dietary, final_notes):
-        """Log the generation request details"""
-        _logger.info(f"""
-        ========== GENERATION REQUEST ==========
-        Client: {self.partner_id.name}
-        Budget (Form): €{self.target_budget:.2f} {'(will check history if 0)' if not self.target_budget else ''}
-        Product Count (Form): {self.product_count if self.specify_product_count else 'Auto-detect'}
-        Enforce Count: {self.specify_product_count}
-        Dietary (Form): {dietary if dietary else 'None'}
-        Composition Type: {self.composition_type}
-        Expected Strategy: {self.expected_strategy}
-        Business Rules: {'Yes' if self.business_rules_applicable else 'No'}
-        Notes Length: {len(final_notes)} chars
-        Full Notes: {final_notes[:200]}{'...' if len(final_notes) > 200 else ''}
-        ========================================
-        """)
+    def _get_product_count_display(self):
+        """Get display string for product count"""
+        if self.product_count_mode == 'exact':
+            return f"Exactly {self.product_count_exact}"
+        elif self.product_count_mode == 'range':
+            return f"{self.product_count_min}-{self.product_count_max}"
+        else:
+            return "Auto (12-15)"
     
-    def _process_success_result(self, result):
-        """Process successful generation result"""
+    def _process_success(self, result):
+        """Process successful generation"""
         self.state = 'done'
         self.composition_id = result.get('composition_id')
+        self.generation_method = result.get('method', 'auto')
         
-        # Get composition products
-        if self.composition_id:
-            self.recommended_products = [(6, 0, self.composition_id.product_ids.ids)]
+        # Build success message
+        composition = self.env['gift.composition'].browse(result.get('composition_id'))
         
-        self.confidence_score = result.get('confidence_score', 0)
-        
-        # Build detailed result message
-        method = result.get('method', 'unknown')
-        method_display = {
-            'business_rules_with_enforcement': '📋 Business Rules + Requirements',
-            'business_rules_transformation': '📋 Business Rules Applied',
-            '8020_rule': '📊 80/20 Rule Applied',
-            'pattern_based_enhanced': '🔍 Pattern-Based Generation',
-            'similar_clients': '👥 Similar Clients Analysis',
-            'universal_enforcement': '🎯 Universal Generation',
-            'fresh_generation': '🆕 Fresh Composition'
-        }.get(method, method)
-        
-        # Check compliance
-        actual_count = result.get('product_count', 0)
-        actual_cost = result.get('total_cost', 0)
-        target_count = self.product_count if self.specify_product_count else None
-        
-        count_compliance = '✅' if not target_count or actual_count == target_count else '⚠️'
-        budget_variance = ((actual_cost - self.target_budget) / self.target_budget * 100) if self.target_budget else 0
-        budget_compliance = '✅' if abs(budget_variance) <= 15 else '⚠️'
-        
-        self.result_message = f"""
-        <div style="background: #d4edda; padding: 15px; border-radius: 5px;">
-            <h4 style="color: #155724;">✅ Recommendation Generated Successfully!</h4>
+        html = f"""
+        <div style="background: #d4edda; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;">
+            <h4 style="margin-top: 0; color: #155724;">
+                ✅ Composition Generated Successfully!
+            </h4>
             
-            <div style="margin-top: 10px;">
-                <b>Generation Method:</b> {method_display}<br>
-                <b>Confidence Score:</b> {result.get('confidence_score', 0)*100:.0f}%
-            </div>
-            
-            <table style="width: 100%; margin-top: 15px; color: #155724;">
-                <tr style="background: #c3e6cb;">
-                    <th style="padding: 5px; text-align: left;">Requirement</th>
-                    <th style="padding: 5px; text-align: center;">Target</th>
-                    <th style="padding: 5px; text-align: center;">Actual</th>
-                    <th style="padding: 5px; text-align: center;">Status</th>
+            <table style="width: 100%; margin-top: 15px;">
+                <tr>
+                    <td style="padding: 5px;"><b>Composition ID:</b></td>
+                    <td>#{composition.id}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 5px;"><b>Products</b></td>
-                    <td style="padding: 5px; text-align: center;">{target_count if target_count else 'Auto'}</td>
-                    <td style="padding: 5px; text-align: center;">{actual_count}</td>
-                    <td style="padding: 5px; text-align: center;">{count_compliance}</td>
+                    <td style="padding: 5px;"><b>Products:</b></td>
+                    <td>{len(composition.product_ids)} items</td>
                 </tr>
                 <tr>
-                    <td style="padding: 5px;"><b>Budget</b></td>
-                    <td style="padding: 5px; text-align: center;">€{self.target_budget:.2f}</td>
-                    <td style="padding: 5px; text-align: center;">€{actual_cost:.2f}</td>
-                    <td style="padding: 5px; text-align: center;">{budget_compliance} ({budget_variance:+.1f}%)</td>
+                    <td style="padding: 5px;"><b>Total Value:</b></td>
+                    <td>€{composition.actual_cost:.2f}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 5px;"><b>Method:</b></td>
+                    <td>{self._get_method_display(self.generation_method)}</td>
                 </tr>
             </table>
+            
+            <div style="margin-top: 15px;">
+                <button class="btn btn-primary" onclick="window.location.reload()">
+                    View Composition
+                </button>
+            </div>
+        </div>
         """
         
-        # Add rules summary if applicable
-        if result.get('rules_applied'):
-            rules_count = len(result['rules_applied'])
-            self.result_message += f"""
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #c3e6cb;">
-                <b>Business Rules Applied:</b> {rules_count} transformations
-            </div>
-            """
-        
-        # Add message from result
-        if result.get('message'):
-            self.result_message += f"""
-            <div style="margin-top: 10px; padding: 10px; background: #c3e6cb; border-radius: 3px;">
-                <b>Details:</b> {result['message']}
-            </div>
-            """
-        
-        self.result_message += "</div>"
-        
-        # Log success
-        _logger.info(f"""
-        ========== GENERATION SUCCESS ==========
-        Method: {method_display}
-        Products: {actual_count} {'✅' if count_compliance == '✅' else '⚠️ (target: ' + str(target_count) + ')'}
-        Total Cost: €{actual_cost:.2f}
-        Variance: {budget_variance:+.1f}%
-        Confidence: {result.get('confidence_score', 0)*100:.0f}%
-        Rules Applied: {len(result.get('rules_applied', []))}
-        ========================================
-        """)
+        self.result_message = html
     
-    def _process_error_result(self, result):
-        """Process error result"""
-        self.state = 'error'
-        error_msg = result.get('error', 'Unknown error')
-        self.error_message = error_msg
-        _logger.error(f"Generation failed: {error_msg}")
-        raise UserError(f"Generation failed: {error_msg}")
+    # ================== UTILITY METHODS ==================
     
-    def action_generate_another(self):
-        """Reset wizard for another generation"""
+    def action_reset_wizard(self):
+        """Reset wizard to initial state"""
         self.ensure_one()
         
-        # Keep client and basic settings
-        partner_id = self.partner_id.id
-        
-        # Create new wizard with same client
-        new_wizard = self.create({
-            'partner_id': partner_id,
-            'target_budget': self.target_budget,
-            'target_year': self.target_year,
+        self.write({
+            'wizard_step': 'client',
+            'state': 'draft',
+            'preview_generated': False,
+            'preview_html': False,
+            'preview_products': [(5, 0, 0)],
+            'result_message': False
         })
         
-        # Return action to open new wizard
-        return {
-            'type': 'ir.actions.act_window',
-            'name': 'Generate Another Recommendation',
-            'res_model': 'ollama.recommendation.wizard',
-            'res_id': new_wizard.id,
-            'view_mode': 'form',
-            'target': 'new',
-        }
+        return {'type': 'ir.actions.do_nothing'}
     
-    def action_view_composition(self):
-        """Open the generated composition"""
-        self.ensure_one()
-        if not self.composition_id:
-            raise UserError("No composition to view")
-        
-        return {
-            'type': 'ir.actions.act_window',
-            'name': 'Gift Composition',
-            'res_model': 'gift.composition',
-            'res_id': self.composition_id.id,
-            'view_mode': 'form',
-            'target': 'current',
-        }
-    
-    def action_test_connection(self):
-        """Test Ollama connection"""
+    def action_test_ai_connection(self):
+        """Test AI connection"""
         self.ensure_one()
         
-        result = self.recommender_id.test_ollama_connection()
-        
-        if result['success']:
+        if self.recommender_id:
+            result = self.recommender_id.test_ollama_connection()
+            
+            notification_type = 'success' if result['success'] else 'warning'
+            
             return {
                 'type': 'ir.actions.client',
                 'tag': 'display_notification',
                 'params': {
-                    'title': 'Connection Test',
+                    'title': 'AI Connection Test',
                     'message': result['message'],
-                    'type': 'success',
+                    'type': notification_type,
                     'sticky': False,
-                }
-            }
-        else:
-            return {
-                'type': 'ir.actions.client',
-                'tag': 'display_notification',
-                'params': {
-                    'title': 'Connection Test Failed',
-                    'message': result['message'],
-                    'type': 'warning',
-                    'sticky': True,
                 }
             }
