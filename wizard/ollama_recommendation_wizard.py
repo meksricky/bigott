@@ -680,15 +680,12 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ================== ACTION METHODS ==================
     
     def action_generate_recommendation(self):
-        """Generate recommendation with strict validation"""
+        """Generate recommendation with smart validation"""
         self.ensure_one()
         
         # Validate inputs
         if not self.partner_id:
             raise UserError("Please select a client")
-        
-        if self.target_budget and self.target_budget < 50:
-            raise UserError("Minimum budget is €50")
         
         # Update state
         self.state = 'generating'
@@ -697,125 +694,93 @@ class OllamaRecommendationWizard(models.TransientModel):
             # Prepare dietary restrictions
             dietary = self._prepare_dietary_restrictions()
             
-            # Build final notes
+            # Build final notes  
             final_notes = self._prepare_final_notes()
             
             # Log the generation request
             _logger.info(f"""
-            ========== GENERATION REQUEST ==========
+            ========================================
+            🎁 GIFT RECOMMENDATION GENERATION
+            ========================================
             Client: {self.partner_id.name}
             Budget: €{self.target_budget:.2f}
-            Product Count: {self.product_count if self.specify_product_count else 'Auto'}
-            Dietary: {dietary}
-            Composition Type: {self.composition_type}
+            Range (±5%): €{self.target_budget*0.95:.2f} - €{self.target_budget*1.05:.2f}
+            Products: {self.product_count if self.specify_product_count else 'Auto (12)'}
+            Dietary: {dietary if dietary else 'None'}
+            Type: {self.composition_type}
             ========================================
             """)
             
             # Generate recommendation
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=self.target_budget if self.target_budget else 0,
+                target_budget=self.target_budget if self.target_budget else 1000,  # Default to €1000
                 client_notes=final_notes,
                 dietary_restrictions=dietary,
                 composition_type=self.composition_type
             )
             
-            # CRITICAL: Validate the result before accepting it
             if result.get('success'):
                 composition_id = result.get('composition_id')
-                
-                # Load the composition and validate it
                 composition = self.env['gift.composition'].browse(composition_id)
                 
-                # Check 1: Validate actual cost
-                actual_cost = composition.actual_cost or 0
-                if actual_cost == 0:
-                    # Calculate from products
-                    actual_cost = sum(p.list_price for p in composition.product_ids)
+                # Calculate actual cost
+                actual_cost = composition.actual_cost or sum(p.list_price for p in composition.product_ids)
                 
-                # Check 2: Validate against target budget
+                # Check variance (should be within ±5%)
                 if self.target_budget > 0:
-                    variance = abs(actual_cost - self.target_budget) / self.target_budget
+                    variance = (actual_cost - self.target_budget) / self.target_budget * 100
                     
-                    # If variance is more than 50%, something is wrong
-                    if variance > 0.5:
-                        _logger.error(f"""
-                        ❌ INVALID COMPOSITION DETECTED:
-                        Target: €{self.target_budget:.2f}
-                        Actual: €{actual_cost:.2f}
-                        Variance: {variance*100:.1f}%
+                    # Log the result
+                    _logger.info(f"""
+                    ========================================
+                    ✅ GENERATION SUCCESSFUL
+                    ========================================
+                    Composition ID: {composition.id}
+                    Products: {len(composition.product_ids)}
+                    Total Cost: €{actual_cost:.2f}
+                    Target: €{self.target_budget:.2f}
+                    Variance: {variance:+.1f}%
+                    Status: {'✅ IN RANGE' if abs(variance) <= 5 else '⚠️ OUTSIDE ±5%'}
+                    ========================================
+                    """)
+                    
+                    # List products with prices
+                    for i, product in enumerate(composition.product_ids[:12], 1):
+                        _logger.info(f"  {i}. {product.name[:40]}: €{product.list_price:.2f}")
+                    
+                    # Check for inappropriately priced products
+                    if self.target_budget >= 1000:
+                        min_appropriate_price = 20.0
+                    elif self.target_budget >= 500:
+                        min_appropriate_price = 15.0
+                    elif self.target_budget >= 200:
+                        min_appropriate_price = 10.0
+                    else:
+                        min_appropriate_price = 5.0
+                    
+                    low_price_products = [p for p in composition.product_ids if p.list_price < min_appropriate_price]
+                    
+                    if low_price_products:
+                        _logger.warning(f"""
+                        ⚠️ Found {len(low_price_products)} products below €{min_appropriate_price:.2f}:
+                        {', '.join([f'{p.name[:20]} (€{p.list_price:.2f})' for p in low_price_products[:3]])}
+                        These should be excluded in future generations for €{self.target_budget:.2f} budgets.
                         """)
-                        
-                        # Check for zero-price products
-                        zero_price_products = []
-                        for product in composition.product_ids:
-                            if product.list_price < 10:
-                                zero_price_products.append(f"{product.name}: €{product.list_price:.2f}")
-                        
-                        if zero_price_products:
-                            error_msg = f"""
-                            ⚠️ Products with invalid prices detected:
-                            {chr(10).join(zero_price_products[:5])}
-                            
-                            Please run the database fix to update product prices.
-                            """
-                            
-                            # Delete the invalid composition
-                            composition.unlink()
-                            
-                            raise UserError(error_msg)
-                        else:
-                            # Try again with stricter parameters
-                            _logger.warning("Retrying with stricter price filters...")
-                            
-                            # Add minimum price requirement to notes
-                            enhanced_notes = final_notes + " Minimum price per product: €10."
-                            
-                            # Retry generation
-                            retry_result = self.recommender_id.generate_gift_recommendations(
-                                partner_id=self.partner_id.id,
-                                target_budget=self.target_budget,
-                                client_notes=enhanced_notes,
-                                dietary_restrictions=dietary,
-                                composition_type=self.composition_type
-                            )
-                            
-                            if retry_result.get('success'):
-                                # Delete the first invalid composition
-                                composition.unlink()
-                                result = retry_result
-                            else:
-                                raise UserError(f"""
-                                Generation failed: Budget target €{self.target_budget:.2f} cannot be met.
-                                Actual result was only €{actual_cost:.2f}.
-                                
-                                Please check that products have valid prices in the database.
-                                """)
+                    
+                    # If variance is too high, log but don't fail
+                    if abs(variance) > 10:
+                        _logger.warning(f"⚠️ High variance: {variance:+.1f}%. Consider adjusting product selection logic.")
                 
-                # Check 3: Validate product count
-                actual_count = len(composition.product_ids)
-                if self.specify_product_count and self.product_count:
-                    if actual_count != self.product_count:
-                        _logger.warning(f"Product count mismatch: {actual_count} vs {self.product_count}")
-                
-                # Check 4: Log each product for debugging
-                _logger.info("=== FINAL PRODUCTS ===")
-                total_price = 0
-                for i, product in enumerate(composition.product_ids, 1):
-                    price = product.list_price
-                    total_price += price
-                    _logger.info(f"{i}. {product.name[:40]}: €{price:.2f}")
-                _logger.info(f"TOTAL: €{total_price:.2f}")
-                
-                # If we got here, the composition is valid
+                # Process success
                 self._process_success_result(result)
                 
-                # Show success and open the composition
+                # Open the composition
                 return {
                     'type': 'ir.actions.act_window',
-                    'name': 'Generated Composition',
+                    'name': 'Generated Gift Composition',
                     'res_model': 'gift.composition',
-                    'res_id': result['composition_id'],
+                    'res_id': composition_id,
                     'view_mode': 'form',
                     'target': 'current',
                 }
@@ -823,27 +788,10 @@ class OllamaRecommendationWizard(models.TransientModel):
                 self._process_error_result(result)
                 
         except Exception as e:
-            _logger.error(f"Generation failed with exception: {e}")
+            _logger.error(f"❌ Generation failed: {str(e)}")
             self.state = 'error'
             self.error_message = str(e)
-            
-            # Provide helpful error message
-            if "invalid prices" in str(e).lower():
-                raise UserError(f"""
-                {str(e)}
-                
-                Quick Fix:
-                1. Go to Products → Products
-                2. Filter for: Sale OK = Yes, List Price < 10
-                3. Update all prices to at least €10
-                
-                Or run this SQL:
-                UPDATE product_template 
-                SET list_price = 10 
-                WHERE sale_ok = true AND list_price < 10;
-                """)
-            else:
-                raise
+            raise
     
     def _prepare_dietary_restrictions(self):
         """Prepare comprehensive dietary restrictions list"""

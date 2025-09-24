@@ -1220,104 +1220,126 @@ class OllamaGiftRecommender(models.Model):
             return {'success': False, 'error': str(e)}
     
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_count, context):
-        """Smart selection with MANDATORY price validation"""
+        """Smart selection with automatic budget compliance (±5%)"""
         
-        min_budget = budget * (1 - flexibility)
-        max_budget = budget * (1 + flexibility)
+        # CRITICAL: Budget flexibility is typically 5%
+        min_budget = budget * (1 - flexibility)  # €950 for €1000 budget
+        max_budget = budget * (1 + flexibility)  # €1050 for €1000 budget
         
-        _logger.warning(f"🎯 Target: {target_count} products, €{budget:.2f} (€{min_budget:.2f}-€{max_budget:.2f})")
+        _logger.info(f"""
+        🎯 Smart Selection Optimization:
+        Target: {target_count} products
+        Budget: €{budget:.2f}
+        Acceptable Range (±{flexibility*100:.0f}%): €{min_budget:.2f} - €{max_budget:.2f}
+        Enforce Count: {enforce_count}
+        """)
         
-        # CRITICAL: Remove any products with invalid prices that slipped through
-        valid_products = []
-        for p in products:
-            try:
-                price = float(p.list_price or 0)
-                if price >= 10.0:  # ABSOLUTE MINIMUM
-                    valid_products.append(p)
-                else:
-                    _logger.error(f"🚨 INVALID PRICE DETECTED: {p.name} = €{price:.2f}")
-            except:
-                continue
-        
-        if not valid_products:
-            _logger.error("🚨 NO VALID PRODUCTS AVAILABLE!")
+        if not products:
+            _logger.error("❌ No products available for selection")
             return []
         
-        # Sort by price for balanced selection
-        valid_products.sort(key=lambda p: float(p.list_price))
+        # Calculate ideal price per product
+        ideal_price_per_product = budget / target_count if target_count > 0 else budget / 12
         
-        # Calculate if we can reach the budget
-        cheapest_sum = sum(float(p.list_price) for p in valid_products[:target_count])
-        most_expensive = sorted(valid_products, key=lambda p: float(p.list_price), reverse=True)
-        expensive_sum = sum(float(p.list_price) for p in most_expensive[:target_count])
+        # Sort products by how close they are to ideal price
+        products_list = list(products)
+        products_list.sort(key=lambda p: abs(float(p.list_price) - ideal_price_per_product))
         
-        _logger.warning(f"💵 Range check: Cheapest {target_count} = €{cheapest_sum:.2f} | Most expensive = €{expensive_sum:.2f}")
-        
-        # STRATEGY: Balanced selection
+        # STRATEGY 1: Try to hit budget exactly with ideal products
         selected = []
         current_total = 0
         
-        # If even the most expensive don't reach minimum, adjust strategy
-        if expensive_sum < min_budget:
-            _logger.warning("⚠️ Adjusting strategy: Adding expensive products multiple times")
+        # First pass: Add products close to ideal price
+        for product in products_list:
+            if len(selected) >= target_count and enforce_count:
+                break
+                
+            price = float(product.list_price)
             
-            # Take the most expensive products
-            for product in most_expensive[:target_count]:
+            # Check if adding this product keeps us in budget
+            if current_total + price <= max_budget:
                 selected.append(product)
-                current_total += float(product.list_price)
+                current_total += price
+                
+                # Stop if we've reached the target count and are in budget range
+                if len(selected) == target_count and min_budget <= current_total <= max_budget:
+                    _logger.info(f"✅ Perfect match found! {len(selected)} products = €{current_total:.2f}")
+                    break
+        
+        # STRATEGY 2: If we're under budget, try swapping or adding
+        if current_total < min_budget:
+            _logger.warning(f"⚠️ Under budget: €{current_total:.2f} < €{min_budget:.2f}")
             
-            # Add more expensive products to reach budget
-            attempts = 0
-            while current_total < min_budget and attempts < 50:
-                for product in most_expensive[:5]:
+            # Get more expensive products not yet selected
+            remaining_products = [p for p in products if p not in selected]
+            remaining_products.sort(key=lambda p: float(p.list_price), reverse=True)
+            
+            if not enforce_count:
+                # We can add more products
+                for product in remaining_products:
+                    price = float(product.list_price)
+                    if current_total + price <= max_budget:
+                        selected.append(product)
+                        current_total += price
+                        _logger.info(f"➕ Added {product.name[:30]} (€{price:.2f}) -> Total: €{current_total:.2f}")
+                        
+                        if current_total >= min_budget:
+                            break
+            else:
+                # Must maintain count - try swapping
+                cheapest_selected = sorted(selected, key=lambda p: float(p.list_price))
+                
+                for cheap_product in cheapest_selected:
                     if current_total >= min_budget:
                         break
-                    if current_total + float(product.list_price) <= max_budget:
-                        selected.append(product)
-                        current_total += float(product.list_price)
-                attempts += 1
-        else:
-            # Normal balanced selection
-            # Start with some expensive products
-            expensive_count = target_count // 3
-            for product in most_expensive[:expensive_count]:
-                selected.append(product)
-                current_total += float(product.list_price)
+                        
+                    for expensive_product in remaining_products:
+                        new_total = current_total - float(cheap_product.list_price) + float(expensive_product.list_price)
+                        
+                        if min_budget <= new_total <= max_budget:
+                            selected.remove(cheap_product)
+                            selected.append(expensive_product)
+                            current_total = new_total
+                            _logger.info(f"🔄 Swapped {cheap_product.name[:20]} with {expensive_product.name[:20]}")
+                            break
+        
+        # STRATEGY 3: If we're over budget, remove or swap
+        elif current_total > max_budget:
+            _logger.warning(f"⚠️ Over budget: €{current_total:.2f} > €{max_budget:.2f}")
             
-            # Add medium-priced products
-            remaining_budget = budget - current_total
-            remaining_count = target_count - len(selected)
+            # Sort by price descending
+            selected.sort(key=lambda p: float(p.list_price), reverse=True)
             
-            if remaining_count > 0:
-                avg_needed = remaining_budget / remaining_count
-                
-                # Find products close to the average needed price
-                candidates = [p for p in valid_products if p not in selected]
-                candidates.sort(key=lambda p: abs(float(p.list_price) - avg_needed))
-                
-                for product in candidates[:remaining_count]:
-                    selected.append(product)
-                    current_total += float(product.list_price)
+            # Remove expensive products until we're in range
+            while current_total > max_budget and len(selected) > target_count:
+                removed = selected.pop(0)
+                current_total -= float(removed.list_price)
+                _logger.info(f"➖ Removed {removed.name[:30]} (€{removed.list_price:.2f})")
         
-        # FINAL VALIDATION - CRITICAL
-        final_selected = []
-        final_total = 0
+        # Final validation
+        final_total = sum(float(p.list_price) for p in selected)
+        budget_compliance = min_budget <= final_total <= max_budget
         
-        for product in selected:
-            price = float(product.list_price or 0)
-            if price >= 10.0:  # NEVER accept products under €10
-                final_selected.append(product)
-                final_total += price
-            else:
-                _logger.error(f"🚨 REMOVED INVALID PRODUCT IN FINAL CHECK: {product.name} = €{price:.2f}")
+        _logger.info(f"""
+        =====================================
+        ✅ FINAL SELECTION COMPLETE
+        =====================================
+        Products: {len(selected)} {'✅' if len(selected) == target_count or not enforce_count else '⚠️'}
+        Total: €{final_total:.2f}
+        Target Range: €{min_budget:.2f} - €{max_budget:.2f}
+        Compliance: {'✅ IN RANGE' if budget_compliance else '❌ OUT OF RANGE'}
+        Variance: {((final_total - budget) / budget * 100):+.1f}%
+        =====================================
+        """)
         
-        _logger.warning(f"✅ Final selection: {len(final_selected)} products = €{final_total:.2f}")
+        # Log each product
+        for i, product in enumerate(selected[:15], 1):
+            _logger.info(f"   {i}. {product.name[:40]}: €{product.list_price:.2f}")
         
-        # Log each selected product for debugging
-        for i, product in enumerate(final_selected[:12], 1):
-            _logger.info(f"   {i}. {product.name[:40]} - €{product.list_price:.2f}")
+        if len(selected) > 15:
+            _logger.info(f"   ... and {len(selected) - 15} more products")
         
-        return final_selected
+        return selected
     
     # ================== NOTES PARSING WITH OLLAMA ==================
     
@@ -1453,22 +1475,46 @@ Extract and return ONLY a valid JSON object with these fields:
         return False
 
     def _get_smart_product_pool(self, budget, dietary, context):
-        """Get intelligently filtered product pool - STRICTLY EXCLUDING ZERO-PRICE ITEMS"""
+        """Get intelligently filtered product pool based on budget context"""
         
         patterns = context.get('patterns', {})
         
-        # CRITICAL: Enforce absolute minimum price of €10
-        min_price = max(10.0, budget * 0.02)  # At least €10, never less
-        max_price = min(budget * 0.4, 500.0)  # Cap at €500 or 40% of budget
+        # SMART FILTERING: Adjust minimum price based on budget
+        # For high budgets, exclude very cheap products that don't make sense
+        if budget >= 1000:
+            # Premium gift: exclude products under €20
+            min_price = 20.0
+            max_price = min(budget * 0.3, 500.0)  # Max 30% of budget per item
+        elif budget >= 500:
+            # High budget: exclude products under €15
+            min_price = 15.0
+            max_price = min(budget * 0.4, 400.0)  # Max 40% of budget per item
+        elif budget >= 200:
+            # Medium budget: exclude products under €10
+            min_price = 10.0
+            max_price = min(budget * 0.5, 300.0)   
+        elif budget >= 100:
+            # Lower budget: exclude products under €5
+            min_price = 5.0
+            max_price = min(budget * 0.6, 150.0)
+        else:
+            # Small budget: include all products €1 and up
+            min_price = 1.0
+            max_price = budget * 0.7
         
-        # Log for debugging
-        _logger.warning(f"🔍 Price filter: €{min_price:.2f} - €{max_price:.2f}")
+        _logger.info(f"""
+        🎯 Smart Product Filtering for Gift Composition:
+        Target Budget: €{budget:.2f}
+        Actual Range (±5%): €{budget*0.95:.2f} - €{budget*1.05:.2f}
+        Product Price Filter: €{min_price:.2f} - €{max_price:.2f}
+        Strategy: {'Premium' if budget >= 1000 else 'High-End' if budget >= 500 else 'Standard' if budget >= 200 else 'Budget'}
+        """)
         
-        # Build strict domain
+        # Build domain with smart price filtering
         domain = [
             ('sale_ok', '=', True),
             ('active', '=', True),
-            ('list_price', '>=', min_price),  # CRITICAL: Use >= not >
+            ('list_price', '>=', min_price),  # Smart minimum based on budget
             ('list_price', '<=', max_price),
             ('default_code', '!=', False),  # Must have internal reference
         ]
@@ -1476,10 +1522,11 @@ Extract and return ONLY a valid JSON object with these fields:
         # Add dietary filters if needed
         if dietary and 'halal' in dietary:
             domain.extend([
-                '|', '|',
+                '|', '|', '|',
                 ('categ_id.complete_name', 'not ilike', 'IBERICOS'),
                 ('categ_id.complete_name', 'not ilike', 'ALCOHOL'),
-                ('name', 'not ilike', 'pork')
+                ('name', 'not ilike', 'pork'),
+                ('name', 'not ilike', 'jamón')
             ])
         
         # Exclude specific IDs if provided
@@ -1490,49 +1537,54 @@ Extract and return ONLY a valid JSON object with these fields:
         # Search for products
         products = self.env['product.template'].sudo().search(domain, limit=1000)
         
-        _logger.warning(f"📦 Found {len(products)} products before validation")
+        _logger.info(f"📦 Found {len(products)} products in appropriate price range")
         
-        # CRITICAL: Triple validation - never trust the domain alone
+        # Additional validation
         valid_products = []
-        invalid_count = 0
+        excluded_count = 0
         
         for product in products:
             try:
-                # Get the actual price
                 price = float(product.list_price or 0)
                 
-                # STRICT validation
+                # Double-check price is in range
                 if price < min_price:
-                    invalid_count += 1
-                    _logger.warning(f"❌ Rejected {product.name}: €{price:.2f} < €{min_price:.2f}")
+                    excluded_count += 1
+                    _logger.debug(f"❌ Excluding {product.name}: €{price:.2f} < €{min_price:.2f}")
                     continue
                 
                 if price > max_price:
-                    invalid_count += 1
-                    _logger.warning(f"❌ Rejected {product.name}: €{price:.2f} > €{max_price:.2f}")
+                    excluded_count += 1
+                    _logger.debug(f"❌ Excluding {product.name}: €{price:.2f} > €{max_price:.2f}")
                     continue
                 
-                # Check actual stock availability using a more reliable method
-                if not self._verify_stock_availability(product):
-                    invalid_count += 1
-                    _logger.warning(f"❌ Rejected {product.name}: No stock")
+                # Check stock availability
+                if not self._has_stock(product):
+                    excluded_count += 1
                     continue
                 
                 valid_products.append(product)
                 
-            except (ValueError, TypeError) as e:
-                invalid_count += 1
-                _logger.warning(f"❌ Rejected {product.name}: Invalid price - {e}")
+            except (ValueError, TypeError):
+                excluded_count += 1
                 continue
-        
-        _logger.warning(f"✅ Valid products: {len(valid_products)} | ❌ Rejected: {invalid_count}")
         
         # Convert back to recordset
         if valid_products:
             valid_ids = [p.id for p in valid_products]
-            return self.env['product.template'].browse(valid_ids)
+            result = self.env['product.template'].browse(valid_ids)
+        else:
+            result = self.env['product.template']
         
-        return self.env['product.template']
+        _logger.info(f"""
+        ✅ Product Pool Summary:
+        - Valid products: {len(result)}
+        - Excluded: {excluded_count}
+        - Price range: €{min_price:.2f} - €{max_price:.2f}
+        - For budget: €{budget:.2f} (±5% = €{budget*0.95:.2f}-€{budget*1.05:.2f})
+        """)
+        
+        return result
     
     def _check_dietary_compliance(self, product, dietary_restrictions):
         """Check if product complies with dietary restrictions"""
