@@ -1,255 +1,242 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-    <record id="view_ollama_recommendation_wizard_form" model="ir.ui.view">
-        <field name="name">ollama.recommendation.wizard.form</field>
-        <field name="model">ollama.recommendation.wizard</field>
-        <field name="arch" type="xml">
-            <form string="Gift Recommendation Wizard">
-                <header>
-                    <field name="state" widget="statusbar" statusbar_visible="draft,generating,done,error"/>
-                </header>
-                <sheet>
-                    <!-- Top Action Box -->
-                    <div class="oe_button_box" name="button_box">
-                        <button name="action_test_connection" 
-                                type="object" 
-                                string="Test AI" 
-                                class="oe_stat_button" 
-                                icon="fa-robot"/>
-                    </div>
-                    
-                    <!-- Title Section -->
-                    <div class="oe_title">
-                        <h1>
-                            <field name="partner_id" 
-                                   placeholder="Select Client..." 
-                                   options="{'no_create_edit': True}" 
-                                   class="oe_inline"
-                                   style="width: 400px;"/>
-                        </h1>
-                        <h3 class="text-muted">Gift Composition Generator</h3>
-                    </div>
-                    
-                    <!-- AI Status Banner -->
-                    <div class="alert alert-info mb-3" attrs="{'invisible': [('ollama_status', '=', False)]}">
-                        <field name="ollama_status" widget="html" nolabel="1"/>
-                    </div>
-                    
-                    <!-- Main Configuration Section -->
-                    <group name="main_config">
-                        <group name="budget_group" string="Budget Configuration">
-                            <field name="target_year"/>
-                            <field name="currency_id" invisible="1"/>
-                            <field name="target_budget" 
-                                   widget="monetary" 
-                                   options="{'currency_field': 'currency_id'}"
-                                   style="font-weight: bold; font-size: 120%;"/>
-                            <field name="specify_product_count" widget="boolean_toggle"/>
-                            <field name="product_count" 
-                                   attrs="{'invisible': [('specify_product_count', '=', False)], 
-                                          'required': [('specify_product_count', '=', True)]}"
-                                   placeholder="Number of products..."/>
-                        </group>
+    <data>
+        
+        <!-- Ollama Recommendation Wizard Form View -->
+        <record id="view_ollama_recommendation_wizard_form" model="ir.ui.view">
+            <field name="name">ollama.recommendation.wizard.form</field>
+            <field name="model">ollama.recommendation.wizard</field>
+            <field name="arch" type="xml">
+                <form string="🎁 AI Gift Composition Generator">
+                    <header>
+                        <field name="state" widget="statusbar" statusbar_visible="draft,generating,done"/>
+                    </header>
+                    <sheet>
+                        <!-- Title Section -->
+                        <div class="oe_title">
+                            <h1 style="color: #875A7B;">
+                                <i class="fa fa-robot"/> AI Gift Recommendation Wizard
+                            </h1>
+                            <field name="ollama_status" nolabel="1"/>
+                        </div>
                         
-                        <group name="strategy_group" string="Generation Strategy">
-                            <field name="engine_type" widget="radio"/>
-                            <field name="composition_type" invisible="1"/>
-                            <field name="composition_display_type" 
-                                   readonly="1" 
-                                   widget="badge"
-                                   attrs="{'invisible': [('composition_display_type', '=', False)]}"/>
-                            <field name="expected_strategy" 
-                                   widget="badge" 
-                                   attrs="{'invisible': [('partner_id', '=', False)]}"/>
-                        </group>
-                    </group>
-                    
-                    <!-- Experience Selection (conditional) -->
-                    <group name="experience_group" 
-                           string="Experience Configuration" 
-                           attrs="{'invisible': [('engine_type', '!=', 'experience')]}">
-                        <group>
-                            <field name="experience_category_filter" 
-                                   widget="selection"/>
-                            <field name="selected_experience" 
-                                   domain="[('is_experience', '=', True)]"
-                                   context="{'default_is_experience': True}"
-                                   options="{'no_create_edit': True}"/>
-                        </group>
-                        <group>
-                            <field name="experience_preview" 
-                                   widget="html" 
-                                   nolabel="1"
-                                   attrs="{'invisible': [('selected_experience', '=', False)]}"/>
-                        </group>
-                    </group>
-                    
-                    <!-- Dietary Restrictions Section -->
-                    <group name="dietary_group" string="Dietary Restrictions">
-                        <group>
-                            <field name="dietary_restrictions" widget="selection"/>
-                            <field name="dietary_restrictions_text" 
-                                   widget="text"
-                                   placeholder="Additional dietary requirements..."
-                                   attrs="{'invisible': [('dietary_restrictions', 'in', ['none'])]}"/>
-                        </group>
-                        <group attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')]}">
-                            <label string="Select Restrictions"/>
-                            <div class="o_row">
-                                <field name="is_halal" widget="boolean_toggle"/>
-                                <label for="is_halal" string="Halal" class="ml-2 mr-3"/>
-                                <field name="is_vegan" widget="boolean_toggle"/>
-                                <label for="is_vegan" string="Vegan" class="ml-2 mr-3"/>
-                                <field name="is_vegetarian" widget="boolean_toggle"/>
-                                <label for="is_vegetarian" string="Vegetarian" class="ml-2 mr-3"/>
-                                <field name="is_gluten_free" widget="boolean_toggle"/>
-                                <label for="is_gluten_free" string="Gluten Free" class="ml-2 mr-3"/>
-                                <field name="is_non_alcoholic" widget="boolean_toggle"/>
-                                <label for="is_non_alcoholic" string="No Alcohol" class="ml-2"/>
-                            </div>
-                        </group>
-                    </group>
-                    
-                    <!-- Client Notes Section -->
-                    <group string="Special Instructions and Notes">
-                        <field name="client_notes" 
-                               widget="text" 
-                               nolabel="1"
-                               placeholder="Enter any special requirements:&#10;• Specific products or categories&#10;• Budget overrides&#10;• Exclusions&#10;• Gift occasion or theme&#10;• Any other preferences..."
-                               style="min-height: 100px;"/>
-                    </group>
-                    
-                    <!-- Client Analysis Section -->
-                    <group name="analysis_section" 
-                           string="Client Analysis" 
-                           attrs="{'invisible': [('partner_id', '=', False)]}"
-                           class="bg-light p-3 rounded">
+                        <!-- Main Content in Tabs -->
                         <notebook>
-                            <page string="Client Information">
-                                <field name="client_info" widget="html" nolabel="1"/>
-                            </page>
-                            <page string="Purchase History">
-                                <field name="client_history_summary" widget="html" nolabel="1"/>
-                                <group col="4" class="mt-3">
-                                    <field name="has_previous_orders" readonly="1" widget="boolean_toggle"/>
-                                    <field name="has_last_year_data" readonly="1" widget="boolean_toggle"/>
-                                    <field name="business_rules_applicable" readonly="1" widget="boolean_toggle"/>
-                                    <field name="client_dietary_history" readonly="1"/>
+                            <!-- Tab 1: Client & Budget -->
+                            <page string="Client & Budget" name="client_budget">
+                                <group>
+                                    <group name="client_section" string="Client Selection">
+                                        <field name="partner_id" 
+                                               options="{'no_create': True, 'no_open': True}"
+                                               placeholder="Select client..."/>
+                                        <field name="expected_strategy" 
+                                               attrs="{'invisible': [('partner_id', '=', False)]}"
+                                               readonly="1"/>
+                                    </group>
+                                    <group name="budget_section" string="Budget Configuration">
+                                        <field name="target_budget" widget="monetary"/>
+                                        <field name="currency_id" invisible="1"/>
+                                        <field name="target_year"/>
+                                        <field name="business_rules_applicable" 
+                                               widget="boolean_toggle"
+                                               readonly="1"
+                                               attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                    </group>
+                                </group>
+                                
+                                <!-- Dynamic Client Information -->
+                                <separator string="Client Analysis" attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                <div attrs="{'invisible': [('partner_id', '=', False)]}">
+                                    <field name="client_info" nolabel="1" readonly="1"/>
+                                </div>
+                                
+                                <!-- AI Recommendations Panel -->
+                                <separator string="AI Recommendations" attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                <group attrs="{'invisible': [('partner_id', '=', False)]}" col="4">
+                                    <field name="budget_recommendation" readonly="1"/>
+                                    <field name="approach_recommendation" readonly="1"/>
+                                    <field name="risk_level" widget="badge" readonly="1"
+                                           decoration-success="risk_level == 'low'"
+                                           decoration-warning="risk_level == 'medium'"
+                                           decoration-danger="risk_level == 'high'"/>
+                                    <field name="has_previous_orders" invisible="1"/>
+                                    <field name="has_last_year_data" invisible="1"/>
                                 </group>
                             </page>
+                            
+                            <!-- Tab 2: Composition Settings -->
+                            <page string="Composition" name="composition_settings">
+                                <group>
+                                    <group string="Composition Type">
+                                        <field name="force_composition_type" widget="radio"/>
+                                        <field name="composition_type" 
+                                               attrs="{'invisible': [('force_composition_type', '!=', 'auto')], 
+                                                      'readonly': [('force_composition_type', '!=', 'auto')]}"/>
+                                        <field name="engine_type" invisible="1"/>
+                                    </group>
+                                    <group string="Product Configuration">
+                                        <field name="specify_product_count"/>
+                                        <field name="product_count" 
+                                               attrs="{'invisible': [('specify_product_count', '=', False)],
+                                                      'required': [('specify_product_count', '=', True)]}"/>
+                                    </group>
+                                </group>
+                                
+                                <!-- Experience Selection (conditional) -->
+                                <group string="Experience Selection" 
+                                       attrs="{'invisible': ['|', 
+                                              ('force_composition_type', '!=', 'experience'),
+                                              ('composition_type', '!=', 'experience')]}">
+                                    <field name="experience_category_filter"/>
+                                    <field name="selected_experience" 
+                                           attrs="{'invisible': [('experience_category_filter', '=', 'all')]}"/>
+                                    <field name="experience_preview" 
+                                           nolabel="1" 
+                                           colspan="2"
+                                           attrs="{'invisible': [('selected_experience', '=', False)]}"/>
+                                </group>
+                            </page>
+                            
+                            <!-- Tab 3: Dietary & Preferences -->
+                            <page string="Dietary & Preferences" name="dietary_prefs">
+                                <group>
+                                    <group string="Dietary Restrictions">
+                                        <field name="dietary_restrictions" widget="radio"/>
+                                        <field name="dietary_restrictions_text" 
+                                               placeholder="Enter additional restrictions..."
+                                               attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')]}"/>
+                                    </group>
+                                    <group string="Detailed Options">
+                                        <field name="is_halal"/>
+                                        <field name="is_vegan"/>
+                                        <field name="is_vegetarian"/>
+                                        <field name="is_gluten_free"/>
+                                        <field name="is_non_alcoholic"/>
+                                    </group>
+                                </group>
+                                
+                                <!-- Client Dietary History -->
+                                <group string="Client History" attrs="{'invisible': [('partner_id', '=', False)]}">
+                                    <field name="partner_dietary_restrictions" readonly="1" nolabel="1"/>
+                                    <field name="client_dietary_history" readonly="1" nolabel="1"/>
+                                </group>
+                            </page>
+                            
+                            <!-- Tab 4: Notes & Context -->
+                            <page string="Notes & Instructions" name="notes">
+                                <group>
+                                    <field name="client_notes" 
+                                           nolabel="1"
+                                           placeholder="Enter any special requirements, preferences, or instructions...&#10;&#10;Examples:&#10;• 'Client loves Spanish wines and artisanal cheeses'&#10;• 'Budget flexible up to €1500 for exceptional items'&#10;• 'Include exactly 15 products'&#10;• 'No chocolates or nuts (allergy)'&#10;• 'Prefers traditional products over modern'"
+                                           style="min-height: 150px;"/>
+                                </group>
+                                <div class="alert alert-info" role="alert">
+                                    <i class="fa fa-info-circle"/> <b>Note:</b> Information in this field takes precedence over other settings.
+                                    The AI will intelligently parse your notes to extract budget, product count, and preferences.
+                                </div>
+                            </page>
+                            
+                            <!-- Tab 5: History Analysis -->
+                            <page string="History Analysis" name="history" 
+                                  attrs="{'invisible': [('partner_id', '=', False)]}">
+                                <field name="client_history_summary" nolabel="1" readonly="1"/>
+                            </page>
+                            
+                            <!-- Tab 6: Results (shown after generation) -->
+                            <page string="Results" name="results" 
+                                  attrs="{'invisible': [('state', 'not in', ['done', 'error'])]}">
+                                <group attrs="{'invisible': [('state', '!=', 'done')]}">
+                                    <field name="composition_id" readonly="1"/>
+                                    <field name="confidence_score" widget="percentage" readonly="1"/>
+                                    <field name="total_cost" widget="monetary" readonly="1"/>
+                                    <field name="product_count_actual" readonly="1"/>
+                                </group>
+                                
+                                <separator string="Result Details"/>
+                                <field name="result_message" 
+                                       nolabel="1" 
+                                       readonly="1"
+                                       attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                                <field name="error_message" 
+                                       nolabel="1" 
+                                       readonly="1"
+                                       attrs="{'invisible': [('state', '!=', 'error')]}"/>
+                                
+                                <separator string="Generated Products" 
+                                          attrs="{'invisible': [('recommended_products', '=', [])]}"/>
+                                <field name="recommended_products" 
+                                       readonly="1"
+                                       attrs="{'invisible': [('recommended_products', '=', [])]}"
+                                       context="{'tree_view_ref': 'product.product_template_tree_view'}">
+                                    <tree>
+                                        <field name="default_code"/>
+                                        <field name="name"/>
+                                        <field name="categ_id"/>
+                                        <field name="list_price" widget="monetary"/>
+                                    </tree>
+                                </field>
+                            </page>
                         </notebook>
-                    </group>
+                    </sheet>
                     
-                    <!-- Results Section -->
-                    <group name="results_section" 
-                           attrs="{'invisible': [('state', '=', 'draft')]}"
-                           class="mt-4">
-                        <separator string="Generation Results" class="mb-3"/>
+                    <!-- Footer Buttons -->
+                    <footer>
+                        <!-- Main action buttons -->
+                        <button name="action_generate_recommendation" 
+                                string="🚀 Generate Composition" 
+                                type="object" 
+                                class="btn-primary"
+                                attrs="{'invisible': ['|', ('state', '!=', 'draft'), ('partner_id', '=', False)]}"
+                                data-hotkey="q"/>
                         
-                        <!-- Success Results -->
-                        <div attrs="{'invisible': [('state', '!=', 'done')]}" 
-                             class="alert alert-success">
-                            <h4 class="alert-heading">Composition Generated Successfully!</h4>
-                            <field name="result_message" widget="html" nolabel="1"/>
+                        <button name="action_view_composition" 
+                                string="📄 View Composition" 
+                                type="object" 
+                                class="btn-success"
+                                attrs="{'invisible': [('composition_id', '=', False)]}"/>
+                        
+                        <button name="action_generate_another" 
+                                string="🔄 Generate Another" 
+                                type="object" 
+                                class="btn-secondary"
+                                attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                        
+                        <!-- Utility buttons -->
+                        <button name="action_test_connection" 
+                                string="🔌 Test Ollama" 
+                                type="object" 
+                                class="btn-info"
+                                attrs="{'invisible': [('state', 'not in', ['draft', 'error'])]}"/>
+                        
+                        <button string="Close" 
+                                class="btn-secondary" 
+                                special="cancel"/>
+                        
+                        <!-- State indicator -->
+                        <div class="text-muted float-left" 
+                             attrs="{'invisible': [('partner_id', '!=', False)]}">
+                            <i class="fa fa-arrow-up"/> Select a client to begin
                         </div>
-                        
-                        <group attrs="{'invisible': [('state', '!=', 'done')]}" col="4">
-                            <field name="composition_id" 
-                                   readonly="1" 
-                                   options="{'no_open': False}"/>
-                            <field name="total_cost" 
-                                   widget="monetary" 
-                                   options="{'currency_field': 'currency_id'}"/>
-                            <field name="product_count_actual" 
-                                   readonly="1" 
-                                   string="Products"/>
-                            <field name="confidence_score" 
-                                   widget="percentage"/>
-                        </group>
-                        
-                        <!-- Products Table -->
-                        <group attrs="{'invisible': [('recommended_products', '=', [])]}" 
-                               string="Products in Composition" 
-                               class="mt-3">
-                            <field name="recommended_products" nolabel="1" mode="tree">
-                                <tree create="false" edit="false" delete="false" decoration-info="True">
-                                    <field name="default_code" optional="show"/>
-                                    <field name="name"/>
-                                    <field name="categ_id"/>
-                                    <field name="list_price" widget="monetary" sum="Total"/>
-                                </tree>
-                            </field>
-                        </group>
-                        
-                        <!-- Error Display -->
-                        <div attrs="{'invisible': [('state', '!=', 'error')]}" 
-                             class="alert alert-danger">
-                            <h4 class="alert-heading">Generation Failed</h4>
-                            <field name="error_message" widget="text" nolabel="1"/>
-                        </div>
-                    </group>
-                    
-                    <!-- Hidden Fields -->
-                    <field name="recommender_id" invisible="1"/>
-                </sheet>
-                
-                <footer>
-                    <!-- Main Generation Button -->
-                    <button name="action_generate_recommendation" 
-                            type="object" 
-                            string="Generate Composition" 
-                            class="btn-primary"
-                            icon="fa-magic"
-                            states="draft,error"/>
-                    
-                    <!-- Regenerate Button -->
-                    <button name="action_generate_recommendation" 
-                            type="object" 
-                            string="Regenerate" 
-                            class="btn-warning"
-                            icon="fa-refresh"
-                            states="done"
-                            confirm="This will create a new composition. Continue?"/>
-                    
-                    <!-- View Composition Button -->
-                    <button name="action_view_composition" 
-                            type="object" 
-                            string="Open Composition" 
-                            class="btn-success"
-                            icon="fa-external-link"
-                            attrs="{'invisible': [('composition_id', '=', False)]}"/>
-                    
-                    <!-- Generate Another Button -->
-                    <button name="action_generate_another" 
-                            type="object" 
-                            string="New Generation" 
-                            class="btn-info"
-                            icon="fa-plus"
-                            states="done"/>
-                    
-                    <!-- Cancel Button -->
-                    <button string="Close" 
-                            class="btn-secondary" 
-                            special="cancel"
-                            icon="fa-times"/>
-                </footer>
-            </form>
-        </field>
-    </record>
-    
-    <!-- Action -->
-    <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
-        <field name="name">Gift Recommendation Wizard</field>
-        <field name="res_model">ollama.recommendation.wizard</field>
-        <field name="view_mode">form</field>
-        <field name="target">new</field>
-        <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
-    </record>
-    
-    <!-- Menu Item -->
-    <menuitem id="menu_ollama_recommendation_wizard" 
-              name="Gift Wizard" 
-              parent="gift_manager.menu_gift_root"
-              action="action_ollama_recommendation_wizard" 
-              sequence="1"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+        
+        <!-- Ollama Recommendation Wizard Action -->
+        <record id="action_ollama_recommendation_wizard" model="ir.actions.act_window">
+            <field name="name">🎁 AI Gift Recommendation</field>
+            <field name="res_model">ollama.recommendation.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+            <field name="context">{}</field>
+        </record>
+        
+        <!-- Add Menu Item -->
+        <menuitem id="menu_ollama_recommendation_wizard"
+                  name="AI Recommendations"
+                  parent="sale.sale_order_menu"
+                  action="action_ollama_recommendation_wizard"
+                  sequence="100"/>
+        
+    </data>
 </odoo>
