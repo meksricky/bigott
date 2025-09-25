@@ -792,46 +792,159 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ================== ACTION METHODS (FROM ORIGINAL - KEEPING EXACT SAME) ==================
     
     def action_generate_recommendation(self):
-        """Generate recommendation with smart validation"""
+        """Generate recommendation using full AI intelligence"""
         self.ensure_one()
         
         if not self.partner_id:
-            raise UserError("Please select a client")
+            raise UserError("Please select a client / Por favor seleccione un cliente")
         
         self.state = 'generating'
         
         try:
+            # Prepare dietary restrictions comprehensively
             dietary = self._prepare_dietary_restrictions()
-            final_notes = self._prepare_final_notes()
             
-            # CRITICAL: Ensure budget is passed correctly
-            actual_budget = self.target_budget if self.target_budget > 0 else 1000.0
+            # Build comprehensive context for AI
+            final_context = self._prepare_final_notes()
+            
+            # Ensure budget is valid
+            actual_budget = self.target_budget if self.target_budget > 0 else 0
+            
+            # If no budget specified, try to infer from history or notes
+            if actual_budget == 0:
+                if self.client_notes:
+                    # Let Ollama parse the budget from notes
+                    _logger.info("No budget in form, will parse from notes")
+                else:
+                    # Use historical average if available
+                    if self.partner_id and self.recommender_id:
+                        patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
+                        if patterns and patterns.get('avg_order_value'):
+                            actual_budget = patterns['avg_order_value']
+                            _logger.info(f"Using historical average: €{actual_budget:,.2f}")
             
             _logger.info(f"""
-            ========================================
-            🎁 GIFT RECOMMENDATION GENERATION
-            ========================================
-            Client: {self.partner_id.name}
-            Budget: €{actual_budget:.2f}
-            Range (±5%): €{actual_budget*0.95:.2f} - €{actual_budget*1.05:.2f}
-            Products: {self.product_count if self.specify_product_count else 'Auto (12)'}
-            Dietary: {dietary if dietary else 'None'}
-            Type: {self.composition_type}
-            Force Type: {self.force_composition_type}
-            ========================================
+            ╔═══════════════════════════════════════════════════════╗
+            ║        🎁 AI GIFT RECOMMENDATION REQUEST             ║
+            ╠═══════════════════════════════════════════════════════╣
+            ║ Client: {self.partner_id.name[:40]:<40} ║
+            ║ Budget: €{actual_budget:>15,.2f}                     ║
+            ║ Dietary: {str(dietary)[:39] if dietary else 'None':<39} ║
+            ║ Type: {self.composition_type:<43} ║
+            ║ Context Size: {len(final_context):>10} characters          ║
+            ║ Ollama Status: {('Connected' if self.recommender_id.ollama_enabled else 'Basic Mode'):<31} ║
+            ╚═══════════════════════════════════════════════════════╝
             """)
             
-            # Add budget enforcement to notes if not already there
-            if actual_budget > 0 and str(actual_budget) not in final_notes:
-                final_notes = f"Target budget is €{actual_budget:.0f}. {final_notes}"
-            
+            # Call the intelligent recommendation engine
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=actual_budget,  # Ensure budget is always passed
-                client_notes=final_notes,
+                target_budget=actual_budget,
+                client_notes=final_context,  # Pass full context as notes
                 dietary_restrictions=dietary,
-                composition_type=self.composition_type if self.force_composition_type == 'auto' else self.force_composition_type
+                composition_type=self.force_composition_type if self.force_composition_type != 'auto' else self.composition_type
             )
+            
+            if result.get('success'):
+                # Validate the result intelligently
+                self._validate_and_process_result(result, actual_budget)
+                
+                # Open the composition
+                return {
+                    'type': 'ir.actions.act_window',
+                    'name': f'Gift Composition #{result.get("composition_id")}',
+                    'res_model': 'gift.composition',
+                    'res_id': result.get('composition_id'),
+                    'view_mode': 'form',
+                    'target': 'current',
+                }
+            else:
+                self._process_error_result(result)
+                
+        except Exception as e:
+            _logger.error(f"❌ Generation failed: {str(e)}", exc_info=True)
+            self.state = 'error'
+            self.error_message = str(e)
+            raise UserError(f"Generation failed / Generación falló: {str(e)}")
+    
+    def _validate_and_process_result(self, result, expected_budget):
+        """Intelligently validate and process the generation result"""
+        composition_id = result.get('composition_id')
+        composition = self.env['gift.composition'].browse(composition_id)
+        
+        # Calculate metrics
+        actual_cost = composition.actual_cost or sum(p.list_price for p in composition.product_ids)
+        product_count = len(composition.product_ids)
+        
+        # Calculate variance
+        if expected_budget > 0:
+            variance_pct = ((actual_cost - expected_budget) / expected_budget) * 100
+            variance_acceptable = abs(variance_pct) <= 15  # Allow 15% variance
+        else:
+            variance_pct = 0
+            variance_acceptable = True
+        
+        # Check for quality issues
+        quality_issues = []
+        
+        # Check for zero-price products
+        zero_price_products = [p for p in composition.product_ids if p.list_price <= 0]
+        if zero_price_products:
+            quality_issues.append(f"Found {len(zero_price_products)} products with €0 price")
+        
+        # Check for unrealistic product count
+        if expected_budget > 0:
+            avg_price = actual_cost / product_count if product_count > 0 else 0
+            
+            # Dynamic validation based on budget
+            if actual_cost < expected_budget * 0.5:
+                quality_issues.append(f"Total too low: €{actual_cost:.2f} vs €{expected_budget:.2f} expected")
+            elif actual_cost > expected_budget * 2:
+                quality_issues.append(f"Total too high: €{actual_cost:.2f} vs €{expected_budget:.2f} expected")
+            
+            # Check if product count makes sense
+            if avg_price > 0:
+                expected_avg = expected_budget / product_count
+                if avg_price < expected_budget * 0.01:  # Average less than 1% of budget
+                    quality_issues.append(f"Products too cheap for budget level")
+        
+        # Log comprehensive result
+        _logger.info(f"""
+        ╔═══════════════════════════════════════════════════════╗
+        ║           ✅ GENERATION COMPLETE                      ║
+        ╠═══════════════════════════════════════════════════════╣
+        ║ Composition ID: #{composition.id:<37} ║
+        ║ Products: {product_count:<44} ║
+        ║ Total Cost: €{actual_cost:>15,.2f}                   ║
+        ║ Target: €{expected_budget:>15,.2f}                   ║
+        ║ Variance: {f'{variance_pct:+.1f}%':<43} ║
+        ║ Status: {('✅ OK' if variance_acceptable else '⚠️ Check'):<45} ║
+        ╚═══════════════════════════════════════════════════════╝
+        """)
+        
+        # List top products
+        for i, product in enumerate(composition.product_ids[:10], 1):
+            _logger.info(f"  {i:2}. {product.default_code or 'N/A':<15} {product.name[:40]:<40} €{product.list_price:>8.2f}")
+        
+        if product_count > 10:
+            _logger.info(f"  ... and {product_count - 10} more products")
+        
+        # Report quality issues if any
+        if quality_issues:
+            _logger.warning(f"""
+        ⚠️ QUALITY ISSUES DETECTED:
+        {chr(10).join(f'  - {issue}' for issue in quality_issues)}
+        Consider reviewing the composition.
+            """)
+        
+        # Process success
+        self.state = 'done'
+        self.composition_id = composition_id
+        self.recommended_products = [(6, 0, composition.product_ids.ids)]
+        self.confidence_score = result.get('confidence_score', 0.85)
+        
+        # Build result message
+        self._build_result_message(result, actual_cost, expected_budget, product_count, quality_issues)
             
             if result.get('success'):
                 composition_id = result.get('composition_id')
@@ -942,141 +1055,287 @@ class OllamaRecommendationWizard(models.TransientModel):
         return unique_dietary
     
     def _prepare_final_notes(self):
-        """Prepare final notes that will be parsed by Ollama"""
-        notes_parts = []
+        """Prepare comprehensive context for Ollama AI - bilingual and intelligent"""
+        context_parts = []
         
-        # CRITICAL: Always include budget in notes for enforcement
+        # Budget context - let AI figure out the optimal approach
         if self.target_budget > 0:
-            notes_parts.append(f"IMPORTANT: The total budget MUST be approximately €{self.target_budget:.0f} (±10%)")
-            notes_parts.append(f"Select products to reach a total between €{self.target_budget*0.9:.0f} and €{self.target_budget*1.1:.0f}")
-        
-        if self.client_notes:
-            notes_parts.append(self.client_notes)
-        
-        if self.specify_product_count and self.product_count:
-            count_instruction = f"Include EXACTLY {self.product_count} products."
-            notes_parts.append(count_instruction)
-            _logger.info(f"🎯 Adding product count to notes: {self.product_count}")
-        else:
-            # Default product count for budget
-            if self.target_budget >= 2000:
-                notes_parts.append("Include 15-20 products for this premium budget")
-            elif self.target_budget >= 1000:
-                notes_parts.append("Include 12-15 products for this budget")
-            elif self.target_budget >= 500:
-                notes_parts.append("Include 8-12 products for this budget")
-            else:
-                notes_parts.append("Include 5-8 products for this budget")
-        
-        if self.composition_type == 'hybrid':
-            notes_parts.append("Focus on premium wines (40-50% of budget) with complementary gourmet products")
-        elif self.composition_type == 'experience':
-            notes_parts.append("Include experience-based products or vouchers")
+            context_parts.append(f"TARGET BUDGET / PRESUPUESTO OBJETIVO: €{self.target_budget:,.2f}")
+            context_parts.append(f"ACCEPTABLE RANGE / RANGO ACEPTABLE: €{self.target_budget*0.9:,.2f} to €{self.target_budget*1.1:,.2f}")
             
-            if self.selected_experience:
-                notes_parts.append(f"Include this experience: {self.selected_experience.name}")
+            # Let AI determine product count based on budget and available products
+            context_parts.append("Determine optimal product count based on budget and product catalog")
+            context_parts.append("Determinar cantidad óptima de productos según presupuesto y catálogo")
         
-        # Add product price guidance based on budget
-        if self.target_budget >= 1000:
-            notes_parts.append("Select premium products, minimum €30 per item, with some flagship items over €100")
-        elif self.target_budget >= 500:
-            notes_parts.append("Select quality products between €20-80 per item")
-        elif self.target_budget >= 200:
-            notes_parts.append("Select products between €15-50 per item")
+        # Historical context for learning
+        if self.partner_id and self.recommender_id:
+            try:
+                patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
+                if patterns:
+                    context_parts.append("HISTORICAL PATTERNS / PATRONES HISTÓRICOS:")
+                    if patterns.get('avg_order_value'):
+                        context_parts.append(f"Previous average order: €{patterns['avg_order_value']:,.2f}")
+                    if patterns.get('favorite_products'):
+                        context_parts.append(f"Client favorites: {', '.join(patterns['favorite_products'][:5])}")
+                    if patterns.get('preferred_categories'):
+                        cats = list(patterns['preferred_categories'].keys())[:5]
+                        context_parts.append(f"Preferred categories: {', '.join(cats)}")
+                    if patterns.get('avg_product_count'):
+                        context_parts.append(f"Typical product count: {patterns['avg_product_count']:.0f}")
+                    
+                    # Get last year's products if available
+                    last_year_products = self.recommender_id._get_last_year_products(self.partner_id.id)
+                    if last_year_products:
+                        context_parts.append(f"Last year purchased {len(last_year_products)} products")
+                        context_parts.append("Apply business rules: maintain favorites, rotate others")
+                        context_parts.append("Aplicar reglas: mantener favoritos, rotar otros")
+            except Exception as e:
+                _logger.debug(f"Could not get patterns: {e}")
         
-        final_notes = ". ".join(notes_parts)
+        # Client's specific notes - most important, could be in any language
+        if self.client_notes:
+            context_parts.append("CLIENT INSTRUCTIONS / INSTRUCCIONES DEL CLIENTE:")
+            context_parts.append(self.client_notes)
+            context_parts.append("(Parse above for budget overrides, product preferences, restrictions)")
+            context_parts.append("(Analizar arriba para cambios de presupuesto, preferencias, restricciones)")
         
-        _logger.info(f"FINAL NOTES FOR AI: {final_notes[:300]}...")
+        # Product count if explicitly specified
+        if self.specify_product_count and self.product_count:
+            context_parts.append(f"REQUIRED PRODUCT COUNT / CANTIDAD REQUERIDA: {self.product_count}")
+            context_parts.append("This is mandatory / Esto es obligatorio")
         
-        return final_notes
+        # Composition strategy
+        composition_type = self.force_composition_type if self.force_composition_type != 'auto' else self.composition_type
+        if composition_type:
+            context_parts.append(f"COMPOSITION TYPE / TIPO DE COMPOSICIÓN: {composition_type}")
+            
+            if composition_type == 'hybrid':
+                context_parts.append("Focus on wines complemented with gourmet products")
+                context_parts.append("Enfoque en vinos complementados con productos gourmet")
+            elif composition_type == 'experience':
+                context_parts.append("Include experiences or activity-based products")
+                context_parts.append("Incluir experiencias o productos basados en actividades")
+                if self.selected_experience:
+                    exp = self.selected_experience
+                    context_parts.append(f"Must include: {exp.name} (€{exp.list_price:,.2f})")
+                    context_parts.append(f"Adjust other products for remaining budget")
+            elif composition_type == 'custom':
+                context_parts.append("Create balanced custom selection")
+                context_parts.append("Crear selección personalizada equilibrada")
+        
+        # Dietary restrictions - comprehensive
+        dietary_restrictions = []
+        
+        if self.dietary_restrictions != 'none':
+            dietary_restrictions.append(self.dietary_restrictions)
+        
+        if self.is_halal:
+            dietary_restrictions.append('halal')
+        if self.is_vegan:
+            dietary_restrictions.append('vegan')
+        if self.is_vegetarian:
+            dietary_restrictions.append('vegetarian')
+        if self.is_gluten_free:
+            dietary_restrictions.append('gluten_free')
+        if self.is_non_alcoholic:
+            dietary_restrictions.append('non_alcoholic')
+        
+        if self.dietary_restrictions_text:
+            dietary_restrictions.extend([x.strip() for x in self.dietary_restrictions_text.split(',')])
+        
+        if dietary_restrictions:
+            context_parts.append(f"DIETARY RESTRICTIONS / RESTRICCIONES DIETÉTICAS: {', '.join(set(dietary_restrictions))}")
+            
+            # Expand on what each means
+            if 'halal' in dietary_restrictions:
+                context_parts.append("HALAL: No pork, no alcohol, no non-halal meat, no ham, no iberico products")
+                context_parts.append("HALAL: Sin cerdo, sin alcohol, sin carne no-halal, sin jamón, sin ibéricos")
+            
+            if 'vegan' in dietary_restrictions:
+                context_parts.append("VEGAN: No animal products whatsoever")
+                context_parts.append("VEGANO: Sin productos animales de ningún tipo")
+            
+            if 'vegetarian' in dietary_restrictions:
+                context_parts.append("VEGETARIAN: No meat, no fish, no seafood")
+                context_parts.append("VEGETARIANO: Sin carne, sin pescado, sin mariscos")
+            
+            if 'non_alcoholic' in dietary_restrictions or 'non_alcoholic' in dietary_restrictions:
+                context_parts.append("NO ALCOHOL: Exclude all alcoholic beverages")
+                context_parts.append("SIN ALCOHOL: Excluir todas las bebidas alcohólicas")
+            
+            if 'gluten_free' in dietary_restrictions:
+                context_parts.append("GLUTEN FREE: No wheat, barley, rye or derivatives")
+                context_parts.append("SIN GLUTEN: Sin trigo, cebada, centeno o derivados")
+        
+        # Quality requirements
+        context_parts.append("QUALITY REQUIREMENTS / REQUISITOS DE CALIDAD:")
+        context_parts.append("1. No products with price €0.00 / Sin productos con precio €0.00")
+        context_parts.append("2. Products must be currently available / Productos deben estar disponibles")
+        context_parts.append("3. Match budget appropriately / Ajustar al presupuesto apropiadamente")
+        context_parts.append("4. Consider product relationships / Considerar relaciones entre productos")
+        
+        # Intelligence instructions for Ollama
+        context_parts.append("AI INSTRUCTIONS / INSTRUCCIONES IA:")
+        context_parts.append("- Analyze all context holistically / Analizar todo el contexto holísticamente")
+        context_parts.append("- Detect language and respond accordingly / Detectar idioma y responder apropiadamente")
+        context_parts.append("- Learn from patterns but adapt to current needs / Aprender de patrones pero adaptarse a necesidades actuales")
+        context_parts.append("- Balance variety with coherence / Equilibrar variedad con coherencia")
+        context_parts.append("- Ensure total matches budget within 10% / Asegurar que total coincida con presupuesto ±10%")
+        
+        # Year context
+        context_parts.append(f"TARGET YEAR / AÑO OBJETIVO: {self.target_year}")
+        
+        # Join with clear separation
+        final_context = "\n".join(context_parts)
+        
+        # Log for debugging
+        _logger.info(f"""
+        ╔═══════════════════════════════════════╗
+        ║     OLLAMA AI CONTEXT PREPARED       ║
+        ╠═══════════════════════════════════════╣
+        ║ Client: {self.partner_id.name if self.partner_id else 'N/A'}
+        ║ Budget: €{self.target_budget:,.2f}
+        ║ Dietary: {', '.join(dietary_restrictions) if dietary_restrictions else 'None'}
+        ║ Type: {composition_type}
+        ║ Context Length: {len(final_context)} chars
+        ╚═══════════════════════════════════════╝
+        
+        First 1000 chars of context:
+        {final_context[:1000]}
+        ...
+        """)
+        
+        return final_context
     
-    def _process_success_result(self, result):
-        """Process successful generation result"""
-        self.state = 'done'
-        self.composition_id = result.get('composition_id')
-        
-        if self.composition_id:
-            self.recommended_products = [(6, 0, self.composition_id.product_ids.ids)]
-        
-        self.confidence_score = result.get('confidence_score', 0)
-        
+    def _build_result_message(self, result, actual_cost, expected_budget, product_count, quality_issues):
+        """Build comprehensive result message in HTML"""
         method = result.get('method', 'unknown')
         method_display = {
-            'business_rules_with_enforcement': '📋 Business Rules + Requirements',
+            'business_rules_with_enforcement': '📋 Business Rules + AI Enhancement',
             'business_rules_transformation': '📋 Business Rules Applied',
             '8020_rule': '📊 80/20 Rule Applied',
-            'pattern_based_enhanced': '🔍 Pattern-Based Generation',
+            'pattern_based_enhanced': '🔍 Pattern-Based AI Generation',
             'similar_clients': '👥 Similar Clients Analysis',
-            'universal_enforcement': '🎯 Universal Generation',
-            'fresh_generation': '🆕 Fresh Composition'
-        }.get(method, method)
+            'universal_enforcement': '🎯 Universal AI Generation',
+            'fresh_generation': '🆕 Fresh AI Composition',
+            'ollama_enhanced': '🤖 Ollama AI Enhanced'
+        }.get(method, f'🎁 {method}')
         
-        actual_count = result.get('product_count', 0)
-        actual_cost = result.get('total_cost', 0)
-        target_count = self.product_count if self.specify_product_count else None
+        # Calculate compliance
+        if expected_budget > 0:
+            variance = ((actual_cost - expected_budget) / expected_budget) * 100
+            if abs(variance) <= 5:
+                budget_status = '✅ Excellent'
+                status_color = '#28a745'
+            elif abs(variance) <= 10:
+                budget_status = '✅ Good'
+                status_color = '#28a745'
+            elif abs(variance) <= 15:
+                budget_status = '⚠️ Acceptable'
+                status_color = '#ffc107'
+            else:
+                budget_status = '⚠️ Review Needed'
+                status_color = '#dc3545'
+        else:
+            variance = 0
+            budget_status = '✅ OK'
+            status_color = '#28a745'
         
-        count_compliance = '✅' if not target_count or actual_count == target_count else '⚠️'
-        budget_variance = ((actual_cost - self.target_budget) / self.target_budget * 100) if self.target_budget else 0
-        budget_compliance = '✅' if abs(budget_variance) <= 15 else '⚠️'
-        
+        # Build HTML message
         self.result_message = f"""
-        <div style="background: #d4edda; padding: 15px; border-radius: 5px;">
-            <h4 style="color: #155724;">✅ Recommendation Generated Successfully!</h4>
-            
-            <div style="margin-top: 10px;">
-                <b>Generation Method:</b> {method_display}<br>
-                <b>Confidence Score:</b> {result.get('confidence_score', 0)*100:.0f}%
-            </div>
-            
-            <table style="width: 100%; margin-top: 15px; color: #155724;">
-                <tr style="background: #c3e6cb;">
-                    <th style="padding: 5px; text-align: left;">Requirement</th>
-                    <th style="padding: 5px; text-align: center;">Target</th>
-                    <th style="padding: 5px; text-align: center;">Actual</th>
-                    <th style="padding: 5px; text-align: center;">Status</th>
-                </tr>
-                <tr>
-                    <td style="padding: 5px;"><b>Products</b></td>
-                    <td style="padding: 5px; text-align: center;">{target_count if target_count else 'Auto'}</td>
-                    <td style="padding: 5px; text-align: center;">{actual_count}</td>
-                    <td style="padding: 5px; text-align: center;">{count_compliance}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 5px;"><b>Budget</b></td>
-                    <td style="padding: 5px; text-align: center;">€{self.target_budget:.2f}</td>
-                    <td style="padding: 5px; text-align: center;">€{actual_cost:.2f}</td>
-                    <td style="padding: 5px; text-align: center;">{budget_compliance} ({budget_variance:+.1f}%)</td>
-                </tr>
-            </table>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+            <div style="background: white; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid {status_color};">
+                <h3 style="margin-top: 0; color: #2c3e50;">
+                    ✅ AI Composition Generated Successfully
+                </h3>
+                
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 20px;">
+                    <div>
+                        <h4 style="color: #6c757d; margin-bottom: 10px;">Generation Details</h4>
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Method:</b></td>
+                                <td style="padding: 5px;">{method_display}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Confidence:</b></td>
+                                <td style="padding: 5px;">{result.get('confidence_score', 0.85)*100:.0f}%</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Products:</b></td>
+                                <td style="padding: 5px;">{product_count} items</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <div>
+                        <h4 style="color: #6c757d; margin-bottom: 10px;">Budget Analysis</h4>
+                        <table style="width: 100%;">
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Target:</b></td>
+                                <td style="padding: 5px;">€{expected_budget:,.2f}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Actual:</b></td>
+                                <td style="padding: 5px;">€{actual_cost:,.2f}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Variance:</b></td>
+                                <td style="padding: 5px;">{variance:+.1f}%</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px; color: #495057;"><b>Status:</b></td>
+                                <td style="padding: 5px; color: {status_color}; font-weight: bold;">{budget_status}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
         """
         
+        # Add quality issues if any
+        if quality_issues:
+            self.result_message += f"""
+                <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin-top: 15px; border-left: 4px solid #ffc107;">
+                    <h4 style="margin-top: 0; color: #856404;">
+                        ⚠️ Quality Review Recommended
+                    </h4>
+                    <ul style="margin-bottom: 0; color: #856404;">
+            """
+            for issue in quality_issues:
+                self.result_message += f"<li>{issue}</li>"
+            self.result_message += """
+                    </ul>
+                </div>
+            """
+        
+        # Add AI insights if available
+        if result.get('ai_insights'):
+            self.result_message += f"""
+                <div style="background: #d1ecf1; padding: 10px; border-radius: 5px; margin-top: 15px; border-left: 4px solid #17a2b8;">
+                    <h4 style="margin-top: 0; color: #0c5460;">
+                        💡 AI Insights
+                    </h4>
+                    <p style="margin-bottom: 0; color: #0c5460;">
+                        {result['ai_insights']}
+                    </p>
+                </div>
+            """
+        
+        # Add rules applied if any
         if result.get('rules_applied'):
             rules_count = len(result['rules_applied'])
             self.result_message += f"""
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #c3e6cb;">
-                <b>Business Rules Applied:</b> {rules_count} transformations
-            </div>
+                <div style="background: #e8f5e9; padding: 10px; border-radius: 5px; margin-top: 15px; border-left: 4px solid #4caf50;">
+                    <p style="margin: 0; color: #2e7d32;">
+                        <b>📋 Business Rules Applied:</b> {rules_count} transformations
+                    </p>
+                </div>
             """
         
-        if result.get('message'):
-            self.result_message += f"""
-            <div style="margin-top: 10px; padding: 10px; background: #c3e6cb; border-radius: 3px;">
-                <b>Details:</b> {result['message']}
+        self.result_message += """
             </div>
-            """
-        
-        self.result_message += "</div>"
-        
-        _logger.info(f"""
-        ========== GENERATION SUCCESS ==========
-        Method: {method_display}
-        Products: {actual_count} {'✅' if count_compliance == '✅' else '⚠️ (target: ' + str(target_count) + ')'}
-        Total Cost: €{actual_cost:.2f}
-        Variance: {budget_variance:+.1f}%
-        Confidence: {result.get('confidence_score', 0)*100:.0f}%
-        Rules Applied: {len(result.get('rules_applied', []))}
-        ========================================
-        """)
+        </div>
+        """
     
     def _process_error_result(self, result):
         """Process error result"""
