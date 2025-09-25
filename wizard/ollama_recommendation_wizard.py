@@ -942,3 +942,164 @@ class OllamaRecommendationWizard(models.TransientModel):
                     'sticky': False,
                 }
             }
+
+
+    # These computed fields are referenced in the view but missing compute methods
+
+    expected_strategy = fields.Char(
+        string='Expected Strategy',
+        compute='_compute_expected_strategy',
+        readonly=True
+    )
+
+    has_previous_orders = fields.Boolean(
+        string='Has Previous Orders',
+        compute='_compute_has_previous_orders',
+        readonly=True
+    )
+
+    has_last_year_data = fields.Boolean(
+        string='Has Last Year Data', 
+        compute='_compute_has_last_year_data',
+        readonly=True
+    )
+
+    business_rules_applicable = fields.Boolean(
+        string='Business Rules Applicable',
+        compute='_compute_business_rules_applicable',
+        readonly=True
+    )
+
+    ollama_status = fields.Char(
+        string='Ollama Status',
+        compute='_compute_ollama_status',
+        readonly=True
+    )
+
+    # ================== ADD COMPUTE METHODS ==================
+
+    @api.depends('partner_id')
+    def _compute_has_previous_orders(self):
+        """Check if client has previous orders"""
+        for wizard in self:
+            if not wizard.partner_id:
+                wizard.has_previous_orders = False
+            else:
+                orders = self.env['sale.order'].search([
+                    ('partner_id', '=', wizard.partner_id.id),
+                    ('state', 'in', ['sale', 'done'])
+                ], limit=1)
+                wizard.has_previous_orders = bool(orders)
+
+    @api.depends('partner_id', 'recommender_id')
+    def _compute_has_last_year_data(self):
+        """Check if client has data from last year"""
+        for wizard in self:
+            wizard.has_last_year_data = False
+            if wizard.partner_id and wizard.recommender_id:
+                try:
+                    # Check for last year's data
+                    last_year = fields.Date.today().year - 1
+                    orders = self.env['sale.order'].search([
+                        ('partner_id', '=', wizard.partner_id.id),
+                        ('date_order', '>=', f'{last_year}-01-01'),
+                        ('date_order', '<=', f'{last_year}-12-31'),
+                        ('state', 'in', ['sale', 'done'])
+                    ], limit=1)
+                    wizard.has_last_year_data = bool(orders)
+                except Exception as e:
+                    _logger.debug(f"Error checking last year data: {e}")
+                    wizard.has_last_year_data = False
+
+    @api.depends('has_last_year_data')
+    def _compute_business_rules_applicable(self):
+        """Check if business rules are applicable"""
+        for wizard in self:
+            wizard.business_rules_applicable = wizard.has_last_year_data
+
+    @api.depends('has_previous_orders', 'has_last_year_data', 'client_notes')
+    def _compute_expected_strategy(self):
+        """Compute the expected generation strategy"""
+        for wizard in self:
+            notes_lower = wizard.client_notes.lower() if wizard.client_notes else ""
+            
+            if 'all new' in notes_lower or 'completely different' in notes_lower:
+                wizard.expected_strategy = '🆕 Fresh Generation'
+            elif wizard.has_last_year_data:
+                wizard.expected_strategy = '📋 Business Rules + 80/20'
+            elif wizard.has_previous_orders:
+                wizard.expected_strategy = '📊 Pattern-Based'
+            else:
+                wizard.expected_strategy = '👥 Similar Clients'
+
+    @api.depends('recommender_id', 'recommender_id.ollama_enabled')
+    def _compute_ollama_status(self):
+        """Compute Ollama connection status"""
+        for wizard in self:
+            if not wizard.recommender_id:
+                wizard.ollama_status = '<span class="text-danger">⚠️ No recommender configured</span>'
+            elif wizard.recommender_id.ollama_enabled:
+                wizard.ollama_status = '<span class="text-success">✅ Ollama Connected - Advanced AI Ready</span>'
+            else:
+                wizard.ollama_status = '<span class="text-warning">⚡ Basic Mode - Ollama Not Connected</span>'
+
+    # ================== ADD MISSING ACTION METHODS ==================
+
+    def action_test_connection(self):
+        """Test Ollama connection"""
+        self.ensure_one()
+        
+        if not self.recommender_id:
+            raise UserError("No recommender configured")
+        
+        result = self.recommender_id.test_ollama_connection()
+        
+        if result.get('success'):
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': '✅ Connection Successful',
+                    'message': result.get('message', 'Ollama is connected and ready'),
+                    'type': 'success',
+                    'sticky': False,
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': '❌ Connection Failed',
+                    'message': result.get('message', 'Could not connect to Ollama'),
+                    'type': 'warning',
+                    'sticky': True,
+                }
+            }
+
+    # ================== OPTIONAL: Add preview functionality ==================
+
+    def action_generate_preview(self):
+        """Generate a preview without creating records"""
+        self.ensure_one()
+        
+        if not self.partner_id:
+            raise UserError("Please select a client first")
+        
+        # Prepare parameters
+        dietary = self._prepare_dietary_restrictions()
+        notes = self._prepare_final_notes()
+        
+        # For now, just update state to show we're ready
+        self.state = 'draft'
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Preview Ready',
+                'message': f'Ready to generate for {self.partner_id.name} with budget €{self.target_budget:.2f}',
+                'type': 'info',
+                'sticky': False,
+            }
+        }
