@@ -27,7 +27,7 @@
                                 <group>
                                     <group name="client_section" string="Client Selection">
                                         <field name="partner_id" 
-                                               options="{'no_create': True, 'no_open': True}"
+                                               options="{'no_create': True}"
                                                placeholder="Select client..."/>
                                         <field name="expected_strategy" 
                                                attrs="{'invisible': [('partner_id', '=', False)]}"
@@ -37,10 +37,19 @@
                                         <field name="target_budget" widget="monetary"/>
                                         <field name="currency_id" invisible="1"/>
                                         <field name="target_year"/>
-                                        <field name="business_rules_applicable" 
-                                               widget="boolean_toggle"
-                                               readonly="1"
-                                               attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                        <label for="business_rules_applicable" string="Business Rules"/>
+                                        <div>
+                                            <field name="business_rules_applicable" 
+                                                   readonly="1"
+                                                   attrs="{'invisible': [('partner_id', '=', False)]}"
+                                                   widget="boolean_button"
+                                                   options="{'terminology': {
+                                                       'string_true': 'Applicable',
+                                                       'string_false': 'Not Applicable',
+                                                       'hover_true': 'Business rules will be applied',
+                                                       'hover_false': 'No rules to apply'
+                                                   }}"/>
+                                        </div>
                                     </group>
                                 </group>
                                 
@@ -52,15 +61,25 @@
                                 
                                 <!-- AI Recommendations Panel -->
                                 <separator string="AI Recommendations" attrs="{'invisible': [('partner_id', '=', False)]}"/>
-                                <group attrs="{'invisible': [('partner_id', '=', False)]}" col="4">
-                                    <field name="budget_recommendation" readonly="1"/>
-                                    <field name="approach_recommendation" readonly="1"/>
-                                    <field name="risk_level" widget="badge" readonly="1"
-                                           decoration-success="risk_level == 'low'"
-                                           decoration-warning="risk_level == 'medium'"
-                                           decoration-danger="risk_level == 'high'"/>
-                                    <field name="has_previous_orders" invisible="1"/>
-                                    <field name="has_last_year_data" invisible="1"/>
+                                <group attrs="{'invisible': [('partner_id', '=', False)]}" col="3">
+                                    <group>
+                                        <field name="budget_recommendation" readonly="1" nolabel="1"/>
+                                    </group>
+                                    <group>
+                                        <field name="approach_recommendation" readonly="1" nolabel="1"/>
+                                    </group>
+                                    <group>
+                                        <field name="risk_level" widget="badge" readonly="1" nolabel="1"
+                                               decoration-success="risk_level == 'low'"
+                                               decoration-warning="risk_level == 'medium'"
+                                               decoration-danger="risk_level == 'high'"/>
+                                    </group>
+                                </group>
+                                
+                                <!-- Hidden fields for computations -->
+                                <group invisible="1">
+                                    <field name="has_previous_orders"/>
+                                    <field name="has_last_year_data"/>
                                 </group>
                             </page>
                             
@@ -68,71 +87,80 @@
                             <page string="Composition" name="composition_settings">
                                 <group>
                                     <group string="Composition Type">
-                                        <field name="force_composition_type" widget="radio"/>
-                                        <field name="composition_type" 
-                                               attrs="{'invisible': [('force_composition_type', '!=', 'auto')], 
-                                                      'readonly': [('force_composition_type', '!=', 'auto')]}"/>
+                                        <field name="force_composition_type" widget="radio" options="{'horizontal': false}"/>
+                                        <!-- Hidden fields to sync -->
+                                        <field name="composition_type" invisible="1"/>
                                         <field name="engine_type" invisible="1"/>
                                     </group>
                                     <group string="Product Configuration">
                                         <field name="specify_product_count"/>
                                         <field name="product_count" 
+                                               placeholder="Number of products..."
                                                attrs="{'invisible': [('specify_product_count', '=', False)],
                                                       'required': [('specify_product_count', '=', True)]}"/>
                                     </group>
                                 </group>
                                 
-                                <!-- Experience Selection (conditional) -->
-                                <group string="Experience Selection" 
-                                       attrs="{'invisible': ['|', 
-                                              ('force_composition_type', '!=', 'experience'),
-                                              ('composition_type', '!=', 'experience')]}">
-                                    <field name="experience_category_filter"/>
-                                    <field name="selected_experience" 
-                                           attrs="{'invisible': [('experience_category_filter', '=', 'all')]}"/>
-                                    <field name="experience_preview" 
-                                           nolabel="1" 
-                                           colspan="2"
-                                           attrs="{'invisible': [('selected_experience', '=', False)]}"/>
+                                <!-- Experience Selection (fixed) -->
+                                <separator string="Experience Selection" 
+                                          attrs="{'invisible': [('force_composition_type', '!=', 'experience')]}"/>
+                                <group attrs="{'invisible': [('force_composition_type', '!=', 'experience')]}">
+                                    <group>
+                                        <field name="experience_category_filter" 
+                                               string="Filter by Category"/>
+                                        <field name="selected_experience" 
+                                               string="Select Experience"
+                                               options="{'no_create': True}"/>
+                                    </group>
+                                    <group>
+                                        <!-- Experience preview -->
+                                        <div attrs="{'invisible': [('selected_experience', '=', False)]}">
+                                            <field name="experience_preview" nolabel="1"/>
+                                        </div>
+                                    </group>
                                 </group>
                             </page>
                             
-                            <!-- Tab 3: Dietary &amp; Preferences -->
+                            <!-- Tab 3: Dietary & Preferences (Simplified) -->
                             <page string="Dietary &amp; Preferences" name="dietary_prefs">
                                 <group>
-                                    <group string="Dietary Restrictions">
-                                        <field name="dietary_restrictions" widget="radio"/>
+                                    <group string="Quick Selection">
+                                        <field name="dietary_restrictions" widget="radio" options="{'horizontal': false}"/>
                                         <field name="dietary_restrictions_text" 
-                                               placeholder="Enter additional restrictions..."
+                                               placeholder="Enter additional restrictions (comma-separated)..."
                                                attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')]}"/>
                                     </group>
-                                    <group string="Detailed Options">
-                                        <field name="is_halal"/>
-                                        <field name="is_vegan"/>
-                                        <field name="is_vegetarian"/>
-                                        <field name="is_gluten_free"/>
-                                        <field name="is_non_alcoholic"/>
+                                    <group string="Detailed Selection" groups="base.group_no_one">
+                                        <field name="is_halal" widget="boolean_toggle"/>
+                                        <field name="is_vegan" widget="boolean_toggle"/>
+                                        <field name="is_vegetarian" widget="boolean_toggle"/>
+                                        <field name="is_gluten_free" widget="boolean_toggle"/>
+                                        <field name="is_non_alcoholic" widget="boolean_toggle"/>
                                     </group>
                                 </group>
                                 
                                 <!-- Client Dietary History -->
-                                <group string="Client History" attrs="{'invisible': [('partner_id', '=', False)]}">
+                                <separator string="Client History" attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                <group attrs="{'invisible': [('partner_id', '=', False)]}" col="1">
                                     <field name="partner_dietary_restrictions" readonly="1" nolabel="1"/>
                                     <field name="client_dietary_history" readonly="1" nolabel="1"/>
                                 </group>
                             </page>
                             
-                            <!-- Tab 4: Notes &amp; Context -->
+                            <!-- Tab 4: Notes & Instructions -->
                             <page string="Notes &amp; Instructions" name="notes">
-                                <group>
+                                <group col="1">
                                     <field name="client_notes" 
                                            nolabel="1"
+                                           widget="text"
                                            placeholder="Enter any special requirements, preferences, or instructions...&#10;&#10;Examples:&#10;• 'Client loves Spanish wines and artisanal cheeses'&#10;• 'Budget flexible up to €1500 for exceptional items'&#10;• 'Include exactly 15 products'&#10;• 'No chocolates or nuts (allergy)'&#10;• 'Prefers traditional products over modern'"
-                                           style="min-height: 150px;"/>
+                                           style="min-height: 200px; width: 100%;"/>
                                 </group>
-                                <div class="alert alert-info" role="alert">
-                                    <i class="fa fa-info-circle"/> <b>Note:</b> Information in this field takes precedence over other settings.
-                                    The AI will intelligently parse your notes to extract budget, product count, and preferences.
+                                <div class="alert alert-info" role="alert" style="margin-top: 16px;">
+                                    <h4 class="alert-heading">
+                                        <i class="fa fa-info-circle"/> Note:
+                                    </h4>
+                                    <p>Information in this field takes precedence over other settings. The AI will intelligently parse your notes to extract budget, product count, and preferences.</p>
                                 </div>
                             </page>
                             
@@ -140,27 +168,45 @@
                             <page string="History Analysis" name="history" 
                                   attrs="{'invisible': [('partner_id', '=', False)]}">
                                 <field name="client_history_summary" nolabel="1" readonly="1"/>
+                                
+                                <!-- Similar Clients Analysis -->
+                                <separator string="Similar Clients Analysis" 
+                                          attrs="{'invisible': [('has_previous_orders', '=', True)]}"/>
+                                <div attrs="{'invisible': [('has_previous_orders', '=', True)]}" 
+                                     class="alert alert-info">
+                                    <p><b>New Client Strategy:</b></p>
+                                    <ul>
+                                        <li>AI will analyze similar clients in your database</li>
+                                        <li>Patterns from clients with similar characteristics will be used</li>
+                                        <li>Industry best practices will be applied</li>
+                                        <li>Consider adding detailed notes for better personalization</li>
+                                    </ul>
+                                </div>
                             </page>
                             
                             <!-- Tab 6: Results (shown after generation) -->
                             <page string="Results" name="results" 
                                   attrs="{'invisible': [('state', 'not in', ['done', 'error'])]}">
-                                <group attrs="{'invisible': [('state', '!=', 'done')]}">
-                                    <field name="composition_id" readonly="1"/>
+                                <group attrs="{'invisible': [('state', '!=', 'done')]}" col="4">
+                                    <field name="composition_id" readonly="1" colspan="2"/>
                                     <field name="confidence_score" widget="percentage" readonly="1"/>
+                                    <newline/>
                                     <field name="total_cost" widget="monetary" readonly="1"/>
-                                    <field name="product_count_actual" readonly="1"/>
+                                    <field name="product_count_actual" readonly="1" string="Products Generated"/>
                                 </group>
                                 
-                                <separator string="Result Details"/>
+                                <separator string="Generation Details"/>
                                 <field name="result_message" 
                                        nolabel="1" 
                                        readonly="1"
                                        attrs="{'invisible': [('state', '!=', 'done')]}"/>
+                                       
                                 <field name="error_message" 
                                        nolabel="1" 
                                        readonly="1"
-                                       attrs="{'invisible': [('state', '!=', 'error')]}"/>
+                                       widget="text"
+                                       attrs="{'invisible': [('state', '!=', 'error')]}"
+                                       style="color: red;"/>
                                 
                                 <separator string="Generated Products" 
                                           attrs="{'invisible': [('recommended_products', '=', [])]}"/>
@@ -169,10 +215,10 @@
                                        attrs="{'invisible': [('recommended_products', '=', [])]}"
                                        context="{'tree_view_ref': 'product.product_template_tree_view'}">
                                     <tree>
-                                        <field name="default_code"/>
+                                        <field name="default_code" optional="show"/>
                                         <field name="name"/>
-                                        <field name="categ_id"/>
-                                        <field name="list_price" widget="monetary"/>
+                                        <field name="categ_id" optional="show"/>
+                                        <field name="list_price" widget="monetary" sum="Total"/>
                                     </tree>
                                 </field>
                             </page>
@@ -187,34 +233,38 @@
                                 type="object" 
                                 class="btn-primary"
                                 attrs="{'invisible': ['|', ('state', '!=', 'draft'), ('partner_id', '=', False)]}"
-                                data-hotkey="q"/>
+                                confirm="Generate AI composition for this client?"
+                                data-hotkey="g"/>
                         
                         <button name="action_view_composition" 
                                 string="📄 View Composition" 
                                 type="object" 
                                 class="btn-success"
-                                attrs="{'invisible': [('composition_id', '=', False)]}"/>
+                                attrs="{'invisible': [('composition_id', '=', False)]}"
+                                data-hotkey="v"/>
                         
                         <button name="action_generate_another" 
                                 string="🔄 Generate Another" 
                                 type="object" 
-                                class="btn-secondary"
+                                class="btn-warning"
                                 attrs="{'invisible': [('state', '!=', 'done')]}"/>
                         
                         <!-- Utility buttons -->
                         <button name="action_test_connection" 
                                 string="🔌 Test Ollama" 
                                 type="object" 
-                                class="btn-info"
+                                class="btn-sm btn-info"
                                 attrs="{'invisible': [('state', 'not in', ['draft', 'error'])]}"/>
                         
                         <button string="Close" 
                                 class="btn-secondary" 
-                                special="cancel"/>
+                                special="cancel"
+                                data-hotkey="x"/>
                         
                         <!-- State indicator -->
                         <div class="text-muted float-left" 
-                             attrs="{'invisible': [('partner_id', '!=', False)]}">
+                             attrs="{'invisible': [('partner_id', '!=', False)]}"
+                             style="margin-left: 16px;">
                             <i class="fa fa-arrow-up"/> Select a client to begin
                         </div>
                     </footer>
@@ -228,15 +278,16 @@
             <field name="res_model">ollama.recommendation.wizard</field>
             <field name="view_mode">form</field>
             <field name="target">new</field>
-            <field name="context">{}</field>
+            <field name="context">{'default_target_budget': 1000.0}</field>
         </record>
         
-        <!-- Add Menu Item -->
+        <!-- Add Menu Item (optional) -->
         <menuitem id="menu_ollama_recommendation_wizard"
-                  name="AI Recommendations"
-                  parent="sale.sale_order_menu"
+                  name="AI Gift Recommendations"
+                  parent="sale.sale_menu_root"
                   action="action_ollama_recommendation_wizard"
-                  sequence="100"/>
+                  sequence="50"
+                  groups="sales_team.group_sale_salesman"/>
         
     </data>
 </odoo>

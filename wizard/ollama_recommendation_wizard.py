@@ -660,21 +660,26 @@ class OllamaRecommendationWizard(models.TransientModel):
                         trend = patterns.get('budget_trend', 'stable')
                         
                         if trend == 'increasing':
-                            wizard.budget_recommendation = f"Suggest €{avg*1.1:.0f} (10% increase from €{avg:.0f} avg)"
+                            suggested = avg * 1.1
+                            wizard.budget_recommendation = f"Suggest €{suggested:.0f} (10% increase from €{avg:.0f} avg)"
                         elif trend == 'decreasing':
-                            wizard.budget_recommendation = f"Suggest €{avg*0.95:.0f} (5% decrease from €{avg:.0f} avg)"
+                            suggested = avg * 0.95
+                            wizard.budget_recommendation = f"Suggest €{suggested:.0f} (5% decrease from €{avg:.0f} avg)"
                         else:
                             wizard.budget_recommendation = f"Maintain at €{avg:.0f} (stable history)"
                     else:
-                        wizard.budget_recommendation = f"Using default €{wizard.target_budget:.0f} (no history)"
+                        # For new clients, use similar clients analysis
+                        similar_avg = 1000.0  # Default
+                        wizard.budget_recommendation = f"Using default €{wizard.target_budget or similar_avg:.0f} (no history)"
                     
-                    # Approach recommendation
+                    # Approach recommendation - MORE DETAILED
                     if wizard.has_last_year_data:
-                        wizard.approach_recommendation = "Apply Business Rules with 80/20 transformation"
+                        wizard.approach_recommendation = "Apply Business Rules R1-R6 with 80/20 transformation"
                     elif wizard.has_previous_orders:
-                        wizard.approach_recommendation = "Use pattern-based generation from history"
+                        wizard.approach_recommendation = "Use pattern-based generation from purchase history"
                     else:
-                        wizard.approach_recommendation = "Fresh generation using similar clients"
+                        # Check for similar clients
+                        wizard.approach_recommendation = "Fresh generation using similar clients analysis"
                     
                     # Risk level
                     if wizard.has_last_year_data:
@@ -799,25 +804,33 @@ class OllamaRecommendationWizard(models.TransientModel):
             dietary = self._prepare_dietary_restrictions()
             final_notes = self._prepare_final_notes()
             
+            # CRITICAL: Ensure budget is passed correctly
+            actual_budget = self.target_budget if self.target_budget > 0 else 1000.0
+            
             _logger.info(f"""
             ========================================
             🎁 GIFT RECOMMENDATION GENERATION
             ========================================
             Client: {self.partner_id.name}
-            Budget: €{self.target_budget:.2f}
-            Range (±5%): €{self.target_budget*0.95:.2f} - €{self.target_budget*1.05:.2f}
+            Budget: €{actual_budget:.2f}
+            Range (±5%): €{actual_budget*0.95:.2f} - €{actual_budget*1.05:.2f}
             Products: {self.product_count if self.specify_product_count else 'Auto (12)'}
             Dietary: {dietary if dietary else 'None'}
             Type: {self.composition_type}
+            Force Type: {self.force_composition_type}
             ========================================
             """)
             
+            # Add budget enforcement to notes if not already there
+            if actual_budget > 0 and str(actual_budget) not in final_notes:
+                final_notes = f"Target budget is €{actual_budget:.0f}. {final_notes}"
+            
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=self.target_budget if self.target_budget else 1000,
+                target_budget=actual_budget,  # Ensure budget is always passed
                 client_notes=final_notes,
                 dietary_restrictions=dietary,
-                composition_type=self.composition_type
+                composition_type=self.composition_type if self.force_composition_type == 'auto' else self.force_composition_type
             )
             
             if result.get('success'):
@@ -932,23 +945,48 @@ class OllamaRecommendationWizard(models.TransientModel):
         """Prepare final notes that will be parsed by Ollama"""
         notes_parts = []
         
+        # CRITICAL: Always include budget in notes for enforcement
+        if self.target_budget > 0:
+            notes_parts.append(f"IMPORTANT: The total budget MUST be approximately €{self.target_budget:.0f} (±10%)")
+            notes_parts.append(f"Select products to reach a total between €{self.target_budget*0.9:.0f} and €{self.target_budget*1.1:.0f}")
+        
         if self.client_notes:
             notes_parts.append(self.client_notes)
         
         if self.specify_product_count and self.product_count:
-            count_instruction = f"I need exactly {self.product_count} products."
+            count_instruction = f"Include EXACTLY {self.product_count} products."
             notes_parts.append(count_instruction)
             _logger.info(f"🎯 Adding product count to notes: {self.product_count}")
+        else:
+            # Default product count for budget
+            if self.target_budget >= 2000:
+                notes_parts.append("Include 15-20 products for this premium budget")
+            elif self.target_budget >= 1000:
+                notes_parts.append("Include 12-15 products for this budget")
+            elif self.target_budget >= 500:
+                notes_parts.append("Include 8-12 products for this budget")
+            else:
+                notes_parts.append("Include 5-8 products for this budget")
         
         if self.composition_type == 'hybrid':
-            notes_parts.append("Prefer wine-focused hybrid composition")
+            notes_parts.append("Focus on premium wines (40-50% of budget) with complementary gourmet products")
         elif self.composition_type == 'experience':
-            notes_parts.append("Include experience-based products")
+            notes_parts.append("Include experience-based products or vouchers")
             
             if self.selected_experience:
                 notes_parts.append(f"Include this experience: {self.selected_experience.name}")
         
+        # Add product price guidance based on budget
+        if self.target_budget >= 1000:
+            notes_parts.append("Select premium products, minimum €30 per item, with some flagship items over €100")
+        elif self.target_budget >= 500:
+            notes_parts.append("Select quality products between €20-80 per item")
+        elif self.target_budget >= 200:
+            notes_parts.append("Select products between €15-50 per item")
+        
         final_notes = ". ".join(notes_parts)
+        
+        _logger.info(f"FINAL NOTES FOR AI: {final_notes[:300]}...")
         
         return final_notes
     
