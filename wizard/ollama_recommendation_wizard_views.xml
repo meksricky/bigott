@@ -23,7 +23,7 @@
                         <!-- Main Content in Tabs -->
                         <notebook>
                             <!-- Tab 1: Client & Budget -->
-                            <page string="Client & Budget" name="client_budget">
+                            <page string="Client &amp; Budget" name="client_budget">
                                 <group>
                                     <group name="client_section" string="Client Selection">
                                         <field name="partner_id" 
@@ -97,8 +97,8 @@
                                 </group>
                             </page>
                             
-                            <!-- Tab 3: Dietary & Preferences -->
-                            <page string="Dietary & Preferences" name="dietary_prefs">
+                            <!-- Tab 3: Dietary &amp; Preferences -->
+                            <page string="Dietary &amp; Preferences" name="dietary_prefs">
                                 <group>
                                     <group string="Dietary Restrictions">
                                         <field name="dietary_restrictions" widget="radio"/>
@@ -122,8 +122,8 @@
                                 </group>
                             </page>
                             
-                            <!-- Tab 4: Notes & Context -->
-                            <page string="Notes & Instructions" name="notes">
+                            <!-- Tab 4: Notes &amp; Context -->
+                            <page string="Notes &amp; Instructions" name="notes">
                                 <group>
                                     <field name="client_notes" 
                                            nolabel="1"
