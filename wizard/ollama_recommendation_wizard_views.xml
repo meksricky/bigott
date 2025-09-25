@@ -17,11 +17,6 @@
                         <h1>Gift Composition Generator</h1>
                     </div>
                     
-                    <!-- Ollama Status Display -->
-                    <group col="1" attrs="{'invisible': [('ollama_status', '=', False)]}">
-                        <field name="ollama_status" nolabel="1"/>
-                    </group>
-                    
                     <notebook>
                         <!-- Tab 1: Configuration -->
                         <page string="Configuration">
@@ -75,7 +70,7 @@
                                 <group>
                                     <field name="dietary_restrictions"/>
                                     <field name="dietary_restrictions_text" 
-                                           widget="text"
+                                           widget="text" 
                                            attrs="{'invisible': [('dietary_restrictions', '=', 'none')]}"
                                            placeholder="Enter additional dietary restrictions..."/>
                                 </group>
@@ -93,7 +88,7 @@
                             
                             <!-- Special Notes -->
                             <separator string="Special Instructions"/>
-                            <field name="client_notes" widget="text" nolabel="1"
+                            <field name="client_notes" widget="text" nolabel="1" 
                                    placeholder="You can specify:&#10;• Budget override&#10;• Exact product count&#10;• Specific categories (e.g. '3 wines, 2 cheeses')&#10;• Exclusions (e.g. 'no chocolate')&#10;• Any other special requirements"/>
                         </page>
                         
@@ -137,10 +132,7 @@
                             
                             <!-- Error Section -->
                             <group attrs="{'invisible': [('state', '!=', 'error')]}" col="1">
-                                <div class="alert alert-danger" role="alert">
-                                    <h4 class="alert-heading">Generation Failed</h4>
-                                    <field name="error_message" nolabel="1"/>
-                                </div>
+                                <field name="error_message" nolabel="1" widget="text"/>
                             </group>
                         </page>
                     </notebook>
