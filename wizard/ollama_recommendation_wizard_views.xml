@@ -22,147 +22,139 @@
                         <field name="ollama_status" nolabel="1"/>
                     </group>
                     
-                    <group col="4">
-                        <!-- Client and Budget Section -->
-                        <group colspan="2" string="Client Details">
-                            <field name="partner_id" options="{'no_quick_create': True}"/>
-                            <field name="target_year"/>
-                        </group>
-                        
-                        <group colspan="2" string="Budget Settings">
-                            <field name="currency_id" invisible="1"/>
-                            <field name="target_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                            <field name="specify_product_count"/>
-                            <field name="product_count" 
-                                   attrs="{'invisible': [('specify_product_count', '=', False)], 
-                                          'required': [('specify_product_count', '=', True)]}"/>
-                        </group>
-                    </group>
-                    
-                    <!-- Client Analysis Section -->
-                    <group attrs="{'invisible': [('partner_id', '=', False)]}" string="Client Analysis">
-                        <group col="1">
-                            <field name="client_info" nolabel="1"/>
-                        </group>
-                        <group col="1">
-                            <field name="client_history_summary" nolabel="1"/>
-                        </group>
-                        <group col="4">
-                            <field name="has_previous_orders" readonly="1"/>
-                            <field name="has_last_year_data" readonly="1"/>
-                            <field name="business_rules_applicable" readonly="1"/>
-                            <field name="expected_strategy" widget="badge"/>
-                        </group>
-                    </group>
-                    
-                    <group col="4">
-                        <!-- Composition Configuration -->
-                        <group colspan="2" string="Composition Type">
-                            <field name="engine_type" widget="radio"/>
-                            <field name="composition_type" invisible="1"/>
-                            <field name="composition_display_type" readonly="1"/>
-                        </group>
-                        
-                        <!-- Experience Selection (when engine_type is experience) -->
-                        <group colspan="2" string="Experience Options" 
-                               attrs="{'invisible': [('engine_type', '!=', 'experience')]}">
-                            <field name="experience_category_filter" string="Category Filter"/>
-                            <field name="selected_experience" 
-                                   string="Select Experience Product"
-                                   domain="[('is_experience', '=', True)]"
-                                   options="{'no_quick_create': True}"/>
-                        </group>
-                    </group>
-                    
-                    <!-- Experience Preview -->
-                    <group attrs="{'invisible': [('selected_experience', '=', False)]}" col="1">
-                        <field name="experience_preview" nolabel="1"/>
-                    </group>
-                    
-                    <!-- Dietary Restrictions -->
-                    <group string="Dietary Restrictions">
-                        <group>
-                            <field name="dietary_restrictions"/>
-                            <field name="client_dietary_history" readonly="1" 
-                                   attrs="{'invisible': [('partner_id', '=', False)]}"/>
-                        </group>
-                        <group>
-                            <field name="dietary_restrictions_text" 
-                                   widget="text"
-                                   attrs="{'invisible': [('dietary_restrictions', '=', 'none')]}"
-                                   placeholder="Additional dietary details..."/>
-                        </group>
-                    </group>
-                    
-                    <!-- Individual Dietary Options -->
-                    <group attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')]}" 
-                           string="Select Individual Restrictions" col="6">
-                        <field name="is_halal" widget="boolean_toggle"/>
-                        <field name="is_vegan" widget="boolean_toggle"/>
-                        <field name="is_vegetarian" widget="boolean_toggle"/>
-                        <field name="is_gluten_free" widget="boolean_toggle"/>
-                        <field name="is_non_alcoholic" widget="boolean_toggle"/>
-                    </group>
-                    
-                    <!-- Client Notes -->
-                    <separator string="Special Requirements and Notes"/>
-                    <field name="client_notes" widget="text" nolabel="1"/>
-                    
-                    <!-- Generation Results -->
-                    <group attrs="{'invisible': [('state', '=', 'draft')]}" string="Results">
-                        <!-- Success Message -->
-                        <group attrs="{'invisible': [('state', '!=', 'done')]}" col="1">
-                            <field name="result_message" nolabel="1" readonly="1"/>
-                            
+                    <notebook>
+                        <!-- Tab 1: Configuration -->
+                        <page string="Configuration">
                             <group col="4">
-                                <field name="composition_id" readonly="1" string="Composition ID"/>
-                                <field name="total_cost" widget="monetary" options="{'currency_field': 'currency_id'}"/>
-                                <field name="product_count_actual" readonly="1" string="Products Count"/>
-                                <field name="confidence_score" widget="percentage" string="Match Score"/>
+                                <!-- Client Section -->
+                                <group colspan="2" string="Client Details">
+                                    <field name="partner_id" options="{'no_quick_create': True}"/>
+                                    <field name="target_year"/>
+                                    <field name="expected_strategy" widget="badge" readonly="1" attrs="{'invisible': [('partner_id', '=', False)]}"/>
+                                </group>
+                                
+                                <!-- Budget Section -->
+                                <group colspan="2" string="Budget Settings">
+                                    <field name="currency_id" invisible="1"/>
+                                    <field name="target_budget" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                    <field name="specify_product_count"/>
+                                    <field name="product_count" 
+                                           attrs="{'invisible': [('specify_product_count', '=', False)], 
+                                                  'required': [('specify_product_count', '=', True)]}"/>
+                                </group>
                             </group>
-                        </group>
+                            
+                            <!-- Composition Settings -->
+                            <separator string="Composition Settings"/>
+                            <group col="4">
+                                <group colspan="2">
+                                    <field name="engine_type" widget="radio"/>
+                                    <field name="composition_type" invisible="1"/>
+                                    <field name="composition_display_type" readonly="1"/>
+                                </group>
+                                
+                                <!-- Experience Options -->
+                                <group colspan="2" attrs="{'invisible': [('engine_type', '!=', 'experience')]}">
+                                    <field name="experience_category_filter"/>
+                                    <field name="selected_experience" 
+                                           domain="[('is_experience', '=', True)]"
+                                           context="{'default_is_experience': True}"
+                                           options="{'no_quick_create': True}"/>
+                                </group>
+                            </group>
+                            
+                            <!-- Experience Preview -->
+                            <group attrs="{'invisible': ['|', ('engine_type', '!=', 'experience'), ('selected_experience', '=', False)]}" col="1">
+                                <separator string="Experience Preview"/>
+                                <field name="experience_preview" nolabel="1"/>
+                            </group>
+                            
+                            <!-- Dietary Section -->
+                            <separator string="Dietary Restrictions"/>
+                            <group col="2">
+                                <group>
+                                    <field name="dietary_restrictions"/>
+                                    <field name="dietary_restrictions_text" 
+                                           widget="text"
+                                           attrs="{'invisible': [('dietary_restrictions', '=', 'none')]}"
+                                           placeholder="Enter additional dietary restrictions..."/>
+                                </group>
+                                <group attrs="{'invisible': [('dietary_restrictions', '!=', 'multiple')]}">
+                                    <label string="Individual Restrictions"/>
+                                    <div>
+                                        <field name="is_halal"/>
+                                        <field name="is_vegan"/>
+                                        <field name="is_vegetarian"/>
+                                        <field name="is_gluten_free"/>
+                                        <field name="is_non_alcoholic"/>
+                                    </div>
+                                </group>
+                            </group>
+                            
+                            <!-- Special Notes -->
+                            <separator string="Special Instructions"/>
+                            <field name="client_notes" widget="text" nolabel="1"
+                                   placeholder="You can specify:&#10;• Budget override&#10;• Exact product count&#10;• Specific categories (e.g. '3 wines, 2 cheeses')&#10;• Exclusions (e.g. 'no chocolate')&#10;• Any other special requirements"/>
+                        </page>
                         
-                        <!-- Products Table -->
-                        <separator string="Recommended Products" 
-                                  attrs="{'invisible': [('recommended_products', '=', [])]}"/>
-                        <field name="recommended_products" nolabel="1" 
-                               attrs="{'invisible': [('recommended_products', '=', [])]}">
-                            <tree create="false" edit="false" delete="false">
-                                <field name="default_code" optional="show"/>
-                                <field name="name"/>
-                                <field name="categ_id" optional="show"/>
-                                <field name="list_price" widget="monetary" sum="Total Value"/>
-                            </tree>
-                        </field>
+                        <!-- Tab 2: Client Analysis -->
+                        <page string="Client Analysis" attrs="{'invisible': [('partner_id', '=', False)]}">
+                            <group col="1">
+                                <field name="client_info" nolabel="1"/>
+                                <separator string="Purchase History"/>
+                                <field name="client_history_summary" nolabel="1"/>
+                            </group>
+                            <group col="4" string="Analysis Indicators">
+                                <field name="has_previous_orders" readonly="1"/>
+                                <field name="has_last_year_data" readonly="1"/>
+                                <field name="business_rules_applicable" readonly="1"/>
+                                <field name="client_dietary_history" readonly="1"/>
+                            </group>
+                        </page>
                         
-                        <!-- Error Message -->
-                        <group attrs="{'invisible': [('state', '!=', 'error')]}" col="1">
-                            <div class="alert alert-danger">
-                                <field name="error_message" nolabel="1" readonly="1"/>
-                            </div>
-                        </group>
-                    </group>
+                        <!-- Tab 3: Results -->
+                        <page string="Results" attrs="{'invisible': [('state', '=', 'draft')]}">
+                            <!-- Success Section -->
+                            <group attrs="{'invisible': [('state', '!=', 'done')]}">
+                                <field name="result_message" nolabel="1" colspan="2"/>
+                                <group col="4">
+                                    <field name="composition_id" readonly="1"/>
+                                    <field name="total_cost" widget="monetary" options="{'currency_field': 'currency_id'}"/>
+                                    <field name="product_count_actual" readonly="1" string="Total Products"/>
+                                    <field name="confidence_score" widget="percentage"/>
+                                </group>
+                                
+                                <separator string="Products in Composition"/>
+                                <field name="recommended_products" nolabel="1">
+                                    <tree create="false" edit="false" delete="false">
+                                        <field name="default_code" string="Code" optional="show"/>
+                                        <field name="name" string="Product"/>
+                                        <field name="categ_id" string="Category"/>
+                                        <field name="list_price" string="Price" widget="monetary" sum="Total"/>
+                                    </tree>
+                                </field>
+                            </group>
+                            
+                            <!-- Error Section -->
+                            <group attrs="{'invisible': [('state', '!=', 'error')]}" col="1">
+                                <div class="alert alert-danger" role="alert">
+                                    <h4 class="alert-heading">Generation Failed</h4>
+                                    <field name="error_message" nolabel="1"/>
+                                </div>
+                            </group>
+                        </page>
+                    </notebook>
                     
-                    <!-- Hidden Fields -->
                     <field name="recommender_id" invisible="1"/>
                 </sheet>
                 
                 <footer>
-                    <!-- Primary Actions -->
                     <button name="action_generate_recommendation" 
                             type="object" 
                             string="Generate Composition" 
                             class="oe_highlight"
                             states="draft,error"/>
                     
-                    <button name="action_generate_recommendation" 
-                            type="object" 
-                            string="Regenerate" 
-                            class="oe_highlight"
-                            states="done"
-                            confirm="This will create a new composition. Continue?"/>
-                    
-                    <!-- After Generation Actions -->
                     <button name="action_view_composition" 
                             type="object" 
                             string="Open Composition" 
@@ -171,7 +163,7 @@
                     
                     <button name="action_generate_another" 
                             type="object" 
-                            string="New Generation" 
+                            string="Generate Another" 
                             states="done"/>
                     
                     <button string="Close" class="oe_link" special="cancel"/>
@@ -185,6 +177,7 @@
         <field name="res_model">ollama.recommendation.wizard</field>
         <field name="view_mode">form</field>
         <field name="target">new</field>
+        <field name="view_id" ref="view_ollama_recommendation_wizard_form"/>
     </record>
     
     <menuitem id="menu_ollama_recommendation_wizard" 

@@ -901,3 +901,44 @@ class OllamaRecommendationWizard(models.TransientModel):
                     'sticky': False,
                 }
             }
+
+    def action_test_connection(self):
+        """Test Ollama connection - wrapper for existing method"""
+        self.ensure_one()
+        
+        if self.recommender_id:
+            result = self.recommender_id.test_ollama_connection()
+            
+            if result['success']:
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': 'Connection Test',
+                        'message': result['message'],
+                        'type': 'success',
+                        'sticky': False,
+                    }
+                }
+            else:
+                return {
+                    'type': 'ir.actions.client',
+                    'tag': 'display_notification',
+                    'params': {
+                        'title': 'Connection Test Failed',
+                        'message': result['message'],
+                        'type': 'warning',
+                        'sticky': True,
+                    }
+                }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Error',
+                    'message': 'No recommender configured',
+                    'type': 'danger',
+                    'sticky': False,
+                }
+            }
