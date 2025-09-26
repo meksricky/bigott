@@ -945,71 +945,6 @@ class OllamaRecommendationWizard(models.TransientModel):
         
         # Build result message
         self._build_result_message(result, actual_cost, expected_budget, product_count, quality_issues)
-            
-            if result.get('success'):
-                composition_id = result.get('composition_id')
-                composition = self.env['gift.composition'].browse(composition_id)
-                
-                actual_cost = composition.actual_cost or sum(p.list_price for p in composition.product_ids)
-                
-                if self.target_budget > 0:
-                    variance = (actual_cost - self.target_budget) / self.target_budget * 100
-                    
-                    _logger.info(f"""
-                    ========================================
-                    ✅ GENERATION SUCCESSFUL
-                    ========================================
-                    Composition ID: {composition.id}
-                    Products: {len(composition.product_ids)}
-                    Total Cost: €{actual_cost:.2f}
-                    Target: €{self.target_budget:.2f}
-                    Variance: {variance:+.1f}%
-                    Status: {'✅ IN RANGE' if abs(variance) <= 5 else '⚠️ OUTSIDE ±5%'}
-                    ========================================
-                    """)
-                    
-                    for i, product in enumerate(composition.product_ids[:12], 1):
-                        _logger.info(f"  {i}. {product.name[:40]}: €{product.list_price:.2f}")
-                    
-                    if self.target_budget >= 1000:
-                        min_appropriate_price = 20.0
-                    elif self.target_budget >= 500:
-                        min_appropriate_price = 15.0
-                    elif self.target_budget >= 200:
-                        min_appropriate_price = 10.0
-                    else:
-                        min_appropriate_price = 5.0
-                    
-                    low_price_products = [p for p in composition.product_ids if p.list_price < min_appropriate_price]
-                    
-                    if low_price_products:
-                        _logger.warning(f"""
-                        ⚠️ Found {len(low_price_products)} products below €{min_appropriate_price:.2f}:
-                        {', '.join([f'{p.name[:20]} (€{p.list_price:.2f})' for p in low_price_products[:3]])}
-                        These should be excluded in future generations for €{self.target_budget:.2f} budgets.
-                        """)
-                    
-                    if abs(variance) > 10:
-                        _logger.warning(f"⚠️ High variance: {variance:+.1f}%. Consider adjusting product selection logic.")
-                
-                self._process_success_result(result)
-                
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Generated Gift Composition',
-                    'res_model': 'gift.composition',
-                    'res_id': composition_id,
-                    'view_mode': 'form',
-                    'target': 'current',
-                }
-            else:
-                self._process_error_result(result)
-                
-        except Exception as e:
-            _logger.error(f"❌ Generation failed: {str(e)}")
-            self.state = 'error'
-            self.error_message = str(e)
-            raise
     
     # Alternative name for view compatibility
     def action_generate_composition(self):
@@ -1159,7 +1094,7 @@ class OllamaRecommendationWizard(models.TransientModel):
                 context_parts.append("VEGETARIAN: No meat, no fish, no seafood")
                 context_parts.append("VEGETARIANO: Sin carne, sin pescado, sin mariscos")
             
-            if 'non_alcoholic' in dietary_restrictions or 'non_alcoholic' in dietary_restrictions:
+            if 'non_alcoholic' in dietary_restrictions:
                 context_parts.append("NO ALCOHOL: Exclude all alcoholic beverages")
                 context_parts.append("SIN ALCOHOL: Excluir todas las bebidas alcohólicas")
             
