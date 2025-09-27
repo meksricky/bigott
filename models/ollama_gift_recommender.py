@@ -1767,130 +1767,6 @@ class OllamaGiftRecommender(models.Model):
             _logger.error(f"Failed to create composition: {e}")
             return {'success': False, 'error': str(e)}
 
-    def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_count, context):
-        """COMPLETE selection optimization - GUARANTEED budget compliance"""
-        
-        min_budget = budget * (1 - flexibility/100)
-        max_budget = budget * (1 + flexibility/100)
-        
-        _logger.info(f"""
-        Selection Optimization:
-        Target: {target_count} products @ €{budget:.2f}
-        Range: €{min_budget:.2f} - €{max_budget:.2f}
-        """)
-        
-        # CRITICAL: Remove ALL zero-price products
-        valid_products = []
-        for p in products:
-            try:
-                if float(p.list_price) > 0:
-                    valid_products.append(p)
-            except:
-                continue
-        
-        if not valid_products:
-            _logger.error("No valid products!")
-            return []
-        
-        # Calculate ideal price
-        ideal_price = budget / target_count
-        
-        # METHOD 1: Try perfect selection
-        products_sorted = sorted(valid_products, key=lambda p: abs(float(p.list_price) - ideal_price))
-        
-        selected = []
-        current_total = 0
-        
-        # First pass - add products near ideal price
-        for product in products_sorted:
-            if len(selected) >= target_count:
-                break
-            
-            price = float(product.list_price)
-            if current_total + price <= max_budget:
-                selected.append(product)
-                current_total += price
-        
-        # Check if we need adjustment
-        if current_total < min_budget:
-            # CRITICAL FIX: Add expensive products to meet budget
-            _logger.warning(f"Under budget: €{current_total:.2f}, need €{min_budget - current_total:.2f} more")
-            
-            # Get expensive products
-            expensive_products = sorted(
-                [p for p in valid_products if p not in selected],
-                key=lambda p: float(p.list_price),
-                reverse=True
-            )
-            
-            if enforce_count and len(selected) >= target_count:
-                # Replace cheap products with expensive ones
-                while current_total < min_budget and expensive_products:
-                    # Find cheapest selected
-                    cheapest_idx = None
-                    cheapest_price = float('inf')
-                    for i, p in enumerate(selected):
-                        if float(p.list_price) < cheapest_price:
-                            cheapest_price = float(p.list_price)
-                            cheapest_idx = i
-                    
-                    if cheapest_idx is not None:
-                        # Replace with expensive product
-                        for exp_product in expensive_products:
-                            new_total = current_total - cheapest_price + float(exp_product.list_price)
-                            if new_total <= max_budget:
-                                selected[cheapest_idx] = exp_product
-                                current_total = new_total
-                                expensive_products.remove(exp_product)
-                                _logger.info(f"Replaced €{cheapest_price:.2f} with €{exp_product.list_price:.2f}")
-                                break
-                        else:
-                            break
-                    else:
-                        break
-            else:
-                # Add more products
-                for product in expensive_products:
-                    if current_total >= min_budget:
-                        break
-                    if current_total + float(product.list_price) <= max_budget:
-                        selected.append(product)
-                        current_total += float(product.list_price)
-                        _logger.info(f"Added €{product.list_price:.2f} product")
-        
-        # Final total
-        final_total = sum(float(p.list_price) for p in selected)
-        
-        # EMERGENCY: If still under budget, duplicate expensive products
-        if final_total < min_budget and selected:
-            shortage = min_budget - final_total
-            most_expensive = max(selected, key=lambda p: float(p.list_price))
-            
-            # Try to find similar expensive products
-            similar_expensive = self.env['product.template'].search([
-                ('list_price', '>=', float(most_expensive.list_price) * 0.8),
-                ('list_price', '<=', shortage),
-                ('sale_ok', '=', True),
-                ('id', 'not in', [p.id for p in selected])
-            ], limit=5)
-            
-            for product in similar_expensive:
-                if final_total >= min_budget:
-                    break
-                selected.append(product)
-                final_total += float(product.list_price)
-                _logger.info(f"Emergency add: €{product.list_price:.2f}")
-        
-        _logger.info(f"""
-        FINAL RESULT:
-        Products: {len(selected)}
-        Total: €{final_total:.2f}
-        Target: €{min_budget:.2f} - €{max_budget:.2f}
-        Status: {'✅ OK' if min_budget <= final_total <= max_budget else '❌ FAILED'}
-        """)
-        
-        return selected
-
     def _generate_with_universal_enforcement(self, partner, requirements, notes, context):
         """Universal generation with strict enforcement of ALL requirements - Fallback method"""
         
@@ -2936,7 +2812,7 @@ class OllamaGiftRecommender(models.Model):
         }
     
     def _get_smart_product_pool(self, budget, dietary, context):
-        """Get product pool - STRICT PRICE FILTERING"""
+        """Get product pool - STRICT PRICE FILTERING with INTELLIGENT VARIATION"""
         
         # Calculate APPROPRIATE price range for budget
         if budget >= 1000:
@@ -2989,8 +2865,9 @@ class OllamaGiftRecommender(models.Model):
         if exclude_ids:
             domain.append(('id', 'not in', exclude_ids))
         
-        # Search
-        products = self.env['product.template'].sudo().search(domain, limit=200, order='list_price desc')
+        # INTELLIGENT VARIATION: Fetch MORE products for variety
+        # Instead of 200, get 500 to have more selection variety
+        products = self.env['product.template'].sudo().search(domain, limit=500, order='list_price desc')
         
         # STRICT validation
         valid_products = []
@@ -3008,14 +2885,56 @@ class OllamaGiftRecommender(models.Model):
             except:
                 continue
         
-        # Sort by price proximity to ideal
-        valid_products.sort(key=lambda p: abs(float(p.list_price) - ideal_price))
+        # INTELLIGENT VARIATION: Add scoring with randomization
+        # Use timestamp for natural variation
+        variation_seed = int(time.time() * 1000) % 100000
+        random.seed(variation_seed)
+        
+        scored_products = []
+        for product in valid_products:
+            price = float(product.list_price)
+            
+            # Base score: proximity to ideal price (keep your logic)
+            price_diff = abs(price - ideal_price)
+            base_score = 1 / (1 + price_diff/ideal_price)
+            
+            # ADD VARIATION: Random factor for natural selection variety
+            # This ensures different products get selected each time
+            variation_factor = random.uniform(0.7, 1.3)  # ±30% variation
+            
+            # Time-based micro-variation (changes every second)
+            time_factor = 1 + ((variation_seed + product.id) % 100) / 200  # 0.5% to 50.5% boost
+            
+            # Final score combines logic with variation
+            final_score = base_score * variation_factor * time_factor
+            
+            scored_products.append((product, final_score))
+        
+        # Sort by varied scores
+        scored_products.sort(key=lambda x: x[1], reverse=True)
+        
+        # Take top products but with some variety in the middle
+        result_products = []
+        
+        if len(scored_products) > 30:
+            # Keep top 30% as-is (best matches)
+            top_count = int(len(scored_products) * 0.3)
+            result_products.extend([p for p, s in scored_products[:top_count]])
+            
+            # VARIETY: Randomly sample from next 50% 
+            middle_products = [p for p, s in scored_products[top_count:int(len(scored_products)*0.8)]]
+            if middle_products:
+                sample_size = min(len(middle_products), 100)
+                random.shuffle(middle_products)
+                result_products.extend(middle_products[:sample_size])
+        else:
+            result_products = [p for p, s in scored_products]
         
         # Convert to recordset
-        if valid_products:
-            result = self.env['product.template'].browse([p.id for p in valid_products])
+        if result_products:
+            result = self.env['product.template'].browse([p.id for p in result_products])
         else:
-            # EMERGENCY: If no products found, expand search
+            # EMERGENCY: If no products found, expand search (keep your logic)
             _logger.warning("No products found, expanding search")
             emergency_domain = [
                 ('sale_ok', '=', True),
@@ -3024,8 +2943,174 @@ class OllamaGiftRecommender(models.Model):
             ]
             result = self.env['product.template'].sudo().search(emergency_domain, limit=50)
         
-        _logger.info(f"Found {len(result)} valid products")
+        _logger.info(f"Found {len(result)} valid products with variation seed {variation_seed}")
         return result
+
+    def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_count, context):
+        """COMPLETE selection optimization with INTELLIGENT VARIATION - GUARANTEED budget compliance"""
+        
+        min_budget = budget * (1 - flexibility/100)
+        max_budget = budget * (1 + flexibility/100)
+        
+        # VARIATION: Use time-based seed for natural variety
+        variation_seed = int(time.time() * 1000) % 100000
+        random.seed(variation_seed)
+        
+        _logger.info(f"""
+        Selection Optimization (Seed: {variation_seed}):
+        Target: {target_count} products @ €{budget:.2f}
+        Range: €{min_budget:.2f} - €{max_budget:.2f}
+        """)
+        
+        # CRITICAL: Remove ALL zero-price products (keep your validation)
+        valid_products = []
+        for p in products:
+            try:
+                if float(p.list_price) > 0:
+                    valid_products.append(p)
+            except:
+                continue
+        
+        if not valid_products:
+            _logger.error("No valid products!")
+            return []
+        
+        # Calculate ideal price
+        ideal_price = budget / target_count
+        
+        # INTELLIGENT VARIATION: Use different selection strategies
+        strategies = [
+            "balanced",      # Your original method
+            "high_low_mix",  # Mix expensive and cheap
+            "middle_focus",  # Focus on mid-price items
+            "premium_tilt",  # Slight bias to premium
+        ]
+        
+        strategy = strategies[variation_seed % len(strategies)]
+        _logger.info(f"Using strategy: {strategy}")
+        
+        if strategy == "balanced":
+            # Your original logic with slight variation
+            products_sorted = sorted(valid_products, 
+                                    key=lambda p: abs(float(p.list_price) - ideal_price) * random.uniform(0.9, 1.1))
+        
+        elif strategy == "high_low_mix":
+            # Sort by price and pick from both ends
+            products_sorted = sorted(valid_products, key=lambda p: float(p.list_price))
+            mixed = []
+            for i in range(len(products_sorted)):
+                if i % 3 == 0:  # Take from expensive end
+                    mixed.append(products_sorted[-(i//3 + 1)] if -(i//3 + 1) >= -len(products_sorted) else products_sorted[0])
+                else:  # Take from cheap end
+                    mixed.append(products_sorted[i//2] if i//2 < len(products_sorted) else products_sorted[-1])
+            products_sorted = mixed
+        
+        elif strategy == "middle_focus":
+            # Focus on products near ideal price
+            products_sorted = sorted(valid_products, 
+                                    key=lambda p: abs(float(p.list_price) - ideal_price))
+        
+        else:  # premium_tilt
+            # Slightly prefer more expensive items
+            products_sorted = sorted(valid_products, 
+                                    key=lambda p: abs(float(p.list_price) - ideal_price * 1.2))
+        
+        selected = []
+        current_total = 0
+        
+        # First pass - add products based on strategy
+        for product in products_sorted:
+            if len(selected) >= target_count:
+                break
+            
+            price = float(product.list_price)
+            
+            # VARIATION: Sometimes skip products for variety (10% chance)
+            if random.random() < 0.1 and len(products_sorted) > target_count * 2:
+                continue
+            
+            if current_total + price <= max_budget:
+                selected.append(product)
+                current_total += price
+        
+        # Keep your budget adjustment logic - it's solid
+        if current_total < min_budget:
+            # Your existing logic for adding expensive products
+            _logger.warning(f"Under budget: €{current_total:.2f}, need €{min_budget - current_total:.2f} more")
+            
+            expensive_products = sorted(
+                [p for p in valid_products if p not in selected],
+                key=lambda p: float(p.list_price),
+                reverse=True
+            )
+            
+            if enforce_count and len(selected) >= target_count:
+                # Your existing replacement logic
+                while current_total < min_budget and expensive_products:
+                    cheapest_idx = None
+                    cheapest_price = float('inf')
+                    for i, p in enumerate(selected):
+                        if float(p.list_price) < cheapest_price:
+                            cheapest_price = float(p.list_price)
+                            cheapest_idx = i
+                    
+                    if cheapest_idx is not None:
+                        for exp_product in expensive_products:
+                            new_total = current_total - cheapest_price + float(exp_product.list_price)
+                            if new_total <= max_budget:
+                                selected[cheapest_idx] = exp_product
+                                current_total = new_total
+                                expensive_products.remove(exp_product)
+                                _logger.info(f"Replaced €{cheapest_price:.2f} with €{exp_product.list_price:.2f}")
+                                break
+                        else:
+                            break
+                    else:
+                        break
+            else:
+                # Your existing addition logic
+                for product in expensive_products:
+                    if current_total >= min_budget:
+                        break
+                    if current_total + float(product.list_price) <= max_budget:
+                        selected.append(product)
+                        current_total += float(product.list_price)
+                        _logger.info(f"Added €{product.list_price:.2f} product")
+        
+        # Final total
+        final_total = sum(float(p.list_price) for p in selected)
+        
+        # Keep your emergency logic - it's a good fallback
+        if final_total < min_budget and selected:
+            shortage = min_budget - final_total
+            most_expensive = max(selected, key=lambda p: float(p.list_price))
+            
+            similar_expensive = self.env['product.template'].search([
+                ('list_price', '>=', float(most_expensive.list_price) * 0.8),
+                ('list_price', '<=', shortage),
+                ('sale_ok', '=', True),
+                ('id', 'not in', [p.id for p in selected])
+            ], limit=5)
+            
+            for product in similar_expensive:
+                if final_total >= min_budget:
+                    break
+                selected.append(product)
+                final_total += float(product.list_price)
+                _logger.info(f"Emergency add: €{product.list_price:.2f}")
+        
+        # VARIATION: Final shuffle for presentation variety
+        random.shuffle(selected)
+        
+        _logger.info(f"""
+        FINAL RESULT (Strategy: {strategy}):
+        Products: {len(selected)}
+        Total: €{final_total:.2f}
+        Target: €{min_budget:.2f} - €{max_budget:.2f}
+        Status: {'✅ OK' if min_budget <= final_total <= max_budget else '❌ FAILED'}
+        """)
+        
+        return selected
     
     def _check_dietary_compliance(self, product, dietary_restrictions):
         """Check if product complies with dietary restrictions (Enhanced from both versions)"""
