@@ -1197,6 +1197,148 @@ class OllamaGiftRecommender(models.Model):
             _logger.error(f"Failed to create composition: {e}")
             return {'success': False, 'error': str(e)}
 
+    def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_count, context):
+        """Smart selection with automatic budget compliance"""
+        
+        # Calculate budget bounds
+        min_budget = budget * (1 - flexibility/100)
+        max_budget = budget * (1 + flexibility/100)
+        
+        _logger.info(f"""
+        🎯 Smart Selection Optimization:
+        Target: {target_count} products
+        Budget: €{budget:.2f}
+        Acceptable Range (±{flexibility:.0f}%): €{min_budget:.2f} - €{max_budget:.2f}
+        Enforce Count: {enforce_count}
+        """)
+        
+        if not products:
+            _logger.error("❌ No products available for selection")
+            return []
+        
+        # Convert to list if it's a recordset
+        products_list = list(products)
+        
+        # Calculate ideal price per product
+        ideal_price_per_product = budget / target_count if target_count > 0 else budget / 12
+        
+        # Sort products by how close they are to ideal price
+        products_list.sort(key=lambda p: abs(float(p.list_price) - ideal_price_per_product))
+        
+        # STRATEGY 1: Try to hit budget exactly with ideal products
+        selected = []
+        current_total = 0
+        
+        # First pass: Add products close to ideal price
+        for product in products_list:
+            if enforce_count and len(selected) >= target_count:
+                break
+                
+            price = float(product.list_price)
+            
+            # Check if adding this product keeps us in budget
+            if current_total + price <= max_budget:
+                selected.append(product)
+                current_total += price
+                
+                # Stop if we've reached the target count and are in budget range
+                if len(selected) == target_count and min_budget <= current_total <= max_budget:
+                    _logger.info(f"✅ Perfect match found! {len(selected)} products = €{current_total:.2f}")
+                    break
+        
+        # STRATEGY 2: If we're under budget, try swapping or adding
+        if current_total < min_budget:
+            _logger.warning(f"⚠️ Under budget: €{current_total:.2f} < €{min_budget:.2f}")
+            
+            # Get more expensive products not yet selected
+            remaining_products = [p for p in products_list if p not in selected]
+            remaining_products.sort(key=lambda p: float(p.list_price), reverse=True)
+            
+            if not enforce_count:
+                # We can add more products
+                for product in remaining_products:
+                    price = float(product.list_price)
+                    if current_total + price <= max_budget:
+                        selected.append(product)
+                        current_total += price
+                        _logger.info(f"➕ Added {product.name[:30]} (€{price:.2f}) -> Total: €{current_total:.2f}")
+                        
+                        if current_total >= min_budget:
+                            break
+            else:
+                # Must maintain count - try swapping
+                cheapest_selected = sorted(selected, key=lambda p: float(p.list_price))
+                
+                for cheap_product in cheapest_selected:
+                    if current_total >= min_budget:
+                        break
+                        
+                    for expensive_product in remaining_products:
+                        new_total = current_total - float(cheap_product.list_price) + float(expensive_product.list_price)
+                        
+                        if min_budget <= new_total <= max_budget:
+                            selected.remove(cheap_product)
+                            selected.append(expensive_product)
+                            current_total = new_total
+                            _logger.info(f"🔄 Swapped {cheap_product.name[:20]} with {expensive_product.name[:20]}")
+                            break
+        
+        # STRATEGY 3: If we're over budget, remove or swap
+        elif current_total > max_budget:
+            _logger.warning(f"⚠️ Over budget: €{current_total:.2f} > €{max_budget:.2f}")
+            
+            if not enforce_count and len(selected) > target_count:
+                # We can remove products
+                selected.sort(key=lambda p: float(p.list_price), reverse=True)
+                
+                while current_total > max_budget and len(selected) > target_count:
+                    removed = selected.pop(0)
+                    current_total -= float(removed.list_price)
+                    _logger.info(f"➖ Removed {removed.name[:30]} (€{removed.list_price:.2f})")
+            else:
+                # Must maintain count - try swapping for cheaper
+                expensive_selected = sorted(selected, key=lambda p: float(p.list_price), reverse=True)
+                remaining_products = [p for p in products_list if p not in selected]
+                remaining_products.sort(key=lambda p: float(p.list_price))
+                
+                for expensive_product in expensive_selected:
+                    if current_total <= max_budget:
+                        break
+                        
+                    for cheap_product in remaining_products:
+                        new_total = current_total - float(expensive_product.list_price) + float(cheap_product.list_price)
+                        
+                        if min_budget <= new_total <= max_budget:
+                            selected.remove(expensive_product)
+                            selected.append(cheap_product)
+                            current_total = new_total
+                            _logger.info(f"🔄 Swapped {expensive_product.name[:20]} with {cheap_product.name[:20]}")
+                            break
+        
+        # Final validation
+        final_total = sum(float(p.list_price) for p in selected)
+        budget_compliance = min_budget <= final_total <= max_budget
+        
+        _logger.info(f"""
+        =====================================
+        ✅ FINAL SELECTION COMPLETE
+        =====================================
+        Products: {len(selected)} {'✅' if len(selected) == target_count or not enforce_count else '⚠️'}
+        Total: €{final_total:.2f}
+        Target Range: €{min_budget:.2f} - €{max_budget:.2f}
+        Compliance: {'✅ IN RANGE' if budget_compliance else '❌ OUT OF RANGE'}
+        Variance: {((final_total - budget) / budget * 100):+.1f}%
+        =====================================
+        """)
+        
+        # Log first few products
+        for i, product in enumerate(selected[:15], 1):
+            _logger.info(f"   {i}. {product.name[:40]}: €{product.list_price:.2f}")
+        
+        if len(selected) > 15:
+            _logger.info(f"   ... and {len(selected) - 15} more products")
+        
+        return selected
 
     def _generate_with_universal_enforcement(self, partner, requirements, notes, context):
         """Universal generation with strict enforcement of ALL requirements - Fallback method"""
