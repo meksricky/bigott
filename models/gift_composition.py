@@ -146,8 +146,9 @@ class GiftComposition(models.Model):
         ('draft', 'Draft'),
         ('confirmed', 'Confirmed'),
         ('delivered', 'Delivered'),
-        ('cancelled', 'Cancelled')
-    ], string='State', default='draft', tracking=True)
+        ('cancelled', 'Cancelled'),
+        ('replaced', 'Replaced'),  # ADD THIS LINE
+    ], string='State', default='draft', track_visibility='onchange')
     
     # ============== STATISTICS FIELDS ==============
     product_count = fields.Integer(string='Product Count', compute='_compute_product_count', store=True)
