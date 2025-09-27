@@ -261,6 +261,7 @@ class GiftComposition(models.Model):
     
     @api.depends('beverage_product_ids', 'aperitif_product_ids', 'foie_product_ids',
                  'canned_product_ids', 'charcuterie_product_ids', 'sweet_product_ids')
+    
     def _compute_category_distribution(self):
         """Compute the distribution of products by category"""
         for record in self:
@@ -467,60 +468,48 @@ class GiftComposition(models.Model):
         }
     
     def action_regenerate(self):
-        """Open wizard to regenerate the composition with NEW products"""
+        """Open wizard to regenerate this composition"""
         self.ensure_one()
         
-        if self.state == 'approved':
-            raise UserError("Cannot regenerate approved compositions. Please create a new draft version.")
-        
-        _logger.info(f"🔄 Starting regeneration for Gift Composition: {self.name} (ID: {self.id})")
-        
-        # Prepare dietary restrictions for wizard
-        dietary = 'none'
-        if self.dietary_restriction_type:
-            dietary = self.dietary_restriction_type
-        elif self.dietary_restrictions:
-            # Try to parse dietary restrictions
-            restrictions = self.dietary_restrictions.lower()
-            if 'halal' in restrictions:
-                dietary = 'halal'
-            elif 'vegan' in restrictions:
-                dietary = 'vegan'
-            elif 'vegetarian' in restrictions:
-                dietary = 'vegetarian'
-            elif 'alcohol' in restrictions:
-                dietary = 'non_alcoholic'
-        
-        # Open the recommendation wizard with current values
+        # Prepare wizard values from existing composition
         wizard_vals = {
+            'regenerate_composition_id': self.id,  # Track which composition we're regenerating
             'partner_id': self.partner_id.id,
             'target_budget': self.target_budget,
             'target_year': self.target_year,
-            'dietary_restrictions': dietary,
             'composition_type': self.composition_type,
-            'regenerate_composition_id': self.id,  # Pass current composition ID
-            'additional_notes': self.notes if hasattr(self, 'notes') else '',
+            'client_notes': self.client_notes,
+            'dietary_restrictions_text': self.dietary_restrictions,
         }
         
-        # Create wizard
+        # Parse dietary restrictions back to boolean fields
+        if self.dietary_restrictions:
+            dietary = self.dietary_restrictions.lower()
+            if 'halal' in dietary:
+                wizard_vals['is_halal'] = True
+            if 'vegan' in dietary:
+                wizard_vals['is_vegan'] = True
+            if 'vegetarian' in dietary:
+                wizard_vals['is_vegetarian'] = True
+            if 'non_alcoholic' in dietary or 'no alcohol' in dietary:
+                wizard_vals['is_non_alcoholic'] = True
+            if 'gluten_free' in dietary or 'sin_gluten' in dietary:
+                wizard_vals['is_gluten_free'] = True
+        
+        # Create and open wizard
         wizard = self.env['ollama.recommendation.wizard'].create(wizard_vals)
         
-        # Return action to open wizard
         return {
+            'name': 'Regenerate Composition',
             'type': 'ir.actions.act_window',
-            'name': 'Regenerate Gift Composition',
             'res_model': 'ollama.recommendation.wizard',
-            'view_mode': 'form',
             'res_id': wizard.id,
+            'view_mode': 'form',
             'target': 'new',
             'context': {
                 'default_partner_id': self.partner_id.id,
                 'default_target_budget': self.target_budget,
-                'default_target_year': self.target_year,
-                'default_dietary_restrictions': dietary,
-                'default_composition_type': self.composition_type,
                 'regeneration_mode': True,
-                'original_composition_id': self.id,
             }
         }
     

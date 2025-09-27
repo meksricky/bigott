@@ -314,6 +314,12 @@ class OllamaRecommendationWizard(models.TransientModel):
         ('medium', 'Medium Risk'),
         ('high', 'High Risk')
     ], string='Risk Level', compute='_compute_ai_recommendations')
+
+    regenerate_composition_id = fields.Many2one(
+        'gift.composition',
+        string='Composition to Regenerate',
+        help='Original composition being regenerated'
+    )
     
     # ================== ALL COMPUTE METHODS (FROM ORIGINAL + NEW) ==================
     
@@ -792,7 +798,7 @@ class OllamaRecommendationWizard(models.TransientModel):
     # ================== ACTION METHODS (FROM ORIGINAL - KEEPING EXACT SAME) ==================
     
     def action_generate_recommendation(self):
-        """Generate recommendation using full AI intelligence"""
+        """Generate recommendation using full AI intelligence with ALL features"""
         self.ensure_one()
         
         if not self.partner_id:
@@ -801,71 +807,161 @@ class OllamaRecommendationWizard(models.TransientModel):
         self.state = 'generating'
         
         try:
-            # Prepare dietary restrictions comprehensively
+            # 1. Prepare dietary restrictions comprehensively
             dietary = self._prepare_dietary_restrictions()
             
-            # Build comprehensive context for AI
-            final_context = self._prepare_final_notes()
+            # 2. Get the simplified notes (not the verbose context)
+            client_notes = self.client_notes if self.client_notes else ""
             
-            # Ensure budget is valid
-            actual_budget = self.target_budget if self.target_budget > 0 else 0
+            # 3. Parse notes for budget override FIRST
+            budget_to_use = self.target_budget
+            if client_notes:
+                # Extract budget from notes if specified
+                import re
+                budget_patterns = [
+                    r'budget[:\s]*(?:of\s+)?(?:€|eur)?\s*(\d+)',
+                    r'(?:€|eur)\s*(\d+)',
+                    r'(\d{4,5})\b(?:\s*(?:€|eur|euros?))?',
+                ]
+                
+                notes_lower = client_notes.lower()
+                for pattern in budget_patterns:
+                    match = re.search(pattern, notes_lower)
+                    if match:
+                        try:
+                            extracted_budget = float(match.group(1))
+                            if 100 <= extracted_budget <= 10000:
+                                budget_to_use = extracted_budget
+                                _logger.info(f"📝 Budget override from notes: €{extracted_budget}")
+                                break
+                        except:
+                            pass
             
-            # If no budget specified, try to infer from history or notes
-            if actual_budget == 0:
-                if self.client_notes:
-                    # Let Ollama parse the budget from notes
-                    _logger.info("No budget in form, will parse from notes")
-                else:
-                    # Use historical average if available
-                    if self.partner_id and self.recommender_id:
-                        patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
-                        if patterns and patterns.get('avg_order_value'):
-                            actual_budget = patterns['avg_order_value']
-                            _logger.info(f"Using historical average: €{actual_budget:,.2f}")
+            # 4. If still no budget, use historical average
+            if budget_to_use <= 0:
+                if self.partner_id and self.recommender_id:
+                    patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
+                    if patterns and patterns.get('avg_order_value'):
+                        budget_to_use = patterns['avg_order_value']
+                        _logger.info(f"📊 Using historical average: €{budget_to_use:,.2f}")
+                    else:
+                        budget_to_use = 1000.0  # Default fallback
+                        _logger.info("📊 No history found, using default €1000")
+            
+            # 5. Determine composition type (could be in notes or form)
+            composition_type = self.force_composition_type if self.force_composition_type != 'auto' else self.composition_type
+            
+            # Check notes for composition type override
+            if client_notes:
+                notes_lower = client_notes.lower()
+                if 'experience' in notes_lower or 'experiencia' in notes_lower:
+                    composition_type = 'experience'
+                    _logger.info("📝 Found 'experience' type in notes")
+                elif 'hybrid' in notes_lower or 'wine' in notes_lower or 'vino' in notes_lower:
+                    composition_type = 'hybrid'
+                    _logger.info("📝 Found 'hybrid' type in notes")
+            
+            # 6. If regenerating, archive old composition
+            if hasattr(self, 'regenerate_composition_id') and self.regenerate_composition_id:
+                self.regenerate_composition_id.write({
+                    'state': 'replaced',
+                    'active': False
+                })
+                _logger.info(f"📝 Archiving old composition #{self.regenerate_composition_id.reference}")
             
             _logger.info(f"""
             ╔═══════════════════════════════════════════════════════╗
             ║        🎁 AI GIFT RECOMMENDATION REQUEST             ║
             ╠═══════════════════════════════════════════════════════╣
             ║ Client: {self.partner_id.name[:40]:<40} ║
-            ║ Budget: €{actual_budget:>15,.2f}                     ║
+            ║ Budget: €{budget_to_use:>15,.2f}                     ║
             ║ Dietary: {str(dietary)[:39] if dietary else 'None':<39} ║
-            ║ Type: {self.composition_type:<43} ║
-            ║ Context Size: {len(final_context):>10} characters          ║
+            ║ Type: {composition_type:<43} ║
+            ║ Notes: {('Yes - ' + str(len(client_notes)) + ' chars')[:39] if client_notes else 'None':<39} ║
             ║ Ollama Status: {('Connected' if self.recommender_id.ollama_enabled else 'Basic Mode'):<31} ║
             ╚═══════════════════════════════════════════════════════╝
             """)
             
-            # Call the intelligent recommendation engine
+            # 7. Call the recommendation engine with SIMPLE notes, not verbose context
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=actual_budget,
-                client_notes=final_context,  # Pass full context as notes
+                target_budget=budget_to_use,
+                client_notes=client_notes,  # Pass actual client notes, not verbose instructions
                 dietary_restrictions=dietary,
-                composition_type=self.force_composition_type if self.force_composition_type != 'auto' else self.composition_type
+                composition_type=composition_type
             )
             
+            # 8. Process result
             if result.get('success'):
-                # Validate the result intelligently
-                self._validate_and_process_result(result, actual_budget)
+                composition_id = result.get('composition_id')
+                
+                # Link to regenerated composition if applicable
+                if hasattr(self, 'regenerate_composition_id') and self.regenerate_composition_id:
+                    new_composition = self.env['gift.composition'].browse(composition_id)
+                    if hasattr(new_composition, 'regenerated_from_id'):
+                        new_composition.regenerated_from_id = self.regenerate_composition_id.id
+                
+                # Validate the result
+                self._validate_and_process_result(result, budget_to_use)
+                
+                # Show success notification
+                message = result.get('message', 'Composition generated successfully')
+                self.env['bus.bus'].sendone(
+                    (self._cr.dbname, 'res.partner', self.env.user.partner_id.id),
+                    {'type': 'simple_notification', 
+                    'title': '✅ Success',
+                    'message': message,
+                    'sticky': False,
+                    'warning': False}
+                )
                 
                 # Open the composition
                 return {
                     'type': 'ir.actions.act_window',
-                    'name': f'Gift Composition #{result.get("composition_id")}',
+                    'name': f'Gift Composition',
                     'res_model': 'gift.composition',
-                    'res_id': result.get('composition_id'),
+                    'res_id': composition_id,
                     'view_mode': 'form',
                     'target': 'current',
                 }
             else:
-                self._process_error_result(result)
+                # Handle error
+                error_msg = result.get('error', 'Unknown error occurred')
+                _logger.error(f"❌ Generation failed: {error_msg}")
                 
+                self.state = 'error'
+                self.error_message = error_msg
+                
+                # Show error notification
+                self.env['bus.bus'].sendone(
+                    (self._cr.dbname, 'res.partner', self.env.user.partner_id.id),
+                    {'type': 'simple_notification',
+                    'title': '❌ Generation Failed',
+                    'message': error_msg,
+                    'sticky': True,
+                    'warning': True}
+                )
+                
+                raise UserError(f"Generation failed: {error_msg}")
+                
+        except UserError:
+            raise
         except Exception as e:
-            _logger.error(f"❌ Generation failed: {str(e)}", exc_info=True)
+            _logger.error(f"❌ Unexpected error: {str(e)}", exc_info=True)
             self.state = 'error'
             self.error_message = str(e)
-            raise UserError(f"Generation failed / Generación falló: {str(e)}")
+            
+            # Show error notification
+            self.env['bus.bus'].sendone(
+                (self._cr.dbname, 'res.partner', self.env.user.partner_id.id),
+                {'type': 'simple_notification',
+                'title': '❌ Unexpected Error',
+                'message': str(e),
+                'sticky': True,
+                'warning': True}
+            )
+            
+            raise UserError(f"Unexpected error: {str(e)}")
     
     def _validate_and_process_result(self, result, expected_budget):
         """Intelligently validate and process the generation result"""
