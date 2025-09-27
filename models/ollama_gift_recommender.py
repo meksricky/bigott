@@ -57,9 +57,8 @@ class OllamaGiftRecommender(models.Model):
     def generate_gift_recommendations(self, partner_id, target_budget, 
                                     client_notes='', dietary_restrictions=None,
                                     composition_type='custom'):
-        """
-        MERGED: Deep Learning + Business Rules Generation
-        """
+        """FIXED: Actually use historical learning"""
+        
         self.ensure_one()
         start_time = datetime.now()
         
@@ -68,117 +67,254 @@ class OllamaGiftRecommender(models.Model):
             if not partner.exists():
                 return {'success': False, 'error': 'Invalid partner'}
             
-            # Form data
-            form_data = {
-                'budget': target_budget if target_budget and target_budget > 0 else None,
-                'dietary': dietary_restrictions or [],
-                'composition_type': composition_type
-            }
+            # STEP 1: Parse notes to get actual requirements (including budget override)
+            notes_data = self._parse_notes_basic_fallback(client_notes) if client_notes else {}
             
-            # STEP 1: Deep Historical Learning (from version 1)
+            # Use budget from notes if specified
+            if notes_data.get('budget_override') and notes_data['budget_override'] > 0:
+                target_budget = notes_data['budget_override']
+                _logger.info(f"📝 Using budget from notes: €{target_budget}")
+            
+            # STEP 2: Deep Historical Learning - THIS WAS NOT BEING USED!
             historical_intelligence = self._deep_historical_learning(partner_id, target_budget)
             
-            # STEP 2: Get all learning data (from version 2)
-            learning_data = self._get_or_update_learning_cache(partner_id)
-            patterns = learning_data.get('patterns') if learning_data else historical_intelligence.get('patterns', {})
-            seasonal = learning_data.get('seasonal') if learning_data else {}
+            # STEP 3: Use historical data to determine product count
+            if historical_intelligence.get('optimal_product_count'):
+                product_count = historical_intelligence['optimal_product_count']
+                _logger.info(f"📊 Using historical product count: {product_count}")
+            else:
+                # Fallback calculation
+                product_count = max(5, min(25, int(target_budget / 80)))
             
-            # STEP 3: Parse notes with intelligence (combined approach)
-            notes_data = self._parse_notes_with_ollama(client_notes, form_data) if client_notes else {}
-            requirements = self._parse_with_intelligence(
-                client_notes, 
-                target_budget, 
-                dietary_restrictions,
-                composition_type,
-                historical_intelligence
-            )
-            
-            # STEP 4: Merge all requirements (from version 2)
-            final_requirements = self._merge_all_requirements(
-                notes_data, form_data, patterns or {}, seasonal or {}
-            )
-            
-            # Override with intelligence-based requirements where appropriate
-            if requirements.get('product_count'):
-                final_requirements['product_count'] = requirements['product_count']
-                final_requirements['enforce_count'] = requirements.get('enforce_count', False)
-            
-            # STEP 5: Get previous sales data
-            previous_sales = self._get_all_previous_sales_data(partner_id)
-            
-            # STEP 6: Create generation context
-            generation_context = {
-                'patterns': patterns,
-                'seasonal': seasonal,
-                'similar_clients': learning_data.get('similar_clients', []) if learning_data else [],
-                'previous_sales': previous_sales,
-                'historical_intelligence': historical_intelligence,
-                'requirements_merged': True
-            }
-            
-            # STEP 7: Determine strategy (Enhanced with both approaches)
-            strategy = self._determine_comprehensive_strategy(
-                previous_sales, patterns, final_requirements, client_notes,
-                historical_intelligence
-            )
-            _logger.info(f"🎯 GENERATION STRATEGY: {strategy}")
-            
-            # STEP 8: Execute generation based on strategy
-            result = None
-            
-            # Check for business rules applicability first
+            # STEP 4: Get historical products for business rules
             last_year_products = self._get_last_year_products(partner_id)
             
-            if last_year_products and strategy in ['business_rules', '8020_rule', 'pattern_based']:
-                # Apply business rules WITH deep learning enforcement
-                result = self._apply_business_rules_with_deep_learning(
-                    partner, last_year_products, final_requirements, 
-                    client_notes, generation_context
-                )
-            elif historical_intelligence['confidence'] >= 0.8:
-                # High confidence - use deep learning
-                result = self._generate_from_deep_learning(
-                    partner, final_requirements, historical_intelligence
+            # STEP 5: Build requirements with historical data
+            requirements = {
+                'budget': target_budget,
+                'product_count': product_count,
+                'dietary': dietary_restrictions or [],
+                'composition_type': composition_type,
+                'enforce_count': False,
+                'budget_flexibility': 5,  # Strict 5% tolerance
+            }
+            
+            # STEP 6: Generate with history-aware selection
+            if last_year_products and len(last_year_products) > 0:
+                # Use 80/20 rule with last year's products
+                result = self._generate_with_8020_and_budget_iteration(
+                    partner, requirements, last_year_products, 
+                    historical_intelligence, client_notes
                 )
             elif historical_intelligence['confidence'] >= 0.5:
-                # Medium confidence - blend approaches
-                result = self._generate_blended_intelligence(
-                    partner, final_requirements, historical_intelligence
-                )
-            elif strategy == 'similar_clients':
-                result = self._generate_from_similar_clients(
-                    partner, final_requirements, client_notes, generation_context
-                )
-            elif strategy == 'pattern_based':
-                result = self._generate_from_patterns_enhanced(
-                    partner, final_requirements, client_notes, generation_context
+                # Use learned patterns
+                result = self._generate_from_patterns_with_budget_iteration(
+                    partner, requirements, historical_intelligence, client_notes
                 )
             else:
-                # Fallback to universal enforcement
-                result = self._generate_with_universal_enforcement(
-                    partner, final_requirements, client_notes, generation_context
+                # No history - use universal with iteration
+                result = self._generate_universal_with_budget_iteration(
+                    partner, requirements, client_notes
                 )
-            
-            # STEP 9: Validate and learn
-            if result and result.get('success'):
-                self._update_learning_from_result(result, final_requirements, historical_intelligence)
-                self.total_recommendations += 1
-                self.successful_recommendations += 1
-                self.last_recommendation_date = fields.Datetime.now()
-                self._validate_and_log_result(result, final_requirements)
-            
-            # Calculate response time
-            response_time = (datetime.now() - start_time).total_seconds()
-            if self.avg_response_time:
-                self.avg_response_time = (self.avg_response_time + response_time) / 2
-            else:
-                self.avg_response_time = response_time
             
             return result
             
         except Exception as e:
             _logger.error(f"Generation failed: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    def _generate_with_8020_and_budget_iteration(self, partner, requirements, 
+                                                last_year_products, intelligence, notes):
+        """Generate using 80/20 rule WITH BUDGET ITERATION"""
+        
+        budget = requirements['budget']
+        product_count = requirements['product_count']
+        dietary = requirements.get('dietary', [])
+        
+        _logger.info(f"🎯 Target: {product_count} products @ €{budget:.2f}")
+        
+        # Step 1: Start with 80% from history
+        keep_count = int(product_count * 0.8)
+        keep_products = []
+        
+        for product in last_year_products[:keep_count]:
+            if self._has_stock(product) and self._check_dietary_compliance(product, dietary):
+                keep_products.append(product)
+        
+        # Step 2: Get product pool for remaining 20%
+        exclude_ids = [p.id for p in keep_products]
+        new_pool = self._get_appropriate_price_pool(budget, product_count, dietary, exclude_ids)
+        
+        # Step 3: ITERATIVE BUDGET OPTIMIZATION
+        selected = self._iterate_until_budget_met(
+            keep_products, new_pool, budget, product_count, max_iterations=10
+        )
+        
+        # Step 4: Create composition
+        total_cost = sum(p.list_price for p in selected)
+        
+        composition = self.env['gift.composition'].create({
+            'partner_id': partner.id,
+            'target_budget': budget,
+            'actual_cost': total_cost,
+            'product_ids': [(6, 0, [p.id for p in selected])],
+            'dietary_restrictions': ', '.join(dietary) if dietary else '',
+            'client_notes': notes,
+            'generation_method': 'ollama',
+            'composition_type': requirements.get('composition_type', 'custom'),
+            'confidence_score': 0.95 if abs(total_cost - budget) / budget < 0.05 else 0.8,
+            'ai_reasoning': f"80/20 Historical: {keep_count} kept, {len(selected)-keep_count} new. Total: €{total_cost:.2f}"
+        })
+        
+        return {
+            'success': True,
+            'composition_id': composition.id,
+            'products': selected,
+            'total_cost': total_cost,
+            'product_count': len(selected),
+            'method': '8020_historical'
+        }
+
+    def _get_appropriate_price_pool(self, budget, target_count, dietary, exclude_ids):
+        """Get products with MIXED price points for a balanced composition"""
+        
+        # For a gift basket, we want variety in price points
+        avg_price_per_product = budget / target_count
+        
+        _logger.info(f"Budget: €{budget:.2f} for {target_count} products = €{avg_price_per_product:.2f} average")
+        
+        # Create price tiers for variety
+        products = []
+        
+        # Tier 1: Economy items (20% of products) - Small treats
+        economy_count = max(2, int(target_count * 0.2))
+        economy_domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>=', 5),
+            ('list_price', '<=', avg_price_per_product * 0.4),  # 40% of average
+            ('id', 'not in', exclude_ids)
+        ]
+        economy_products = self.env['product.template'].search(economy_domain, limit=economy_count * 3)
+        products.extend(economy_products)
+        
+        # Tier 2: Standard items (50% of products) - Core products
+        standard_count = max(5, int(target_count * 0.5))
+        standard_domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>', avg_price_per_product * 0.4),
+            ('list_price', '<=', avg_price_per_product * 1.2),  # Near average
+            ('id', 'not in', exclude_ids)
+        ]
+        standard_products = self.env['product.template'].search(standard_domain, limit=standard_count * 3)
+        products.extend(standard_products)
+        
+        # Tier 3: Premium items (30% of products) - Highlight items
+        premium_count = max(2, int(target_count * 0.3))
+        premium_domain = [
+            ('sale_ok', '=', True),
+            ('list_price', '>', avg_price_per_product * 1.2),
+            ('list_price', '<=', avg_price_per_product * 2.5),  # Premium but not excessive
+            ('id', 'not in', exclude_ids)
+        ]
+        premium_products = self.env['product.template'].search(premium_domain, limit=premium_count * 3)
+        products.extend(premium_products)
+        
+        _logger.info(f"""
+        Price Mix for €{budget:.2f}:
+        - Economy (€5-€{avg_price_per_product*0.4:.0f}): {len(economy_products)} products
+        - Standard (€{avg_price_per_product*0.4:.0f}-€{avg_price_per_product*1.2:.0f}): {len(standard_products)} products  
+        - Premium (€{avg_price_per_product*1.2:.0f}-€{avg_price_per_product*2.5:.0f}): {len(premium_products)} products
+        """)
+        
+        # Filter by stock and dietary
+        valid = []
+        for p in products:
+            if self._has_stock(p) and self._check_dietary_compliance(p, dietary):
+                valid.append(p)
+        
+        return valid
+
+
+    def _iterate_until_budget_met(self, base_products, pool, target_budget, 
+                                target_count, max_iterations=10):
+        """ITERATIVELY adjust selection with SMART swapping"""
+        
+        min_budget = target_budget * 0.95
+        max_budget = target_budget * 1.05
+        
+        selected = list(base_products)
+        
+        # Categorize pool by price for smart selection
+        pool_by_price = {
+            'cheap': [p for p in pool if float(p.list_price) < target_budget/target_count * 0.5],
+            'medium': [p for p in pool if target_budget/target_count * 0.5 <= float(p.list_price) < target_budget/target_count * 1.5],
+            'expensive': [p for p in pool if float(p.list_price) >= target_budget/target_count * 1.5]
+        }
+        
+        for iteration in range(max_iterations):
+            current_total = sum(float(p.list_price) for p in selected)
+            current_avg = current_total / len(selected) if selected else 0
+            
+            _logger.info(f"Iteration {iteration + 1}: €{current_total:.2f} (target: €{target_budget:.2f})")
+            
+            # Check if we're in range
+            if min_budget <= current_total <= max_budget:
+                _logger.info(f"✅ Budget met in {iteration + 1} iterations!")
+                return selected
+            
+            if current_total < min_budget:
+                # Under budget - need to add value
+                shortage = target_budget - current_total
+                shortage_per_item = shortage / max(1, target_count - len(selected))
+                
+                if len(selected) < target_count:
+                    # Add products that help reach budget
+                    if shortage_per_item > current_avg:
+                        # Need expensive items
+                        candidates = pool_by_price['expensive'] + pool_by_price['medium']
+                    else:
+                        # Need medium items
+                        candidates = pool_by_price['medium'] + pool_by_price['cheap']
+                    
+                    if candidates:
+                        # Pick the one closest to what we need
+                        best = min(candidates, key=lambda p: abs(float(p.list_price) - shortage_per_item))
+                        selected.append(best)
+                        for category in pool_by_price.values():
+                            if best in category:
+                                category.remove(best)
+                else:
+                    # Swap cheap for expensive
+                    if selected and pool_by_price['expensive']:
+                        cheapest = min(selected, key=lambda p: float(p.list_price))
+                        expensive = pool_by_price['expensive'][0]
+                        
+                        new_total = current_total - float(cheapest.list_price) + float(expensive.list_price)
+                        if new_total <= max_budget:
+                            selected.remove(cheapest)
+                            selected.append(expensive)
+                            pool_by_price['expensive'].remove(expensive)
+            
+            else:  # Over budget
+                # Over budget - need to reduce value
+                excess = current_total - target_budget
+                
+                if len(selected) > target_count:
+                    # Remove expensive products
+                    most_expensive = max(selected, key=lambda p: float(p.list_price))
+                    if float(most_expensive.list_price) > excess:
+                        selected.remove(most_expensive)
+                else:
+                    # Swap expensive for cheap
+                    if selected and pool_by_price['cheap']:
+                        most_expensive = max(selected, key=lambda p: float(p.list_price))
+                        cheap = pool_by_price['cheap'][0]
+                        
+                        selected.remove(most_expensive)
+                        selected.append(cheap)
+                        pool_by_price['cheap'].remove(cheap)
+        
+        return selected
 
     def _merge_all_requirements(self, notes_data, form_data, patterns, seasonal):
         """Intelligently merge requirements from all sources with proper error handling"""
