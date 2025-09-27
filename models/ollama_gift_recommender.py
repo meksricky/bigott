@@ -1199,7 +1199,7 @@ class OllamaGiftRecommender(models.Model):
             return {'success': False, 'error': str(e)}
 
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_count, context):
-        """Smart selection with automatic budget compliance"""
+        """Smart selection with automatic budget compliance - FIXED to exclude €0 products"""
         
         # Calculate budget bounds
         min_budget = budget * (1 - flexibility/100)
@@ -1217,8 +1217,24 @@ class OllamaGiftRecommender(models.Model):
             _logger.error("❌ No products available for selection")
             return []
         
-        # Convert to list if it's a recordset
-        products_list = list(products)
+        # CRITICAL FIX: Filter out products with zero or invalid prices
+        valid_products = []
+        for p in products:
+            try:
+                price = float(p.list_price)
+                if price > 0:  # Only include products with positive prices
+                    valid_products.append(p)
+                else:
+                    _logger.debug(f"Excluding zero-price product: {p.name}")
+            except (ValueError, TypeError, AttributeError):
+                _logger.debug(f"Excluding product with invalid price: {p.name if hasattr(p, 'name') else 'Unknown'}")
+                continue
+        
+        if not valid_products:
+            _logger.error("❌ No valid products with positive prices")
+            return []
+        
+        products_list = valid_products
         
         # Calculate ideal price per product
         ideal_price_per_product = budget / target_count if target_count > 0 else budget / 12
@@ -1226,28 +1242,26 @@ class OllamaGiftRecommender(models.Model):
         # Sort products by how close they are to ideal price
         products_list.sort(key=lambda p: abs(float(p.list_price) - ideal_price_per_product))
         
-        # STRATEGY 1: Try to hit budget exactly with ideal products
+        # STRATEGY 1: Start with products closest to ideal price
         selected = []
         current_total = 0
         
-        # First pass: Add products close to ideal price
         for product in products_list:
             if enforce_count and len(selected) >= target_count:
                 break
                 
             price = float(product.list_price)
             
-            # Check if adding this product keeps us in budget
-            if current_total + price <= max_budget:
+            # Check if adding this product keeps us in reasonable range
+            if current_total + price <= max_budget * 1.1:  # Allow slight overage initially
                 selected.append(product)
                 current_total += price
                 
-                # Stop if we've reached the target count and are in budget range
                 if len(selected) == target_count and min_budget <= current_total <= max_budget:
-                    _logger.info(f"✅ Perfect match found! {len(selected)} products = €{current_total:.2f}")
-                    break
+                    _logger.info(f"✅ Perfect match: {len(selected)} products = €{current_total:.2f}")
+                    return selected
         
-        # STRATEGY 2: If we're under budget, try swapping or adding
+        # STRATEGY 2: Adjust if we're under budget
         if current_total < min_budget:
             _logger.warning(f"⚠️ Under budget: €{current_total:.2f} < €{min_budget:.2f}")
             
@@ -1256,69 +1270,82 @@ class OllamaGiftRecommender(models.Model):
             remaining_products.sort(key=lambda p: float(p.list_price), reverse=True)
             
             if not enforce_count:
-                # We can add more products
+                # Add more expensive products
                 for product in remaining_products:
                     price = float(product.list_price)
                     if current_total + price <= max_budget:
                         selected.append(product)
                         current_total += price
-                        _logger.info(f"➕ Added {product.name[:30]} (€{price:.2f}) -> Total: €{current_total:.2f}")
+                        _logger.info(f"➕ Added {product.name[:30]} (€{price:.2f})")
                         
                         if current_total >= min_budget:
                             break
             else:
-                # Must maintain count - try swapping
-                cheapest_selected = sorted(selected, key=lambda p: float(p.list_price))
-                
-                for cheap_product in cheapest_selected:
-                    if current_total >= min_budget:
+                # Swap cheap products for expensive ones
+                attempts = 0
+                while current_total < min_budget and attempts < 50:
+                    attempts += 1
+                    
+                    # Find cheapest selected product
+                    if not selected:
                         break
-                        
-                    for expensive_product in remaining_products:
-                        new_total = current_total - float(cheap_product.list_price) + float(expensive_product.list_price)
-                        
-                        if min_budget <= new_total <= max_budget:
-                            selected.remove(cheap_product)
-                            selected.append(expensive_product)
-                            current_total = new_total
-                            _logger.info(f"🔄 Swapped {cheap_product.name[:20]} with {expensive_product.name[:20]}")
+                    cheapest = min(selected, key=lambda p: float(p.list_price))
+                    
+                    # Find a more expensive replacement
+                    replacement = None
+                    for product in remaining_products:
+                        new_price = float(product.list_price)
+                        new_total = current_total - float(cheapest.list_price) + new_price
+                        if new_total <= max_budget and new_price > float(cheapest.list_price):
+                            replacement = product
                             break
+                    
+                    if replacement:
+                        selected.remove(cheapest)
+                        selected.append(replacement)
+                        current_total = current_total - float(cheapest.list_price) + float(replacement.list_price)
+                        _logger.info(f"🔄 Swapped €{cheapest.list_price:.2f} → €{replacement.list_price:.2f}")
+                    else:
+                        break
         
-        # STRATEGY 3: If we're over budget, remove or swap
+        # STRATEGY 3: Adjust if we're over budget
         elif current_total > max_budget:
             _logger.warning(f"⚠️ Over budget: €{current_total:.2f} > €{max_budget:.2f}")
             
             if not enforce_count and len(selected) > target_count:
-                # We can remove products
+                # Remove expensive products
                 selected.sort(key=lambda p: float(p.list_price), reverse=True)
                 
                 while current_total > max_budget and len(selected) > target_count:
                     removed = selected.pop(0)
                     current_total -= float(removed.list_price)
                     _logger.info(f"➖ Removed {removed.name[:30]} (€{removed.list_price:.2f})")
-            else:
-                # Must maintain count - try swapping for cheaper
-                expensive_selected = sorted(selected, key=lambda p: float(p.list_price), reverse=True)
-                remaining_products = [p for p in products_list if p not in selected]
-                remaining_products.sort(key=lambda p: float(p.list_price))
-                
-                for expensive_product in expensive_selected:
-                    if current_total <= max_budget:
-                        break
-                        
-                    for cheap_product in remaining_products:
-                        new_total = current_total - float(expensive_product.list_price) + float(cheap_product.list_price)
-                        
-                        if min_budget <= new_total <= max_budget:
-                            selected.remove(expensive_product)
-                            selected.append(cheap_product)
-                            current_total = new_total
-                            _logger.info(f"🔄 Swapped {expensive_product.name[:20]} with {cheap_product.name[:20]}")
-                            break
         
         # Final validation
         final_total = sum(float(p.list_price) for p in selected)
         budget_compliance = min_budget <= final_total <= max_budget
+        
+        # Last attempt to fix budget if still not compliant
+        if not budget_compliance and final_total < min_budget:
+            _logger.warning("🔧 Final adjustment needed - budget too low")
+            
+            # Try to add more products or increase prices
+            shortage = min_budget - final_total
+            avg_needed = shortage / max(1, target_count - len(selected)) if not enforce_count else shortage
+            
+            _logger.info(f"Need to add €{shortage:.2f} more (avg €{avg_needed:.2f} per product)")
+            
+            # Find products that can fill the gap
+            gap_fillers = [p for p in products_list if p not in selected and float(p.list_price) >= avg_needed * 0.5]
+            gap_fillers.sort(key=lambda p: abs(float(p.list_price) - avg_needed))
+            
+            for filler in gap_fillers:
+                if final_total >= min_budget:
+                    break
+                if not enforce_count or len(selected) < target_count:
+                    selected.append(filler)
+                    final_total += float(filler.list_price)
+                    _logger.info(f"➕ Gap filler: {filler.name[:30]} (€{filler.list_price:.2f})")
         
         _logger.info(f"""
         =====================================
@@ -1331,13 +1358,6 @@ class OllamaGiftRecommender(models.Model):
         Variance: {((final_total - budget) / budget * 100):+.1f}%
         =====================================
         """)
-        
-        # Log first few products
-        for i, product in enumerate(selected[:15], 1):
-            _logger.info(f"   {i}. {product.name[:40]}: €{product.list_price:.2f}")
-        
-        if len(selected) > 15:
-            _logger.info(f"   ... and {len(selected) - 15} more products")
         
         return selected
 
@@ -2386,11 +2406,11 @@ class OllamaGiftRecommender(models.Model):
         }
     
     def _get_smart_product_pool(self, budget, dietary, context):
-        """Get intelligently filtered product pool based on budget context"""
+        """Get intelligently filtered product pool - EXCLUDE €0 PRODUCTS"""
         
         patterns = context.get('patterns', {})
         
-        # SMART FILTERING: Adjust minimum price based on budget
+        # Smart price range based on budget
         if budget >= 1000:
             min_price = 20.0
             max_price = min(budget * 0.3, 500.0)
@@ -2399,38 +2419,39 @@ class OllamaGiftRecommender(models.Model):
             max_price = min(budget * 0.4, 400.0)
         elif budget >= 200:
             min_price = 10.0
-            max_price = min(budget * 0.5, 300.0)   
+            max_price = min(budget * 0.5, 300.0)
         elif budget >= 100:
             min_price = 5.0
             max_price = min(budget * 0.6, 150.0)
         else:
-            min_price = 1.0
+            min_price = 3.0  # Minimum €3 to avoid junk products
             max_price = budget * 0.7
         
         _logger.info(f"""
-        🎯 Smart Product Filtering for Gift Composition:
-        Target Budget: €{budget:.2f}
-        Product Price Filter: €{min_price:.2f} - €{max_price:.2f}
+        🎯 Smart Product Filtering:
+        Budget: €{budget:.2f}
+        Price Range: €{min_price:.2f} - €{max_price:.2f}
         """)
         
-        # Build domain with smart price filtering
+        # Build domain with smart filtering
         domain = [
             ('sale_ok', '=', True),
             ('active', '=', True),
-            ('list_price', '>=', min_price),
+            ('list_price', '>', min_price),  # CRITICAL: Greater than, not >=
             ('list_price', '<=', max_price),
-            ('default_code', '!=', False),
         ]
         
-        # Add dietary filters if needed
-        if dietary and 'halal' in dietary:
-            domain.extend([
-                '|', '|', '|',
-                ('categ_id.complete_name', 'not ilike', 'IBERICOS'),
-                ('categ_id.complete_name', 'not ilike', 'ALCOHOL'),
-                ('name', 'not ilike', 'pork'),
-                ('name', 'not ilike', 'jamón')
-            ])
+        # Add dietary filters
+        if dietary:
+            for restriction in dietary:
+                if restriction.lower() in ['halal', 'no_pork']:
+                    domain.extend([
+                        '!', '|', '|', '|',
+                        ('name', 'ilike', 'jamón'),
+                        ('name', 'ilike', 'pork'),
+                        ('name', 'ilike', 'cerdo'),
+                        ('name', 'ilike', 'ibérico')
+                    ])
         
         # Exclude specific IDs if provided
         exclude_ids = context.get('exclude_ids', [])
@@ -2438,30 +2459,30 @@ class OllamaGiftRecommender(models.Model):
             domain.append(('id', 'not in', exclude_ids))
         
         # Search for products
-        products = self.env['product.template'].sudo().search(domain, limit=1000)
+        products = self.env['product.template'].sudo().search(domain, limit=500)
         
-        _logger.info(f"📦 Found {len(products)} products in appropriate price range")
-        
-        # Additional validation
+        # Additional validation - CRITICAL
         valid_products = []
-        excluded_count = 0
-        
         for product in products:
             try:
                 price = float(product.list_price or 0)
                 
-                if price < min_price or price > max_price:
-                    excluded_count += 1
-                    continue
-                
-                if not self._has_stock(product):
-                    excluded_count += 1
-                    continue
-                
-                valid_products.append(product)
-                
-            except (ValueError, TypeError):
-                excluded_count += 1
+                # Double-check price is valid and in range
+                if min_price < price <= max_price:
+                    # Check stock
+                    if self._has_stock(product):
+                        # Check dietary compliance
+                        if self._check_dietary_compliance(product, dietary):
+                            valid_products.append(product)
+                        else:
+                            _logger.debug(f"Excluded for dietary: {product.name}")
+                    else:
+                        _logger.debug(f"No stock: {product.name}")
+                else:
+                    _logger.debug(f"Price out of range: {product.name} (€{price:.2f})")
+                    
+            except (ValueError, TypeError, AttributeError) as e:
+                _logger.debug(f"Invalid product data: {e}")
                 continue
         
         # Convert back to recordset
@@ -2471,7 +2492,16 @@ class OllamaGiftRecommender(models.Model):
         else:
             result = self.env['product.template']
         
-        _logger.info(f"✅ Product Pool: {len(result)} valid products")
+        _logger.info(f"""
+        ✅ Product Pool Summary:
+        - Found: {len(products)} products
+        - Valid: {len(result)} products
+        - Excluded: {len(products) - len(result)} products
+        - Price range: €{min_price:.2f} - €{max_price:.2f}
+        """)
+        
+        if len(result) < 10:
+            _logger.warning(f"⚠️ Only {len(result)} valid products found. May need to adjust filters.")
         
         return result
     
@@ -2802,11 +2832,17 @@ class OllamaGiftRecommender(models.Model):
             return 'winter'
     
     def _call_ollama(self, prompt, format_json=False):
-        """Make a call to Ollama API"""
+        """Make a call to Ollama API with proper error handling"""
         if not self.ollama_enabled:
             return None
         
         try:
+            # Limit prompt length for the 3B model
+            max_prompt_length = 2000
+            if len(prompt) > max_prompt_length:
+                prompt = prompt[:max_prompt_length] + "..."
+                _logger.warning(f"Prompt truncated to {max_prompt_length} characters")
+            
             url = f"{self.ollama_base_url}/api/generate"
             
             payload = {
@@ -2814,236 +2850,59 @@ class OllamaGiftRecommender(models.Model):
                 'prompt': prompt,
                 'stream': False,
                 'options': {
-                    'temperature': 0.7,
+                    'temperature': 0.5,  # Lower temperature for more consistent output
                     'top_p': 0.9,
-                    'num_predict': 2000
+                    'num_predict': 500,  # Reduced for faster response
+                    'num_ctx': 2048,     # Context window
+                    'seed': 42,          # For reproducibility
+                    'stop': ['\n\n', '```']  # Stop sequences
                 }
             }
             
             if format_json:
+                # Simpler JSON instruction
                 payload['format'] = 'json'
+                payload['options']['temperature'] = 0.3  # Even lower for JSON
             
-            response = requests.post(url, json=payload, timeout=self.ollama_timeout)
+            response = requests.post(
+                url, 
+                json=payload, 
+                timeout=60,  # 60 second timeout
+                headers={'Content-Type': 'application/json'}
+            )
             
             if response.status_code == 200:
                 data = response.json()
-                return data.get('response', '').strip()
+                result = data.get('response', '').strip()
+                
+                if format_json and result:
+                    # Clean up JSON response
+                    result = result.replace('```json', '').replace('```', '')
+                    result = result.strip()
+                    # Validate JSON
+                    try:
+                        json.loads(result)  # Test parse
+                    except:
+                        _logger.error(f"Invalid JSON from Ollama: {result[:200]}")
+                        return None
+                
+                return result
+            elif response.status_code == 500:
+                _logger.error(f"Ollama 500 error. Model might be overloaded.")
+                return None
             else:
-                _logger.error(f"Ollama API error: {response.status_code}")
+                _logger.error(f"Ollama API error {response.status_code}")
                 return None
                 
-        except Exception as e:
-            _logger.error(f"Ollama request failed: {str(e)}")
+        except requests.exceptions.Timeout:
+            _logger.error("Ollama request timeout")
             return None
-        """Intelligently merge requirements from all sources with proper error handling"""
-        
-        merged = {
-            'budget': 100.0,
-            'budget_source': 'default',
-            'budget_flexibility': 15,
-            'product_count': 5,
-            'count_source': 'default',
-            'enforce_count': False,
-            'dietary': [],
-            'dietary_source': 'none',
-            'composition_type': 'custom',
-            'type_source': 'default',
-            'categories_required': {},
-            'categories_excluded': [],
-            'specific_products': [],
-            'special_instructions': [],
-            'seasonal_hint': None,
-            'preferred_price_range': None
-        }
-        
-        # 1. MERGE BUDGET (Priority: Notes > Form > History > Default)
-        if notes_data and notes_data.get('budget_override') and notes_data['budget_override'] > 0:
-            merged['budget'] = float(notes_data['budget_override'])
-            merged['budget_source'] = 'notes (override)'
-            _logger.info(f"💰 Budget from NOTES: €{merged['budget']:.2f}")
-        elif form_data and form_data.get('budget') and form_data['budget'] > 0:
-            merged['budget'] = float(form_data['budget'])
-            merged['budget_source'] = 'form'
-            _logger.info(f"💰 Budget from FORM: €{merged['budget']:.2f}")
-        elif patterns and patterns.get('avg_order_value') and patterns['avg_order_value'] > 0:
-            historical_budget = float(patterns['avg_order_value'])
-            trend = patterns.get('budget_trend', 'stable')
-            if trend == 'increasing':
-                historical_budget *= 1.1
-                merged['budget_source'] = 'history (increasing trend +10%)'
-            elif trend == 'decreasing':
-                historical_budget *= 0.95
-                merged['budget_source'] = 'history (decreasing trend -5%)'
-            else:
-                merged['budget_source'] = 'history (stable trend)'
-            merged['budget'] = max(100.0, historical_budget)
-            _logger.info(f"💰 Budget from HISTORY: €{merged['budget']:.2f} ({trend} trend)")
-        else:
-            merged['budget'] = 1000.0
-            merged['budget_source'] = 'default'
-            _logger.info(f"💰 Using DEFAULT budget: €{merged['budget']:.2f}")
-        
-        merged['budget'] = max(100.0, float(merged['budget']))
-        
-        # 2. MERGE PRODUCT COUNT (Priority: Notes > History > Calculated)
-        if notes_data and notes_data.get('product_count') and notes_data['product_count'] > 0:
-            merged['product_count'] = int(notes_data['product_count'])
-            merged['enforce_count'] = True
-            merged['count_source'] = 'notes (strict enforcement)'
-            _logger.info(f"📦 Product count from NOTES: {merged['product_count']} (STRICT)")
-        elif notes_data and notes_data.get('mandatory_count') and notes_data['mandatory_count'] > 0:
-            merged['product_count'] = int(notes_data['mandatory_count'])
-            merged['enforce_count'] = True
-            merged['count_source'] = 'notes (mandatory)'
-            _logger.info(f"📦 Mandatory count from NOTES: {merged['product_count']}")
-        elif patterns and patterns.get('avg_product_count') and patterns['avg_product_count'] > 0:
-            merged['product_count'] = max(1, int(round(patterns['avg_product_count'])))
-            merged['enforce_count'] = False
-            merged['count_source'] = 'history (flexible)'
-            _logger.info(f"📦 Product count from HISTORY: {merged['product_count']} (flexible)")
-        else:
-            avg_price = 80.0
-            if patterns and patterns.get('preferred_price_range'):
-                price_range = patterns['preferred_price_range']
-                if price_range.get('avg') and price_range['avg'] > 0:
-                    avg_price = float(price_range['avg'])
-                elif price_range.get('min') and price_range.get('max'):
-                    min_p = float(price_range.get('min', 50))
-                    max_p = float(price_range.get('max', 150))
-                    if min_p > 0 and max_p > 0:
-                        avg_price = (min_p + max_p) / 2
-            avg_price = max(10.0, avg_price)
-            calculated_count = int(merged['budget'] / avg_price) if avg_price > 0 else 12
-            merged['product_count'] = max(5, min(25, calculated_count))
-            merged['enforce_count'] = False
-            merged['count_source'] = f'calculated (€{merged["budget"]:.0f}/€{avg_price:.0f})'
-            _logger.info(f"📦 Product count CALCULATED: {merged['product_count']} (flexible)")
-        
-        merged['product_count'] = max(1, int(merged['product_count']))
-        
-        # 3. MERGE DIETARY RESTRICTIONS (Union of all sources)
-        dietary_set = set()
-        
-        if notes_data and notes_data.get('dietary'):
-            dietary_items = notes_data['dietary']
-            if isinstance(dietary_items, list):
-                dietary_set.update(dietary_items)
-            elif isinstance(dietary_items, str):
-                dietary_set.add(dietary_items)
-            merged['dietary_source'] = 'notes'
-            _logger.info(f"🥗 Dietary from NOTES: {notes_data['dietary']}")
-        
-        if form_data and form_data.get('dietary'):
-            dietary_items = form_data['dietary']
-            if isinstance(dietary_items, list):
-                dietary_set.update(dietary_items)
-            elif isinstance(dietary_items, str):
-                dietary_set.add(dietary_items)
-            if merged['dietary_source'] == 'notes':
-                merged['dietary_source'] = 'notes+form (combined)'
-            else:
-                merged['dietary_source'] = 'form'
-            _logger.info(f"🥗 Dietary from FORM: {form_data['dietary']}")
-        
-        merged['dietary'] = list(dietary_set)
-        if not merged['dietary']:
-            merged['dietary_source'] = 'none'
-            _logger.info("🥗 No dietary restrictions")
-        
-        # 4. MERGE COMPOSITION TYPE
-        if notes_data and notes_data.get('composition_type'):
-            merged['composition_type'] = notes_data['composition_type']
-            merged['type_source'] = 'notes'
-            _logger.info(f"🎁 Composition type from NOTES: {merged['composition_type']}")
-        elif form_data and form_data.get('composition_type'):
-            merged['composition_type'] = form_data['composition_type']
-            merged['type_source'] = 'form'
-            _logger.info(f"🎁 Composition type from FORM: {merged['composition_type']}")
-        elif patterns and patterns.get('total_orders', 0) >= 3:
-            if patterns.get('preferred_categories'):
-                top_categories = list(patterns['preferred_categories'].keys())
-                top_categories_str = ' '.join(str(cat) for cat in top_categories).lower()
-                if any(word in top_categories_str for word in ['wine', 'vino', 'champagne', 'alcohol']):
-                    merged['composition_type'] = 'hybrid'
-                    merged['type_source'] = 'history (wine preference detected)'
-                elif any(word in top_categories_str for word in ['experience', 'experiencia']):
-                    merged['composition_type'] = 'experience'
-                    merged['type_source'] = 'history (experience preference detected)'
-                else:
-                    merged['composition_type'] = 'custom'
-                    merged['type_source'] = 'history (general products)'
-            else:
-                merged['composition_type'] = 'custom'
-                merged['type_source'] = 'default'
-        else:
-            merged['composition_type'] = 'custom'
-            merged['type_source'] = 'default'
-        
-        # 5. MERGE BUDGET FLEXIBILITY
-        if notes_data and notes_data.get('budget_flexibility'):
-            try:
-                flex = float(notes_data['budget_flexibility'])
-                merged['budget_flexibility'] = max(5, min(30, flex))
-                _logger.info(f"📐 Flexibility from NOTES: {merged['budget_flexibility']}%")
-            except (ValueError, TypeError):
-                merged['budget_flexibility'] = 15
-        else:
-            merged['budget_flexibility'] = 15
-        
-        # 6. MERGE CATEGORY REQUIREMENTS
-        if notes_data:
-            if notes_data.get('categories_required'):
-                merged['categories_required'] = notes_data['categories_required']
-                _logger.info(f"📂 Categories required: {merged['categories_required']}")
-            if notes_data.get('categories_excluded'):
-                merged['categories_excluded'] = notes_data['categories_excluded']
-                _logger.info(f"🚫 Categories excluded: {merged['categories_excluded']}")
-            if notes_data.get('specific_products'):
-                merged['specific_products'] = notes_data['specific_products']
-                _logger.info(f"⭐ Specific products requested: {len(merged['specific_products'])} items")
-            if notes_data.get('special_instructions'):
-                merged['special_instructions'] = notes_data['special_instructions']
-                _logger.info(f"📋 Special instructions: {len(merged['special_instructions'])} notes")
-        
-        # 7. ADD SEASONAL PREFERENCES
-        if seasonal and not merged.get('categories_required'):
-            current_season = seasonal.get('current_season')
-            if current_season and seasonal.get('seasonal_data', {}).get(current_season):
-                season_data = seasonal['seasonal_data'][current_season]
-                if season_data.get('top_categories'):
-                    merged['seasonal_hint'] = season_data['top_categories']
-                    _logger.info(f"🌡️ Seasonal hint ({current_season}): {merged['seasonal_hint'][:3] if merged['seasonal_hint'] else 'None'}")
-                if season_data.get('top_products'):
-                    merged['seasonal_products'] = [p[0] for p in season_data['top_products'][:5]]
-                    _logger.info(f"🌡️ Seasonal products to consider: {len(merged.get('seasonal_products', []))} items")
-        
-        # 8. ADD PRICE RANGE PREFERENCE
-        if patterns and patterns.get('preferred_price_range'):
-            price_range = patterns['preferred_price_range']
-            if price_range.get('min') and price_range.get('max'):
-                merged['preferred_price_range'] = price_range
-                _logger.info(f"💰 Price range preference: €{price_range.get('min', 0):.2f} - €{price_range.get('max', 0):.2f}")
-        
-        # 9. CALCULATE FINAL BUDGET BOUNDS
-        flexibility = float(merged['budget_flexibility'])
-        budget = float(merged['budget'])
-        merged['min_budget'] = budget * (1 - flexibility/100)
-        merged['max_budget'] = budget * (1 + flexibility/100)
-        
-        # 10. LOG SUMMARY
-        _logger.info("="*60)
-        _logger.info("FINAL MERGED REQUIREMENTS SUMMARY:")
-        _logger.info(f"  💰 Budget: €{merged['budget']:.2f} (±{flexibility}%)")
-        _logger.info(f"     Range: €{merged['min_budget']:.2f} - €{merged['max_budget']:.2f}")
-        _logger.info(f"     Source: {merged['budget_source']}")
-        _logger.info(f"  📦 Products: {merged['product_count']} (enforce: {merged['enforce_count']})")
-        _logger.info(f"     Source: {merged['count_source']}")
-        _logger.info(f"  🎁 Type: {merged['composition_type']} (from: {merged['type_source']})")
-        if merged['dietary']:
-            _logger.info(f"  🥗 Dietary: {', '.join(merged['dietary'])} (from: {merged['dietary_source']})")
-        _logger.info("="*60)
-        
-        return merged
+        except requests.exceptions.RequestException as e:
+            _logger.error(f"Ollama request error: {e}")
+            return None
+        except Exception as e:
+            _logger.error(f"Unexpected Ollama error: {e}")
+            return None
     
     def _log_final_requirements(self, requirements):
         """Log the final merged requirements"""
