@@ -1561,6 +1561,102 @@ class OllamaGiftRecommender(models.Model):
             reasoning_parts.append(f"💡 Count source: {requirements['count_source']}")
         
         return "\n".join(reasoning_parts)
+
+    def _validate_and_log_result(self, result, requirements):
+        """Validate and log the result against requirements"""
+        
+        if not result or not result.get('success'):
+            _logger.error("❌ Generation failed - no valid result")
+            return False
+        
+        actual_count = result.get('product_count', 0)
+        actual_cost = result.get('total_cost', 0)
+        expected_count = requirements.get('product_count')
+        expected_budget = requirements.get('budget', 0)
+        flexibility = requirements.get('budget_flexibility', 10)
+        
+        # Validate product count if strict enforcement
+        count_valid = True
+        if requirements.get('enforce_count') and expected_count:
+            if actual_count == expected_count:
+                _logger.info(f"✅ Count requirement MET: {actual_count} products")
+            else:
+                _logger.error(f"❌ Count requirement FAILED: {actual_count} != {expected_count}")
+                count_valid = False
+        else:
+            _logger.info(f"📦 Product count: {actual_count} (flexible target: {expected_count})")
+        
+        # Validate budget compliance
+        budget_valid = True
+        if expected_budget > 0:
+            min_budget = expected_budget * (1 - flexibility/100)
+            max_budget = expected_budget * (1 + flexibility/100)
+            
+            if min_budget <= actual_cost <= max_budget:
+                variance = ((actual_cost - expected_budget) / expected_budget) * 100
+                _logger.info(f"✅ Budget requirement MET: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+            else:
+                variance = ((actual_cost - expected_budget) / expected_budget) * 100
+                _logger.error(f"❌ Budget requirement FAILED: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+                _logger.error(f"   Expected range: €{min_budget:.2f} - €{max_budget:.2f}")
+                budget_valid = False
+        
+        # Log dietary compliance
+        if requirements.get('dietary'):
+            _logger.info(f"🥗 Dietary restrictions applied: {', '.join(requirements['dietary'])}")
+        
+        # Log composition details
+        if result.get('composition_id'):
+            _logger.info(f"📝 Composition created: ID #{result['composition_id']}")
+        
+        # Log confidence score
+        if result.get('confidence_score'):
+            confidence = result['confidence_score']
+            if confidence >= 0.9:
+                _logger.info(f"🎯 High confidence: {confidence*100:.0f}%")
+            elif confidence >= 0.7:
+                _logger.info(f"✅ Good confidence: {confidence*100:.0f}%")
+            else:
+                _logger.warning(f"⚠️ Low confidence: {confidence*100:.0f}%")
+        
+        # Log generation method/strategy
+        if result.get('method'):
+            _logger.info(f"🔧 Strategy used: {result['method']}")
+        
+        # Log overall success
+        overall_valid = count_valid and budget_valid
+        
+        _logger.info("="*60)
+        if overall_valid:
+            _logger.info("✅✅✅ GENERATION SUCCESSFUL - ALL REQUIREMENTS MET ✅✅✅")
+        else:
+            _logger.warning("⚠️⚠️⚠️ GENERATION COMPLETED WITH WARNINGS ⚠️⚠️⚠️")
+            if not count_valid:
+                _logger.warning("  - Product count requirement not met")
+            if not budget_valid:
+                _logger.warning("  - Budget requirement not met")
+        _logger.info("="*60)
+        
+        # Log summary
+        if result.get('message'):
+            _logger.info(f"Summary: {result['message']}")
+        
+        # Performance metrics
+        if result.get('products'):
+            products = result['products']
+            if products:
+                prices = [float(p.list_price) for p in products]
+                avg_price = sum(prices) / len(prices) if prices else 0
+                min_price = min(prices) if prices else 0
+                max_price = max(prices) if prices else 0
+                
+                _logger.info(f"📊 Product metrics:")
+                _logger.info(f"   - Count: {len(products)}")
+                _logger.info(f"   - Total: €{sum(prices):.2f}")
+                _logger.info(f"   - Average: €{avg_price:.2f}")
+                _logger.info(f"   - Range: €{min_price:.2f} - €{max_price:.2f}")
+        
+        return overall_valid
     
     def _intelligent_budget_optimization(self, products, target_count, target_budget, flexibility):
         """
