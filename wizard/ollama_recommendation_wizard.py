@@ -990,55 +990,167 @@ class OllamaRecommendationWizard(models.TransientModel):
         return unique_dietary
     
     def _prepare_final_notes(self):
-        """Prepare MINIMAL context for AI - just the essentials"""
+        """Parse client notes for key info, then prepare MINIMAL context for AI"""
         
-        # Maximum 500 characters TOTAL for the 3B model
+        # First, extract key information from client notes if provided
+        extracted_data = {}
+        if self.client_notes:
+            extracted_data = self._extract_key_info_from_notes(self.client_notes)
+        
+        # Build minimal context with extracted info
         context_parts = []
         
-        # 1. Client notes (MOST IMPORTANT - goes first)
-        if self.client_notes:
-            # Limit to 200 characters
-            notes = self.client_notes[:200].strip()
-            if notes:
-                context_parts.append(notes)
+        # 1. Budget - check if client specified a different budget in notes
+        budget_to_use = self.target_budget
+        if extracted_data.get('budget'):
+            budget_to_use = extracted_data['budget']
+            _logger.info(f"📝 Budget override from notes: €{budget_to_use}")
+            context_parts.append(f"Budget: €{budget_to_use}")
+        elif self.target_budget > 0:
+            context_parts.append(f"Budget: €{self.target_budget}")
         
-        # 2. Budget (simple number)
-        if self.target_budget > 0:
-            context_parts.append(f"Budget: €{self.target_budget:.0f}")
+        # 2. Product count - from notes or explicit field
+        if extracted_data.get('product_count'):
+            context_parts.append(f"Count: {extracted_data['product_count']} products")
+        elif self.specify_product_count and self.product_count:
+            context_parts.append(f"Count: {self.product_count} products")
         
-        # 3. Product count (if explicitly specified)
-        if self.specify_product_count and self.product_count:
-            context_parts.append(f"Count: {self.product_count} products required")
+        # 3. Dietary - combine all sources
+        dietary = set()
         
-        # 4. Dietary (simple list)
-        dietary = []
+        # From checkboxes
         if self.is_halal:
-            dietary.append('halal')
+            dietary.add('halal')
         if self.is_vegan:
-            dietary.append('vegan')
+            dietary.add('vegan')
         if self.is_vegetarian:
-            dietary.append('vegetarian')
+            dietary.add('vegetarian')
         if self.is_non_alcoholic:
-            dietary.append('no-alcohol')
+            dietary.add('no-alcohol')
+        
+        # From notes
+        if extracted_data.get('dietary'):
+            dietary.update(extracted_data['dietary'])
         
         if dietary:
             context_parts.append(f"Dietary: {', '.join(dietary)}")
         
-        # 5. Type (one word)
-        if self.composition_type:
+        # 4. Special requirements from notes
+        if extracted_data.get('special_requirements'):
+            for req in extracted_data['special_requirements'][:2]:  # Max 2
+                context_parts.append(req)
+        
+        # 5. Type
+        if extracted_data.get('composition_type'):
+            context_parts.append(f"Type: {extracted_data['composition_type']}")
+        elif self.composition_type:
             context_parts.append(f"Type: {self.composition_type}")
         
-        # Join with simple separator
-        final_context = ' | '.join(context_parts)
+        # 6. Add remaining client notes (stuff we couldn't parse)
+        if extracted_data.get('remaining_notes'):
+            context_parts.append(extracted_data['remaining_notes'][:100])
         
-        # CRITICAL: Limit total length
-        if len(final_context) > 500:
-            final_context = final_context[:500]
+        # Join and limit
+        final_context = ' | '.join(context_parts)[:500]
         
-        # Simple logging
         _logger.info(f"AI Context ({len(final_context)} chars): {final_context}")
         
+        # CRITICAL: Update the actual budget being used
+        if extracted_data.get('budget'):
+            self.target_budget = extracted_data['budget']
+        
         return final_context
+
+    def _extract_key_info_from_notes(self, notes):
+        """Extract structured information from free-text notes"""
+        
+        if not notes:
+            return {}
+        
+        extracted = {
+            'budget': None,
+            'product_count': None,
+            'dietary': [],
+            'composition_type': None,
+            'special_requirements': [],
+            'remaining_notes': notes
+        }
+        
+        notes_lower = notes.lower()
+        
+        # 1. Extract budget (CRITICAL - was being ignored!)
+        import re
+        
+        # Look for budget patterns
+        budget_patterns = [
+            r'budget[:\s]+(?:of\s+)?(?:€|eur)?\s*(\d+)',
+            r'presupuesto[:\s]+(?:de\s+)?(?:€|eur)?\s*(\d+)',
+            r'(?:€|eur)\s*(\d+)\s*budget',
+            r'(\d{3,5})\s*(?:€|eur|euros?)',
+        ]
+        
+        for pattern in budget_patterns:
+            match = re.search(pattern, notes_lower)
+            if match:
+                try:
+                    budget_value = float(match.group(1))
+                    if 100 <= budget_value <= 10000:
+                        extracted['budget'] = budget_value
+                        _logger.info(f"📝 Extracted budget from notes: €{budget_value}")
+                        # Remove this from remaining notes
+                        notes = notes[:match.start()] + notes[match.end():]
+                        break
+                except:
+                    pass
+        
+        # 2. Extract product count
+        count_patterns = [
+            r'(\d+)\s+products?',
+            r'(\d+)\s+items?',
+            r'products?[:\s]+(\d+)',
+        ]
+        
+        for pattern in count_patterns:
+            match = re.search(pattern, notes_lower)
+            if match:
+                try:
+                    count = int(match.group(1))
+                    if 1 <= count <= 50:
+                        extracted['product_count'] = count
+                        notes = notes[:match.start()] + notes[match.end():]
+                        break
+                except:
+                    pass
+        
+        # 3. Extract dietary restrictions
+        dietary_keywords = {
+            'halal': ['halal'],
+            'vegan': ['vegan', 'vegano'],
+            'vegetarian': ['vegetarian', 'vegetariano'],
+            'no-alcohol': ['no alcohol', 'sin alcohol', 'non-alcoholic'],
+            'gluten-free': ['gluten free', 'sin gluten', 'celiac'],
+        }
+        
+        for diet_type, keywords in dietary_keywords.items():
+            if any(kw in notes_lower for kw in keywords):
+                extracted['dietary'].append(diet_type)
+        
+        # 4. Extract composition type
+        if 'experience' in notes_lower or 'experiencia' in notes_lower:
+            extracted['composition_type'] = 'experience'
+        elif 'sweet' in notes_lower or 'dulce' in notes_lower:
+            extracted['special_requirements'].append('include sweets')
+        elif 'wine' in notes_lower or 'vino' in notes_lower:
+            extracted['composition_type'] = 'hybrid'
+        
+        # 5. Clean up remaining notes
+        # Remove extracted parts to avoid duplication
+        for term in ['budget', 'presupuesto', 'halal', 'vegan', 'experience']:
+            notes = re.sub(rf'\b{term}\b', '', notes, flags=re.IGNORECASE)
+        
+        extracted['remaining_notes'] = ' '.join(notes.split())  # Clean whitespace
+        
+        return extracted
     
     def _build_result_message(self, result, actual_cost, expected_budget, product_count, quality_issues):
         """Build comprehensive result message in HTML"""
