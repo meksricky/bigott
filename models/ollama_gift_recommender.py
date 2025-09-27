@@ -316,6 +316,200 @@ class OllamaGiftRecommender(models.Model):
         
         return selected
 
+    def _generate_universal_with_budget_iteration(self, partner, requirements, notes):
+        """Universal generation with budget iteration - no history available"""
+        
+        budget = requirements['budget']
+        product_count = requirements.get('product_count', 12)
+        dietary = requirements.get('dietary', [])
+        
+        _logger.info(f"🎯 Universal generation: {product_count} products @ €{budget:.2f}")
+        
+        # Get mixed price pool
+        pool = self._get_appropriate_price_pool(budget, product_count, dietary, [])
+        
+        if not pool:
+            return {'success': False, 'error': 'No products available'}
+        
+        # Select initial products
+        selected = self._select_initial_mix(pool, product_count, budget)
+        
+        # Iterate to meet budget
+        selected = self._iterate_until_budget_met(
+            [], selected, budget, product_count, max_iterations=10
+        )
+        
+        total_cost = sum(float(p.list_price) for p in selected)
+        
+        composition = self.env['gift.composition'].create({
+            'partner_id': partner.id,
+            'target_budget': budget,
+            'actual_cost': total_cost,
+            'product_ids': [(6, 0, [p.id for p in selected])],
+            'dietary_restrictions': ', '.join(dietary) if dietary else '',
+            'client_notes': notes,
+            'generation_method': 'ollama',
+            'composition_type': requirements.get('composition_type', 'custom'),
+            'confidence_score': 0.7,
+            'ai_reasoning': f"Universal selection: {len(selected)} products = €{total_cost:.2f}"
+        })
+        
+        return {
+            'success': True,
+            'composition_id': composition.id,
+            'products': selected,
+            'total_cost': total_cost,
+            'product_count': len(selected)
+        }
+
+    def _generate_from_patterns_with_budget_iteration(self, partner, requirements, 
+                                                    intelligence, notes):
+        """Generate from patterns with budget iteration"""
+        
+        budget = requirements['budget']
+        product_count = requirements.get('product_count', 12)
+        dietary = requirements.get('dietary', [])
+        
+        _logger.info(f"🎯 Pattern-based: {product_count} products @ €{budget:.2f}")
+        
+        # Start with products from successful patterns
+        selected = []
+        
+        for pattern in intelligence.get('successful_patterns', [])[:3]:
+            for prod_id in pattern.get('products', [])[:5]:
+                product = self.env['product.template'].browse(prod_id)
+                if product.exists() and self._has_stock(product) and self._check_dietary_compliance(product, dietary):
+                    selected.append(product)
+                    if len(selected) >= product_count // 2:
+                        break
+        
+        # Get pool for remaining
+        exclude_ids = [p.id for p in selected]
+        pool = self._get_appropriate_price_pool(budget, product_count, dietary, exclude_ids)
+        
+        # Iterate to meet budget
+        selected = self._iterate_until_budget_met(
+            selected, pool, budget, product_count, max_iterations=10
+        )
+        
+        total_cost = sum(float(p.list_price) for p in selected)
+        
+        composition = self.env['gift.composition'].create({
+            'partner_id': partner.id,
+            'target_budget': budget,
+            'actual_cost': total_cost,
+            'product_ids': [(6, 0, [p.id for p in selected])],
+            'dietary_restrictions': ', '.join(dietary) if dietary else '',
+            'client_notes': notes,
+            'generation_method': 'ollama',
+            'composition_type': requirements.get('composition_type', 'custom'),
+            'confidence_score': 0.85,
+            'ai_reasoning': f"Pattern-based: {len(selected)} products = €{total_cost:.2f}"
+        })
+        
+        return {
+            'success': True,
+            'composition_id': composition.id,
+            'products': selected,
+            'total_cost': total_cost,
+            'product_count': len(selected)
+        }
+
+    def _select_initial_mix(self, pool, target_count, budget):
+        """Select initial product mix with varied price points"""
+        
+        if not pool:
+            return []
+        
+        # Sort pool by price
+        pool_sorted = sorted(pool, key=lambda p: float(p.list_price))
+        
+        selected = []
+        avg_price = budget / target_count
+        
+        # Divide pool into tiers
+        cheap = [p for p in pool_sorted if float(p.list_price) < avg_price * 0.5]
+        medium = [p for p in pool_sorted if avg_price * 0.5 <= float(p.list_price) < avg_price * 1.5]
+        expensive = [p for p in pool_sorted if float(p.list_price) >= avg_price * 1.5]
+        
+        # Select mix
+        # 20% cheap
+        for i in range(min(len(cheap), max(2, int(target_count * 0.2)))):
+            selected.append(cheap[i])
+        
+        # 50% medium
+        for i in range(min(len(medium), max(5, int(target_count * 0.5)))):
+            selected.append(medium[i])
+        
+        # 30% expensive
+        for i in range(min(len(expensive), max(3, int(target_count * 0.3)))):
+            selected.append(expensive[i])
+        
+        # Fill remainder with medium if needed
+        while len(selected) < target_count and medium:
+            for p in medium:
+                if p not in selected:
+                    selected.append(p)
+                    if len(selected) >= target_count:
+                        break
+        
+        return selected
+
+    def _parse_notes_basic_fallback(self, notes):
+        """Parse notes to extract budget and other requirements"""
+        
+        parsed = {
+            'use_default': False,
+            'budget_override': None,
+            'product_count': None,
+            'dietary': [],
+        }
+        
+        if not notes:
+            return parsed
+        
+        notes_lower = notes.lower()
+        
+        # Extract budget
+        import re
+        
+        # Look for budget patterns
+        budget_patterns = [
+            r'budget[:\s]+(?:of\s+)?(?:€|eur)?\s*(\d+)',
+            r'(?:€|eur)\s*(\d+)',
+            r'(\d{3,5})\s*(?:€|eur|euros?)',
+        ]
+        
+        for pattern in budget_patterns:
+            match = re.search(pattern, notes_lower)
+            if match:
+                try:
+                    value = float(match.group(1))
+                    if 100 <= value <= 10000:
+                        parsed['budget_override'] = value
+                        _logger.info(f"📝 Found budget in notes: €{value}")
+                        break
+                except:
+                    pass
+        
+        # Extract product count
+        count_match = re.search(r'(\d+)\s+products?', notes_lower)
+        if count_match:
+            try:
+                count = int(count_match.group(1))
+                if 1 <= count <= 50:
+                    parsed['product_count'] = count
+            except:
+                pass
+        
+        # Extract dietary
+        if 'halal' in notes_lower:
+            parsed['dietary'].append('halal')
+        if 'vegan' in notes_lower:
+            parsed['dietary'].append('vegan')
+        
+        return parsed
+
     def _merge_all_requirements(self, notes_data, form_data, patterns, seasonal):
         """Intelligently merge requirements from all sources with proper error handling"""
         
