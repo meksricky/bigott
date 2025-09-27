@@ -2356,7 +2356,8 @@ Extract and return ONLY a valid JSON object with these fields:
                 if 'product' in notes_lower or 'item' in notes_lower:
                     parsed['product_count'] = num_int
             elif 100 <= num_int <= 10000:
-                if 'budget' in notes_lower or '€' in notes or '
+                if 'budget' in notes_lower or '€' in notes or '$' in notes:
+                    parsed['budget_override'] = float(num_int)
     
     # ================== ACTION METHODS ==================
     
@@ -2441,22 +2442,7 @@ Extract and return ONLY a valid JSON object with these fields:
             else:
                 return {'success': False, 'message': 'No response from Ollama'}
         except Exception as e:
-            return {'success': False, 'message': f'Connection failed: {str(e)}'} in notes:
-                    parsed['budget_override'] = float(num_int)
-        
-        # Basic dietary detection
-        if 'halal' in notes_lower:
-            parsed['dietary'].append('halal')
-        if 'vegan' in notes_lower:
-            parsed['dietary'].append('vegan')
-        
-        # Composition type
-        if 'hybrid' in notes_lower:
-            parsed['composition_type'] = 'hybrid'
-        elif 'experience' in notes_lower:
-            parsed['composition_type'] = 'experience'
-        
-        return parsed
+            return {'success': False, 'message': f'Connection failed: {str(e)}'}
     
     # ================== ACTION METHODS ==================
     
