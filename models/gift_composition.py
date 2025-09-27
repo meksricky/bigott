@@ -468,50 +468,77 @@ class GiftComposition(models.Model):
         }
     
     def action_regenerate(self):
-        """Open wizard to regenerate this composition"""
+        """Directly regenerate composition without wizard"""
         self.ensure_one()
         
-        # Prepare wizard values from existing composition
-        wizard_vals = {
-            'regenerate_composition_id': self.id,  # Track which composition we're regenerating
-            'partner_id': self.partner_id.id,
-            'target_budget': self.target_budget,
-            'target_year': self.target_year,
-            'composition_type': self.composition_type,
-            'client_notes': self.client_notes,
-            'dietary_restrictions_text': self.dietary_restrictions,
-        }
+        # Archive current composition
+        self.write({
+            'state': 'replaced',
+            'active': False
+        })
         
-        # Parse dietary restrictions back to boolean fields
+        # Get recommender
+        recommender = self.env['ollama.gift.recommender'].get_or_create_recommender()
+        
+        # Parse existing dietary restrictions back to list
+        dietary = []
         if self.dietary_restrictions:
-            dietary = self.dietary_restrictions.lower()
-            if 'halal' in dietary:
-                wizard_vals['is_halal'] = True
-            if 'vegan' in dietary:
-                wizard_vals['is_vegan'] = True
-            if 'vegetarian' in dietary:
-                wizard_vals['is_vegetarian'] = True
-            if 'non_alcoholic' in dietary or 'no alcohol' in dietary:
-                wizard_vals['is_non_alcoholic'] = True
-            if 'gluten_free' in dietary or 'sin_gluten' in dietary:
-                wizard_vals['is_gluten_free'] = True
+            dietary_text = self.dietary_restrictions.lower()
+            if 'halal' in dietary_text:
+                dietary.append('halal')
+            if 'vegan' in dietary_text:
+                dietary.append('vegan')
+            if 'vegetarian' in dietary_text:
+                dietary.append('vegetarian')
+            if 'no alcohol' in dietary_text or 'non_alcoholic' in dietary_text:
+                dietary.append('non_alcoholic')
+            if 'gluten' in dietary_text:
+                dietary.append('gluten_free')
         
-        # Create and open wizard
-        wizard = self.env['ollama.recommendation.wizard'].create(wizard_vals)
+        _logger.info(f"""
+        ╔═══════════════════════════════════════════════════════╗
+        ║         🔄 REGENERATING COMPOSITION                   ║
+        ╠═══════════════════════════════════════════════════════╣
+        ║ Original: {self.reference:<43} ║
+        ║ Client: {self.partner_id.name[:40]:<40} ║
+        ║ Budget: €{self.target_budget:>15,.2f}                     ║
+        ╚═══════════════════════════════════════════════════════╝
+        """)
         
-        return {
-            'name': 'Regenerate Composition',
-            'type': 'ir.actions.act_window',
-            'res_model': 'ollama.recommendation.wizard',
-            'res_id': wizard.id,
-            'view_mode': 'form',
-            'target': 'new',
-            'context': {
-                'default_partner_id': self.partner_id.id,
-                'default_target_budget': self.target_budget,
-                'regeneration_mode': True,
+        # Generate new composition with same parameters
+        result = recommender.generate_gift_recommendations(
+            partner_id=self.partner_id.id,
+            target_budget=self.target_budget,
+            client_notes=self.client_notes,
+            dietary_restrictions=dietary,
+            composition_type=self.composition_type or 'custom'
+        )
+        
+        if result.get('success'):
+            new_composition = self.env['gift.composition'].browse(result['composition_id'])
+            
+            # Link to old composition if field exists
+            if hasattr(new_composition, 'regenerated_from_id'):
+                new_composition.regenerated_from_id = self.id
+            
+            # Add note about regeneration
+            new_composition.internal_notes = f"Regenerated from {self.reference}\n{new_composition.internal_notes or ''}"
+            
+            # Show success message
+            return {
+                'type': 'ir.actions.act_window',
+                'name': f'Regenerated Composition',
+                'res_model': 'gift.composition',
+                'res_id': new_composition.id,
+                'view_mode': 'form',
+                'target': 'current',
+                'context': {
+                    'show_notification': True,
+                    'notification_message': f'Successfully regenerated from {self.reference}'
+                }
             }
-        }
+        else:
+            raise UserError(f"Regeneration failed: {result.get('error', 'Unknown error')}")
     
     def get_categorized_products(self):
         """Get products organized by category - useful for reports"""
