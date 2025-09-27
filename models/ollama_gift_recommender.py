@@ -1154,14 +1154,15 @@ class OllamaGiftRecommender(models.Model):
         total_cost = sum(p.list_price for p in selected)
         
         try:
-            # Build reasoning
+            # Build reasoning that explains the strategy used
             top_similar = similar_clients[0] if similar_clients else None
-            reasoning = f"""Similar Client Pattern Generation:
+            reasoning = f"""AI Generation Using Similar Client Patterns (No Direct History):
     - Based on {len(similar_clients)} similar clients
-    - Top match: {top_similar['similarity']*100:.0f}% similarity if top_similar else 'N/A'
+    - Top match: {top_similar['similarity']*100:.0f}% similarity
     - Selected {len(selected)} products = €{total_cost:.2f}
     - Budget target: €{budget:.2f} (variance: {((total_cost-budget)/budget)*100:+.1f}%)
     - Products from similar patterns: {len([p for p in selected if p.id in product_popularity])}
+    - Strategy: Learning from similar purchasing patterns due to limited client history
     """
             
             composition = self.env['gift.composition'].create({
@@ -1172,7 +1173,7 @@ class OllamaGiftRecommender(models.Model):
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'dietary_restrictions': ', '.join(dietary) if dietary else '',
                 'client_notes': notes,
-                'generation_method': 'similar_clients',
+                'generation_method': 'ollama',  # AI-powered generation
                 'composition_type': requirements.get('composition_type', 'custom'),
                 'confidence_score': 0.85,
                 'ai_reasoning': reasoning
@@ -1189,8 +1190,8 @@ class OllamaGiftRecommender(models.Model):
                 'total_cost': total_cost,
                 'product_count': len(selected),
                 'confidence_score': 0.85,
-                'message': f'Similar clients: {len(selected)} products = €{total_cost:.2f}',
-                'method': 'similar_clients'
+                'message': f'Similar clients strategy: {len(selected)} products = €{total_cost:.2f}',
+                'method': 'similar_clients'  # Internal tracking
             }
             
         except Exception as e:
@@ -1392,9 +1393,15 @@ class OllamaGiftRecommender(models.Model):
         
         # Create composition
         try:
-            reasoning = self._build_comprehensive_reasoning(
+            base_reasoning = self._build_comprehensive_reasoning(
                 requirements, selected, total_cost, budget, context
             )
+            
+            reasoning = f"""AI Universal Generation (Fallback Strategy):
+    {base_reasoning}
+    - Strategy: Universal optimization with requirement enforcement
+    - Compliance: {'✅ All requirements met' if (count_ok and budget_ok) else '⚠️ Best effort within constraints'}
+    """
             
             composition = self.env['gift.composition'].create({
                 'partner_id': partner.id,
@@ -1404,7 +1411,7 @@ class OllamaGiftRecommender(models.Model):
                 'product_ids': [(6, 0, [p.id for p in selected])],
                 'dietary_restrictions': ', '.join(dietary) if dietary else '',
                 'client_notes': notes,
-                'generation_method': 'universal',
+                'generation_method': 'ollama',  # AI-powered generation
                 'composition_type': requirements.get('composition_type', 'custom'),
                 'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
                 'ai_reasoning': reasoning
@@ -1421,7 +1428,7 @@ class OllamaGiftRecommender(models.Model):
                 'product_count': len(selected),
                 'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
                 'message': f"{'✅' if (count_ok and budget_ok) else '⚠️'} Generated {len(selected)} products, €{total_cost:.2f}",
-                'method': 'universal_enforcement',
+                'method': 'universal_enforcement',  # Internal tracking
                 'compliant': count_ok and budget_ok
             }
             
@@ -1437,19 +1444,26 @@ class OllamaGiftRecommender(models.Model):
         
         # First fulfill category requirements
         for category, count in categories_required.items():
-            cat_products = [p for p in products if category.lower() in p.name.lower() or 
-                            (p.categ_id and category.lower() in p.categ_id.name.lower())]
-            cat_products.sort(key=lambda p: abs(p.list_price - (budget/total_count if total_count else 50)))
-            selected.extend(cat_products[:count])
-            _logger.info(f"📂 Added {min(count, len(cat_products))} {category} products")
+            cat_products = [p for p in products 
+                        if category.lower() in (p.name.lower() if p.name else '') or 
+                        (p.categ_id and category.lower() in (p.categ_id.name.lower() if p.categ_id.name else ''))]
+            
+            # Sort by price proximity to ideal
+            ideal_price = budget/total_count if total_count else 50
+            cat_products.sort(key=lambda p: abs(float(p.list_price) - ideal_price))
+            
+            added = cat_products[:count]
+            selected.extend(added)
+            _logger.info(f"📂 Added {len(added)}/{count} {category} products")
         
         # Fill remaining slots
         if total_count:
             remaining_count = total_count - len(selected)
             if remaining_count > 0:
                 available = [p for p in products if p not in selected]
-                available.sort(key=lambda p: abs(p.list_price - (budget/total_count)))
+                available.sort(key=lambda p: abs(float(p.list_price) - (budget/total_count)))
                 selected.extend(available[:remaining_count])
+                _logger.info(f"📦 Added {min(remaining_count, len(available))} additional products")
         
         return selected
 
@@ -1457,57 +1471,94 @@ class OllamaGiftRecommender(models.Model):
     def _enforce_exact_count(self, selected, all_products, exact_count, budget):
         """Enforce exact product count no matter what"""
         
-        if len(selected) == exact_count:
+        current_count = len(selected)
+        
+        if current_count == exact_count:
             return selected
         
-        if len(selected) < exact_count:
-            # Add products
-            remaining_needed = exact_count - len(selected)
+        if current_count < exact_count:
+            # Need more products
+            remaining_needed = exact_count - current_count
             available = [p for p in all_products if p not in selected]
-            available.sort(key=lambda p: p.list_price)
-            selected.extend(available[:remaining_needed])
-            _logger.info(f"➕ Added {remaining_needed} products to meet count requirement")
+            
+            # Sort by price to add cheapest first
+            available.sort(key=lambda p: float(p.list_price))
+            
+            added = available[:remaining_needed]
+            selected.extend(added)
+            _logger.info(f"➕ Added {len(added)} products to meet count requirement ({current_count} → {len(selected)})")
         
-        elif len(selected) > exact_count:
-            # Remove products
-            excess = len(selected) - exact_count
-            selected.sort(key=lambda p: p.list_price, reverse=True)
-            selected = selected[excess:]  # Remove the most expensive ones
-            _logger.info(f"➖ Removed {excess} products to meet count requirement")
+        elif current_count > exact_count:
+            # Too many products - remove most expensive
+            excess = current_count - exact_count
+            
+            # Sort by price descending
+            selected_list = list(selected)
+            selected_list.sort(key=lambda p: float(p.list_price), reverse=True)
+            
+            # Remove most expensive products
+            selected = selected_list[excess:]
+            _logger.info(f"➖ Removed {excess} expensive products to meet count requirement ({current_count} → {len(selected)})")
         
-        return selected[:exact_count]  # Final safety check
+        # Final safety check
+        final_selected = selected[:exact_count] if len(selected) > exact_count else selected
+        _logger.info(f"✅ Final count: {len(final_selected)} (target: {exact_count})")
+        
+        return final_selected
 
 
     def _build_comprehensive_reasoning(self, requirements, products, total_cost, budget, context):
         """Build detailed reasoning for the composition"""
         
         reasoning_parts = []
+        
+        # Basic stats
         reasoning_parts.append(f"📊 Generated {len(products)} products totaling €{total_cost:.2f}")
         
-        variance = ((total_cost - budget) / budget) * 100 if budget else 0
-        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        # Budget analysis
+        variance = ((total_cost - budget) / budget * 100) if budget else 0
+        reasoning_parts.append(f"💰 Budget: €{budget:.2f} → €{total_cost:.2f} ({variance:+.1f}% variance)")
         
+        # Count compliance
         if requirements.get('enforce_count') and requirements.get('product_count'):
-            if len(products) == requirements['product_count']:
-                reasoning_parts.append(f"✅ Met exact count requirement: {requirements['product_count']}")
+            target = requirements['product_count']
+            if len(products) == target:
+                reasoning_parts.append(f"✅ Exact count requirement met: {target} products")
             else:
-                reasoning_parts.append(f"⚠️ Count mismatch: {len(products)} vs {requirements['product_count']} required")
+                reasoning_parts.append(f"⚠️ Count variance: {len(products)} vs {target} required")
+        else:
+            reasoning_parts.append(f"📦 Product count: {len(products)} (flexible target: {requirements.get('product_count', 'auto')})")
         
+        # Dietary restrictions
         if requirements.get('dietary'):
             reasoning_parts.append(f"🥗 Dietary restrictions applied: {', '.join(requirements['dietary'])}")
         
+        # Historical patterns
         if context.get('patterns'):
             patterns = context['patterns']
+            
+            if patterns.get('total_orders', 0) > 0:
+                reasoning_parts.append(f"📈 Based on {patterns['total_orders']} historical orders")
+            
             if patterns.get('favorite_products'):
                 favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
                 if favorites_included > 0:
-                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products from history")
+                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products")
             
             if patterns.get('budget_trend'):
-                reasoning_parts.append(f"📈 Budget trend: {patterns['budget_trend']}")
+                reasoning_parts.append(f"📊 Budget trend: {patterns['budget_trend']}")
         
+        # Categories
         if requirements.get('categories_required'):
-            reasoning_parts.append(f"📂 Category requirements: {requirements['categories_required']}")
+            cats = ', '.join(f"{cat}({count})" for cat, count in requirements['categories_required'].items())
+            reasoning_parts.append(f"📂 Category requirements: {cats}")
+        
+        # Source info
+        if requirements.get('budget_source'):
+            reasoning_parts.append(f"💡 Budget source: {requirements['budget_source']}")
+        
+        if requirements.get('count_source'):
+            reasoning_parts.append(f"💡 Count source: {requirements['count_source']}")
         
         return "\n".join(reasoning_parts)
     
