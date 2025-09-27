@@ -1080,6 +1080,294 @@ class OllamaGiftRecommender(models.Model):
             'method': 'success_pattern_learning',
             'confidence_score': 0.75
         }
+
+    def _generate_from_similar_clients(self, partner, requirements, notes, context):
+        """Generate based on similar clients when no direct history exists"""
+        
+        similar_clients = context.get('similar_clients', [])
+        
+        if not similar_clients:
+            # No similar clients found, fallback to universal enforcement
+            return self._generate_with_universal_enforcement(partner, requirements, notes, context)
+        
+        _logger.info(f"👥 Learning from {len(similar_clients)} similar clients")
+        
+        budget = requirements['budget']
+        product_count = requirements['product_count']
+        dietary = requirements.get('dietary', [])
+        
+        # Aggregate product popularity from similar clients
+        product_popularity = {}
+        
+        for similar in similar_clients:
+            similarity_weight = similar['similarity']
+            patterns = similar['patterns']
+            
+            # Weight products by similarity score
+            for prod_id in patterns.get('favorite_products', []):
+                if prod_id not in product_popularity:
+                    product_popularity[prod_id] = 0
+                product_popularity[prod_id] += similarity_weight
+        
+        # Sort products by popularity score
+        popular_product_ids = sorted(
+            product_popularity.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:product_count * 2]  # Get more than needed for filtering
+        
+        # Build product list
+        products = []
+        for prod_id, score in popular_product_ids:
+            product = self.env['product.template'].browse(prod_id)
+            if product.exists() and self._has_stock(product) and self._check_dietary_compliance(product, dietary):
+                products.append(product)
+                if len(products) >= product_count * 1.5:  # Get extras for optimization
+                    break
+        
+        # If not enough products from similar clients, add from smart pool
+        if len(products) < product_count:
+            additional = self._get_smart_product_pool(budget, dietary, context)
+            for product in additional:
+                if product not in products:
+                    products.append(product)
+                    if len(products) >= product_count * 2:
+                        break
+        
+        # Optimize selection for budget and count
+        if products:
+            selected = self._smart_optimize_selection(
+                products,
+                product_count,
+                budget,
+                requirements.get('budget_flexibility', 10),
+                requirements.get('enforce_count', False),
+                context
+            )
+        else:
+            selected = []
+        
+        if not selected:
+            _logger.warning("No products selected from similar clients, using fallback")
+            return self._generate_with_universal_enforcement(partner, requirements, notes, context)
+        
+        total_cost = sum(p.list_price for p in selected)
+        
+        try:
+            # Build reasoning
+            top_similar = similar_clients[0] if similar_clients else None
+            reasoning = f"""Similar Client Pattern Generation:
+    - Based on {len(similar_clients)} similar clients
+    - Top match: {top_similar['similarity']*100:.0f}% similarity if top_similar else 'N/A'
+    - Selected {len(selected)} products = €{total_cost:.2f}
+    - Budget target: €{budget:.2f} (variance: {((total_cost-budget)/budget)*100:+.1f}%)
+    - Products from similar patterns: {len([p for p in selected if p.id in product_popularity])}
+    """
+            
+            composition = self.env['gift.composition'].create({
+                'partner_id': partner.id,
+                'target_budget': budget,
+                'target_year': fields.Date.today().year,
+                'actual_cost': total_cost,
+                'product_ids': [(6, 0, [p.id for p in selected])],
+                'dietary_restrictions': ', '.join(dietary) if dietary else '',
+                'client_notes': notes,
+                'generation_method': 'similar_clients',
+                'composition_type': requirements.get('composition_type', 'custom'),
+                'confidence_score': 0.85,
+                'ai_reasoning': reasoning
+            })
+            
+            # Auto-categorize if method exists
+            if hasattr(composition, 'auto_categorize_products'):
+                composition.auto_categorize_products()
+            
+            return {
+                'success': True,
+                'composition_id': composition.id,
+                'products': selected,
+                'total_cost': total_cost,
+                'product_count': len(selected),
+                'confidence_score': 0.85,
+                'message': f'Similar clients: {len(selected)} products = €{total_cost:.2f}',
+                'method': 'similar_clients'
+            }
+            
+        except Exception as e:
+            _logger.error(f"Failed to create composition: {e}")
+            return {'success': False, 'error': str(e)}
+
+
+    def _generate_with_universal_enforcement(self, partner, requirements, notes, context):
+        """Universal generation with strict enforcement of ALL requirements - Fallback method"""
+        
+        budget = requirements['budget']
+        flexibility = requirements.get('budget_flexibility', 10)
+        product_count = requirements['product_count']
+        enforce_count = requirements.get('enforce_count', False)
+        dietary = requirements.get('dietary', [])
+        
+        # Calculate budget bounds
+        min_budget = budget * (1 - flexibility/100)
+        max_budget = budget * (1 + flexibility/100)
+        
+        _logger.info(f"🎯 Universal Generation: {'EXACTLY' if enforce_count else 'APPROXIMATELY'} {product_count} products, €{min_budget:.2f}-€{max_budget:.2f}")
+        
+        # Get product pool
+        products = self._get_smart_product_pool(budget, dietary, context)
+        
+        if not products:
+            return {'success': False, 'error': 'No products available matching criteria'}
+        
+        # Apply category requirements if any
+        if requirements.get('categories_required'):
+            selected = self._select_with_category_requirements(
+                products, requirements['categories_required'], 
+                product_count, budget
+            )
+        else:
+            # Use smart optimization
+            selected = self._smart_optimize_selection(
+                products, product_count, budget, flexibility,
+                enforce_count, context
+            )
+        
+        # STRICT ENFORCEMENT if required
+        if enforce_count and product_count:
+            selected = self._enforce_exact_count(selected, products, product_count, budget)
+        
+        # Calculate total
+        total_cost = sum(p.list_price for p in selected)
+        
+        # Check compliance
+        count_ok = (not enforce_count) or (len(selected) == product_count)
+        budget_ok = min_budget <= total_cost <= max_budget
+        
+        if not count_ok:
+            _logger.error(f"❌ Count violation: {len(selected)} != {product_count}")
+        if not budget_ok:
+            _logger.warning(f"⚠️ Budget variance: €{total_cost:.2f} not in €{min_budget:.2f}-€{max_budget:.2f}")
+        
+        # Create composition
+        try:
+            reasoning = self._build_comprehensive_reasoning(
+                requirements, selected, total_cost, budget, context
+            )
+            
+            composition = self.env['gift.composition'].create({
+                'partner_id': partner.id,
+                'target_budget': budget,
+                'target_year': fields.Date.today().year,
+                'actual_cost': total_cost,
+                'product_ids': [(6, 0, [p.id for p in selected])],
+                'dietary_restrictions': ', '.join(dietary) if dietary else '',
+                'client_notes': notes,
+                'generation_method': 'universal',
+                'composition_type': requirements.get('composition_type', 'custom'),
+                'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
+                'ai_reasoning': reasoning
+            })
+            
+            if hasattr(composition, 'auto_categorize_products'):
+                composition.auto_categorize_products()
+            
+            return {
+                'success': True,
+                'composition_id': composition.id,
+                'products': selected,
+                'total_cost': total_cost,
+                'product_count': len(selected),
+                'confidence_score': 0.95 if (count_ok and budget_ok) else 0.7,
+                'message': f"{'✅' if (count_ok and budget_ok) else '⚠️'} Generated {len(selected)} products, €{total_cost:.2f}",
+                'method': 'universal_enforcement',
+                'compliant': count_ok and budget_ok
+            }
+            
+        except Exception as e:
+            _logger.error(f"Failed to create composition: {e}")
+            return {'success': False, 'error': str(e)}
+
+
+    def _select_with_category_requirements(self, products, categories_required, total_count, budget):
+        """Select products meeting specific category requirements"""
+        
+        selected = []
+        
+        # First fulfill category requirements
+        for category, count in categories_required.items():
+            cat_products = [p for p in products if category.lower() in p.name.lower() or 
+                            (p.categ_id and category.lower() in p.categ_id.name.lower())]
+            cat_products.sort(key=lambda p: abs(p.list_price - (budget/total_count if total_count else 50)))
+            selected.extend(cat_products[:count])
+            _logger.info(f"📂 Added {min(count, len(cat_products))} {category} products")
+        
+        # Fill remaining slots
+        if total_count:
+            remaining_count = total_count - len(selected)
+            if remaining_count > 0:
+                available = [p for p in products if p not in selected]
+                available.sort(key=lambda p: abs(p.list_price - (budget/total_count)))
+                selected.extend(available[:remaining_count])
+        
+        return selected
+
+
+    def _enforce_exact_count(self, selected, all_products, exact_count, budget):
+        """Enforce exact product count no matter what"""
+        
+        if len(selected) == exact_count:
+            return selected
+        
+        if len(selected) < exact_count:
+            # Add products
+            remaining_needed = exact_count - len(selected)
+            available = [p for p in all_products if p not in selected]
+            available.sort(key=lambda p: p.list_price)
+            selected.extend(available[:remaining_needed])
+            _logger.info(f"➕ Added {remaining_needed} products to meet count requirement")
+        
+        elif len(selected) > exact_count:
+            # Remove products
+            excess = len(selected) - exact_count
+            selected.sort(key=lambda p: p.list_price, reverse=True)
+            selected = selected[excess:]  # Remove the most expensive ones
+            _logger.info(f"➖ Removed {excess} products to meet count requirement")
+        
+        return selected[:exact_count]  # Final safety check
+
+
+    def _build_comprehensive_reasoning(self, requirements, products, total_cost, budget, context):
+        """Build detailed reasoning for the composition"""
+        
+        reasoning_parts = []
+        reasoning_parts.append(f"📊 Generated {len(products)} products totaling €{total_cost:.2f}")
+        
+        variance = ((total_cost - budget) / budget) * 100 if budget else 0
+        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        
+        if requirements.get('enforce_count') and requirements.get('product_count'):
+            if len(products) == requirements['product_count']:
+                reasoning_parts.append(f"✅ Met exact count requirement: {requirements['product_count']}")
+            else:
+                reasoning_parts.append(f"⚠️ Count mismatch: {len(products)} vs {requirements['product_count']} required")
+        
+        if requirements.get('dietary'):
+            reasoning_parts.append(f"🥗 Dietary restrictions applied: {', '.join(requirements['dietary'])}")
+        
+        if context.get('patterns'):
+            patterns = context['patterns']
+            if patterns.get('favorite_products'):
+                favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
+                if favorites_included > 0:
+                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products from history")
+            
+            if patterns.get('budget_trend'):
+                reasoning_parts.append(f"📈 Budget trend: {patterns['budget_trend']}")
+        
+        if requirements.get('categories_required'):
+            reasoning_parts.append(f"📂 Category requirements: {requirements['categories_required']}")
+        
+        return "\n".join(reasoning_parts)
     
     def _intelligent_budget_optimization(self, products, target_count, target_budget, flexibility):
         """
