@@ -165,6 +165,13 @@ class GiftComposition(models.Model):
     min_product_price = fields.Float(string="Min Price", compute="_compute_price_statistics", store=True)
     max_product_price = fields.Float(string="Max Price", compute="_compute_price_statistics", store=True)
     price_std_deviation = fields.Float(string="Price Std Dev", compute="_compute_price_statistics", store=True)
+
+
+    active = fields.Boolean(
+        string='Active', 
+        default=True,
+        help="If unchecked, it will allow you to hide the composition without removing it."
+    )
     
     # ============== COMPUTED METHODS ==============
     
