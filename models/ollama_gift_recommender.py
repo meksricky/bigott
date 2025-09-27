@@ -57,7 +57,7 @@ class OllamaGiftRecommender(models.Model):
     def generate_gift_recommendations(self, partner_id, target_budget, 
                                     client_notes='', dietary_restrictions=None,
                                     composition_type='custom'):
-        """FIXED: Actually use historical learning"""
+        """COMPREHENSIVE generation using ALL existing features together"""
         
         self.ensure_one()
         start_time = datetime.now()
@@ -67,61 +67,300 @@ class OllamaGiftRecommender(models.Model):
             if not partner.exists():
                 return {'success': False, 'error': 'Invalid partner'}
             
-            # STEP 1: Parse notes to get actual requirements (including budget override)
-            notes_data = self._parse_notes_basic_fallback(client_notes) if client_notes else {}
+            # 1. Parse notes FIRST to get budget override and ALL requirements
+            notes_data = self._parse_notes_with_ollama(client_notes, {'budget': target_budget}) if client_notes else {}
             
-            # Use budget from notes if specified
-            if notes_data.get('budget_override') and notes_data['budget_override'] > 0:
+            # Override budget if specified in notes
+            if notes_data.get('budget_override'):
                 target_budget = notes_data['budget_override']
-                _logger.info(f"📝 Using budget from notes: €{target_budget}")
+                _logger.info(f"📝 Budget override from notes: €{target_budget}")
             
-            # STEP 2: Deep Historical Learning - THIS WAS NOT BEING USED!
+            # 2. Deep Historical Learning - USE IT
             historical_intelligence = self._deep_historical_learning(partner_id, target_budget)
             
-            # STEP 3: Use historical data to determine product count
-            if historical_intelligence.get('optimal_product_count'):
-                product_count = historical_intelligence['optimal_product_count']
-                _logger.info(f"📊 Using historical product count: {product_count}")
-            else:
-                # Fallback calculation
-                product_count = max(5, min(25, int(target_budget / 80)))
+            # 3. Get ALL learning data 
+            learning_data = self._get_or_update_learning_cache(partner_id)
+            patterns = learning_data.get('patterns') if learning_data else historical_intelligence.get('patterns', {})
+            seasonal = learning_data.get('seasonal') if learning_data else {}
             
-            # STEP 4: Get historical products for business rules
-            last_year_products = self._get_last_year_products(partner_id)
-            
-            # STEP 5: Build requirements with historical data
-            requirements = {
+            # 4. Merge ALL requirements (notes + form + patterns + seasonal)
+            form_data = {
                 'budget': target_budget,
-                'product_count': product_count,
                 'dietary': dietary_restrictions or [],
-                'composition_type': composition_type,
-                'enforce_count': False,
-                'budget_flexibility': 5,  # Strict 5% tolerance
+                'composition_type': composition_type
             }
             
-            # STEP 6: Generate with history-aware selection
-            if last_year_products and len(last_year_products) > 0:
-                # Use 80/20 rule with last year's products
-                result = self._generate_with_8020_and_budget_iteration(
-                    partner, requirements, last_year_products, 
-                    historical_intelligence, client_notes
+            # THIS WAS BEING SKIPPED - merge everything
+            final_requirements = self._merge_all_requirements(
+                notes_data, form_data, patterns, seasonal
+            )
+            
+            # 5. Apply historical budget adjustment if no override
+            if not notes_data.get('budget_override') and patterns.get('avg_order_value'):
+                # Consider historical spending patterns
+                historical_avg = patterns['avg_order_value']
+                if patterns.get('budget_trend') == 'increasing':
+                    suggested_budget = historical_avg * 1.1
+                elif patterns.get('budget_trend') == 'decreasing':
+                    suggested_budget = historical_avg * 0.95
+                else:
+                    suggested_budget = historical_avg
+                
+                # Blend with requested budget (70% requested, 30% historical)
+                final_requirements['budget'] = target_budget * 0.7 + suggested_budget * 0.3
+                _logger.info(f"📊 Adjusted budget with history: €{final_requirements['budget']:.2f}")
+            
+            # 6. Get previous sales and last year products
+            previous_sales = self._get_all_previous_sales_data(partner_id)
+            last_year_products = self._get_last_year_products(partner_id)
+            
+            # 7. Create COMPLETE generation context
+            generation_context = {
+                'patterns': patterns,
+                'seasonal': seasonal,
+                'similar_clients': learning_data.get('similar_clients', []) if learning_data else [],
+                'previous_sales': previous_sales,
+                'historical_intelligence': historical_intelligence,
+                'requirements_merged': True,
+                'last_year_products': last_year_products
+            }
+            
+            # 8. Determine strategy based on ALL available data
+            strategy = self._determine_comprehensive_strategy(
+                previous_sales, patterns, final_requirements, client_notes,
+                historical_intelligence
+            )
+            
+            _logger.info(f"🎯 Strategy: {strategy} with {len(last_year_products)} historical products")
+            
+            # 9. Execute with ALL features working together
+            if last_year_products and strategy in ['business_rules', '8020_rule']:
+                # Apply business rules WITH all requirements
+                result = self._apply_business_rules_with_deep_learning(
+                    partner, last_year_products, final_requirements, 
+                    client_notes, generation_context
+                )
+            elif historical_intelligence['confidence'] >= 0.8:
+                result = self._generate_from_deep_learning(
+                    partner, final_requirements, historical_intelligence
                 )
             elif historical_intelligence['confidence'] >= 0.5:
-                # Use learned patterns
-                result = self._generate_from_patterns_with_budget_iteration(
-                    partner, requirements, historical_intelligence, client_notes
+                result = self._generate_blended_intelligence(
+                    partner, final_requirements, historical_intelligence
                 )
             else:
-                # No history - use universal with iteration
-                result = self._generate_universal_with_budget_iteration(
-                    partner, requirements, client_notes
+                result = self._generate_with_universal_enforcement(
+                    partner, final_requirements, client_notes, generation_context
                 )
+            
+            # 10. Validate and learn
+            if result and result.get('success'):
+                self._validate_and_log_result(result, final_requirements)
+                self._update_learning_from_result(result, final_requirements, historical_intelligence)
+                self.successful_recommendations += 1
+            
+            self.total_recommendations += 1
+            self.last_recommendation_date = fields.Datetime.now()
             
             return result
             
         except Exception as e:
             _logger.error(f"Generation failed: {str(e)}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+
+    def _check_dietary_compliance(self, product, dietary_restrictions):
+        """COMPLETE dietary checking - ALL restrictions, not just basic ones"""
+        
+        if not dietary_restrictions:
+            return True
+        
+        product_name = product.name.lower() if product.name else ''
+        categ_name = product.categ_id.name.lower() if product.categ_id else ''
+        
+        # Process ALL dietary types
+        for restriction in dietary_restrictions:
+            restriction = restriction.lower()
+            
+            # HALAL - comprehensive
+            if restriction in ['halal', 'no_pork']:
+                prohibited = ['cerdo', 'pork', 'jamón', 'jamon', 'ibérico', 'iberico', 
+                            'chorizo', 'salchichón', 'lomo', 'panceta', 'bacon', 'ham',
+                            'prosciutto', 'salami', 'mortadela', 'sobrasada']
+                if any(word in product_name for word in prohibited):
+                    return False
+                
+                # No alcohol for halal
+                alcohol_words = ['vino', 'wine', 'alcohol', 'licor', 'whisky', 'vodka', 
+                            'rum', 'gin', 'brandy', 'champagne', 'cava', 'beer', 'cerveza']
+                if any(word in product_name for word in alcohol_words):
+                    return False
+                
+                # Check product attributes
+                if hasattr(product, 'contains_pork') and product.contains_pork:
+                    return False
+                if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
+                    return False
+                if hasattr(product, 'is_iberian_product') and product.is_iberian_product:
+                    return False
+            
+            # VEGAN - comprehensive
+            elif restriction in ['vegan', 'vegano']:
+                prohibited = ['carne', 'meat', 'pollo', 'chicken', 'pescado', 'fish', 
+                            'marisco', 'seafood', 'queso', 'cheese', 'leche', 'milk', 
+                            'huevo', 'egg', 'mantequilla', 'butter', 'nata', 'cream',
+                            'miel', 'honey', 'yogurt', 'jamón', 'chorizo', 'foie',
+                            'anchoa', 'anchovy', 'atún', 'tuna', 'salmon', 'bacalao']
+                if any(word in product_name for word in prohibited):
+                    return False
+                
+                # Check category
+                if categ_name in ['charcuterie', 'cheese', 'foie_gras', 'dairy']:
+                    return False
+                
+                if hasattr(product, 'is_vegan') and not product.is_vegan:
+                    return False
+            
+            # VEGETARIAN
+            elif restriction in ['vegetarian', 'vegetariano']:
+                prohibited = ['carne', 'meat', 'pollo', 'chicken', 'pescado', 'fish', 
+                            'marisco', 'seafood', 'jamón', 'ham', 'chorizo', 'anchoa',
+                            'atún', 'tuna', 'salmon', 'bacalao', 'sardina']
+                if any(word in product_name for word in prohibited):
+                    return False
+                
+                if categ_name in ['charcuterie', 'foie_gras']:
+                    return False
+            
+            # NO ALCOHOL
+            elif restriction in ['no_alcohol', 'non_alcoholic', 'sin_alcohol']:
+                prohibited = ['vino', 'wine', 'alcohol', 'licor', 'cerveza', 'beer', 
+                            'whisky', 'vodka', 'ginebra', 'gin', 'rum', 'brandy', 
+                            'champagne', 'cava', 'vermouth', 'liqueur', 'spirits']
+                if any(word in product_name for word in prohibited):
+                    return False
+                
+                if hasattr(product, 'contains_alcohol') and product.contains_alcohol:
+                    return False
+                
+                # Check beverage family
+                if hasattr(product, 'beverage_family'):
+                    if product.beverage_family in ['wine', 'spirits_high', 'beer', 'champagne']:
+                        return False
+            
+            # GLUTEN FREE
+            elif restriction in ['gluten_free', 'sin_gluten', 'celiac']:
+                prohibited = ['pan', 'bread', 'pasta', 'galleta', 'cookie', 'harina', 
+                            'flour', 'trigo', 'wheat', 'cebada', 'barley', 'centeno', 
+                            'rye', 'bizcocho', 'cake', 'tarta', 'croissant', 'cereales']
+                if any(word in product_name for word in prohibited):
+                    return False
+                
+                if hasattr(product, 'contains_gluten') and product.contains_gluten:
+                    return False
+            
+            # NUT FREE
+            elif restriction in ['nut_free', 'sin_frutos_secos']:
+                prohibited = ['almendra', 'almond', 'nuez', 'walnut', 'cacahuete', 'peanut',
+                            'pistacho', 'avellana', 'hazelnut', 'anacardo', 'cashew']
+                if any(word in product_name for word in prohibited):
+                    return False
+            
+            # LACTOSE FREE
+            elif restriction in ['lactose_free', 'sin_lactosa']:
+                prohibited = ['leche', 'milk', 'queso', 'cheese', 'nata', 'cream', 
+                            'mantequilla', 'butter', 'yogurt', 'lactose']
+                if any(word in product_name for word in prohibited):
+                    return False
+        
+        return True
+
+
+    def _apply_business_rules_with_deep_learning(self, partner, last_products, 
+                                                requirements, notes, context):
+        """Apply business rules using ALL context and requirements"""
+        
+        _logger.info(f"Applying business rules with {len(last_products)} historical products")
+        
+        # Get the historical intelligence
+        historical_intelligence = context.get('historical_intelligence', {})
+        
+        # 1. Apply business rules transformation
+        try:
+            rules_engine = self.env['business.rules.engine'].sudo()
+            transformation = rules_engine.apply_composition_rules(
+                partner.id,
+                datetime.now().year,
+                last_products
+            )
+        except:
+            # Fallback to 80/20 rule
+            transformation = {
+                'products': last_products[:int(len(last_products) * 0.8)],
+                'rule_applications': []
+            }
+        
+        # 2. Apply ALL dietary filters
+        filtered_products = self._filter_products_by_dietary(
+            transformation['products'], requirements.get('dietary', [])
+        )
+        
+        # 3. Use historical intelligence for count
+        if historical_intelligence.get('optimal_product_count'):
+            target_count = historical_intelligence['optimal_product_count']
+        elif requirements.get('product_count'):
+            target_count = requirements['product_count']
+        else:
+            target_count = len(last_products)
+        
+        # 4. Get appropriate pool for additions
+        exclude_ids = [p.id for p in filtered_products]
+        pool = self._get_smart_product_pool(
+            requirements['budget'], 
+            requirements.get('dietary', []), 
+            {**context, 'exclude_ids': exclude_ids}
+        )
+        
+        # 5. Apply iterative budget optimization
+        optimized = self._iterate_until_budget_met(
+            filtered_products,
+            pool,
+            requirements['budget'],
+            target_count,
+            max_iterations=15
+        )
+        
+        # 6. Apply category requirements if specified
+        if requirements.get('categories_required'):
+            optimized = self._enforce_category_requirements(
+                optimized, requirements['categories_required'],
+                requirements['budget'], pool
+            )
+        
+        # 7. Final budget check
+        total_cost = sum(float(p.list_price) for p in optimized)
+        
+        # Create composition
+        composition = self.env['gift.composition'].create({
+            'partner_id': partner.id,
+            'target_budget': requirements['budget'],
+            'actual_cost': total_cost,
+            'product_ids': [(6, 0, [p.id for p in optimized])],
+            'dietary_restrictions': ', '.join(requirements.get('dietary', [])),
+            'client_notes': notes,
+            'generation_method': 'ollama',
+            'composition_type': requirements.get('composition_type', 'custom'),
+            'confidence_score': 0.95,
+            'ai_reasoning': f"Business rules + deep learning: {len(optimized)} products, €{total_cost:.2f}"
+        })
+        
+        return {
+            'success': True,
+            'composition_id': composition.id,
+            'products': optimized,
+            'total_cost': total_cost,
+            'product_count': len(optimized)
+        }
 
     def _generate_with_8020_and_budget_iteration(self, partner, requirements, 
                                                 last_year_products, intelligence, notes):
