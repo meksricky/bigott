@@ -3215,23 +3215,6 @@ Extract and return ONLY a valid JSON object with these fields:
             })
         return recommender
     
-    def test_ollama_connection(self):
-        """Test connection to Ollama service"""
-        self.ensure_one()
-        
-        if not self.ollama_enabled:
-            return {'success': False, 'message': 'Ollama is disabled'}
-        
-        try:
-            response = self._call_ollama("Respond with 'OK' if you receive this message.")
-            
-            if response:
-                return {'success': True, 'message': f'✅ Connected to Ollama ({self.ollama_model})'}
-            else:
-                return {'success': False, 'message': 'No response from Ollama'}
-        except Exception as e:
-            return {'success': False, 'message': f'Connection failed: {str(e)}'}
-    
     # ================== ACTION METHODS ==================
     
     def action_view_recommendations(self):
