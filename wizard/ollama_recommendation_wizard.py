@@ -990,155 +990,53 @@ class OllamaRecommendationWizard(models.TransientModel):
         return unique_dietary
     
     def _prepare_final_notes(self):
-        """Prepare comprehensive context for Ollama AI - bilingual and intelligent"""
+        """Prepare MINIMAL context for AI - just the essentials"""
+        
+        # Maximum 500 characters TOTAL for the 3B model
         context_parts = []
         
-        # Budget context - let AI figure out the optimal approach
-        if self.target_budget > 0:
-            context_parts.append(f"TARGET BUDGET / PRESUPUESTO OBJETIVO: €{self.target_budget:,.2f}")
-            context_parts.append(f"ACCEPTABLE RANGE / RANGO ACEPTABLE: €{self.target_budget*0.9:,.2f} to €{self.target_budget*1.1:,.2f}")
-            
-            # Let AI determine product count based on budget and available products
-            context_parts.append("Determine optimal product count based on budget and product catalog")
-            context_parts.append("Determinar cantidad óptima de productos según presupuesto y catálogo")
-        
-        # Historical context for learning
-        if self.partner_id and self.recommender_id:
-            try:
-                patterns = self.recommender_id._analyze_client_purchase_patterns(self.partner_id.id)
-                if patterns:
-                    context_parts.append("HISTORICAL PATTERNS / PATRONES HISTÓRICOS:")
-                    if patterns.get('avg_order_value'):
-                        context_parts.append(f"Previous average order: €{patterns['avg_order_value']:,.2f}")
-                    if patterns.get('favorite_products'):
-                        context_parts.append(f"Client favorites: {', '.join(patterns['favorite_products'][:5])}")
-                    if patterns.get('preferred_categories'):
-                        cats = list(patterns['preferred_categories'].keys())[:5]
-                        context_parts.append(f"Preferred categories: {', '.join(cats)}")
-                    if patterns.get('avg_product_count'):
-                        context_parts.append(f"Typical product count: {patterns['avg_product_count']:.0f}")
-                    
-                    # Get last year's products if available
-                    last_year_products = self.recommender_id._get_last_year_products(self.partner_id.id)
-                    if last_year_products:
-                        context_parts.append(f"Last year purchased {len(last_year_products)} products")
-                        context_parts.append("Apply business rules: maintain favorites, rotate others")
-                        context_parts.append("Aplicar reglas: mantener favoritos, rotar otros")
-            except Exception as e:
-                _logger.debug(f"Could not get patterns: {e}")
-        
-        # Client's specific notes - most important, could be in any language
+        # 1. Client notes (MOST IMPORTANT - goes first)
         if self.client_notes:
-            context_parts.append("CLIENT INSTRUCTIONS / INSTRUCCIONES DEL CLIENTE:")
-            context_parts.append(self.client_notes)
-            context_parts.append("(Parse above for budget overrides, product preferences, restrictions)")
-            context_parts.append("(Analizar arriba para cambios de presupuesto, preferencias, restricciones)")
+            # Limit to 200 characters
+            notes = self.client_notes[:200].strip()
+            if notes:
+                context_parts.append(notes)
         
-        # Product count if explicitly specified
+        # 2. Budget (simple number)
+        if self.target_budget > 0:
+            context_parts.append(f"Budget: €{self.target_budget:.0f}")
+        
+        # 3. Product count (if explicitly specified)
         if self.specify_product_count and self.product_count:
-            context_parts.append(f"REQUIRED PRODUCT COUNT / CANTIDAD REQUERIDA: {self.product_count}")
-            context_parts.append("This is mandatory / Esto es obligatorio")
+            context_parts.append(f"Count: {self.product_count} products required")
         
-        # Composition strategy
-        composition_type = self.force_composition_type if self.force_composition_type != 'auto' else self.composition_type
-        if composition_type:
-            context_parts.append(f"COMPOSITION TYPE / TIPO DE COMPOSICIÓN: {composition_type}")
-            
-            if composition_type == 'hybrid':
-                context_parts.append("Focus on wines complemented with gourmet products")
-                context_parts.append("Enfoque en vinos complementados con productos gourmet")
-            elif composition_type == 'experience':
-                context_parts.append("Include experiences or activity-based products")
-                context_parts.append("Incluir experiencias o productos basados en actividades")
-                if self.selected_experience:
-                    exp = self.selected_experience
-                    context_parts.append(f"Must include: {exp.name} (€{exp.list_price:,.2f})")
-                    context_parts.append(f"Adjust other products for remaining budget")
-            elif composition_type == 'custom':
-                context_parts.append("Create balanced custom selection")
-                context_parts.append("Crear selección personalizada equilibrada")
-        
-        # Dietary restrictions - comprehensive
-        dietary_restrictions = []
-        
-        if self.dietary_restrictions != 'none':
-            dietary_restrictions.append(self.dietary_restrictions)
-        
+        # 4. Dietary (simple list)
+        dietary = []
         if self.is_halal:
-            dietary_restrictions.append('halal')
+            dietary.append('halal')
         if self.is_vegan:
-            dietary_restrictions.append('vegan')
+            dietary.append('vegan')
         if self.is_vegetarian:
-            dietary_restrictions.append('vegetarian')
-        if self.is_gluten_free:
-            dietary_restrictions.append('gluten_free')
+            dietary.append('vegetarian')
         if self.is_non_alcoholic:
-            dietary_restrictions.append('non_alcoholic')
+            dietary.append('no-alcohol')
         
-        if self.dietary_restrictions_text:
-            dietary_restrictions.extend([x.strip() for x in self.dietary_restrictions_text.split(',')])
+        if dietary:
+            context_parts.append(f"Dietary: {', '.join(dietary)}")
         
-        if dietary_restrictions:
-            context_parts.append(f"DIETARY RESTRICTIONS / RESTRICCIONES DIETÉTICAS: {', '.join(set(dietary_restrictions))}")
-            
-            # Expand on what each means
-            if 'halal' in dietary_restrictions:
-                context_parts.append("HALAL: No pork, no alcohol, no non-halal meat, no ham, no iberico products")
-                context_parts.append("HALAL: Sin cerdo, sin alcohol, sin carne no-halal, sin jamón, sin ibéricos")
-            
-            if 'vegan' in dietary_restrictions:
-                context_parts.append("VEGAN: No animal products whatsoever")
-                context_parts.append("VEGANO: Sin productos animales de ningún tipo")
-            
-            if 'vegetarian' in dietary_restrictions:
-                context_parts.append("VEGETARIAN: No meat, no fish, no seafood")
-                context_parts.append("VEGETARIANO: Sin carne, sin pescado, sin mariscos")
-            
-            if 'non_alcoholic' in dietary_restrictions:
-                context_parts.append("NO ALCOHOL: Exclude all alcoholic beverages")
-                context_parts.append("SIN ALCOHOL: Excluir todas las bebidas alcohólicas")
-            
-            if 'gluten_free' in dietary_restrictions:
-                context_parts.append("GLUTEN FREE: No wheat, barley, rye or derivatives")
-                context_parts.append("SIN GLUTEN: Sin trigo, cebada, centeno o derivados")
+        # 5. Type (one word)
+        if self.composition_type:
+            context_parts.append(f"Type: {self.composition_type}")
         
-        # Quality requirements
-        context_parts.append("QUALITY REQUIREMENTS / REQUISITOS DE CALIDAD:")
-        context_parts.append("1. No products with price €0.00 / Sin productos con precio €0.00")
-        context_parts.append("2. Products must be currently available / Productos deben estar disponibles")
-        context_parts.append("3. Match budget appropriately / Ajustar al presupuesto apropiadamente")
-        context_parts.append("4. Consider product relationships / Considerar relaciones entre productos")
+        # Join with simple separator
+        final_context = ' | '.join(context_parts)
         
-        # Intelligence instructions for Ollama
-        context_parts.append("AI INSTRUCTIONS / INSTRUCCIONES IA:")
-        context_parts.append("- Analyze all context holistically / Analizar todo el contexto holísticamente")
-        context_parts.append("- Detect language and respond accordingly / Detectar idioma y responder apropiadamente")
-        context_parts.append("- Learn from patterns but adapt to current needs / Aprender de patrones pero adaptarse a necesidades actuales")
-        context_parts.append("- Balance variety with coherence / Equilibrar variedad con coherencia")
-        context_parts.append("- Ensure total matches budget within 10% / Asegurar que total coincida con presupuesto ±10%")
+        # CRITICAL: Limit total length
+        if len(final_context) > 500:
+            final_context = final_context[:500]
         
-        # Year context
-        context_parts.append(f"TARGET YEAR / AÑO OBJETIVO: {self.target_year}")
-        
-        # Join with clear separation
-        final_context = "\n".join(context_parts)
-        
-        # Log for debugging
-        _logger.info(f"""
-        ╔═══════════════════════════════════════╗
-        ║     OLLAMA AI CONTEXT PREPARED       ║
-        ╠═══════════════════════════════════════╣
-        ║ Client: {self.partner_id.name if self.partner_id else 'N/A'}
-        ║ Budget: €{self.target_budget:,.2f}
-        ║ Dietary: {', '.join(dietary_restrictions) if dietary_restrictions else 'None'}
-        ║ Type: {composition_type}
-        ║ Context Length: {len(final_context)} chars
-        ╚═══════════════════════════════════════╝
-        
-        First 1000 chars of context:
-        {final_context[:1000]}
-        ...
-        """)
+        # Simple logging
+        _logger.info(f"AI Context ({len(final_context)} chars): {final_context}")
         
         return final_context
     
