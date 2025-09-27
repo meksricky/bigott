@@ -9,6 +9,9 @@ import re
 import random
 import statistics
 
+import time
+from odoo.exceptions import UserError
+
 _logger = logging.getLogger(__name__)
 
 class OllamaGiftRecommender(models.Model):
