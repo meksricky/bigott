@@ -2097,7 +2097,7 @@ class OllamaGiftRecommender(models.Model):
         
         merged['budget'] = max(100.0, float(merged['budget']))
         
-        # 2. MERGE PRODUCT COUNT
+        # 2. MERGE PRODUCT COUNT (Priority: Notes > History > Calculated)
         if notes_data and notes_data.get('product_count') and notes_data['product_count'] > 0:
             merged['product_count'] = int(notes_data['product_count'])
             merged['enforce_count'] = True
@@ -2133,7 +2133,7 @@ class OllamaGiftRecommender(models.Model):
         
         merged['product_count'] = max(1, int(merged['product_count']))
         
-        # 3. MERGE DIETARY RESTRICTIONS
+        # 3. MERGE DIETARY RESTRICTIONS (Union of all sources)
         dietary_set = set()
         
         if notes_data and notes_data.get('dietary'):
@@ -2202,8 +2202,58 @@ class OllamaGiftRecommender(models.Model):
         else:
             merged['budget_flexibility'] = 15
         
-        # Additional merging logic...
-        # [Rest of the method continues as in version 2]
+        # 6. MERGE CATEGORY REQUIREMENTS
+        if notes_data:
+            if notes_data.get('categories_required'):
+                merged['categories_required'] = notes_data['categories_required']
+                _logger.info(f"📂 Categories required: {merged['categories_required']}")
+            if notes_data.get('categories_excluded'):
+                merged['categories_excluded'] = notes_data['categories_excluded']
+                _logger.info(f"🚫 Categories excluded: {merged['categories_excluded']}")
+            if notes_data.get('specific_products'):
+                merged['specific_products'] = notes_data['specific_products']
+                _logger.info(f"⭐ Specific products requested: {len(merged['specific_products'])} items")
+            if notes_data.get('special_instructions'):
+                merged['special_instructions'] = notes_data['special_instructions']
+                _logger.info(f"📋 Special instructions: {len(merged['special_instructions'])} notes")
+        
+        # 7. ADD SEASONAL PREFERENCES
+        if seasonal and not merged.get('categories_required'):
+            current_season = seasonal.get('current_season')
+            if current_season and seasonal.get('seasonal_data', {}).get(current_season):
+                season_data = seasonal['seasonal_data'][current_season]
+                if season_data.get('top_categories'):
+                    merged['seasonal_hint'] = season_data['top_categories']
+                    _logger.info(f"🌡️ Seasonal hint ({current_season}): {merged['seasonal_hint'][:3] if merged['seasonal_hint'] else 'None'}")
+                if season_data.get('top_products'):
+                    merged['seasonal_products'] = [p[0] for p in season_data['top_products'][:5]]
+                    _logger.info(f"🌡️ Seasonal products to consider: {len(merged.get('seasonal_products', []))} items")
+        
+        # 8. ADD PRICE RANGE PREFERENCE
+        if patterns and patterns.get('preferred_price_range'):
+            price_range = patterns['preferred_price_range']
+            if price_range.get('min') and price_range.get('max'):
+                merged['preferred_price_range'] = price_range
+                _logger.info(f"💰 Price range preference: €{price_range.get('min', 0):.2f} - €{price_range.get('max', 0):.2f}")
+        
+        # 9. CALCULATE FINAL BUDGET BOUNDS
+        flexibility = float(merged['budget_flexibility'])
+        budget = float(merged['budget'])
+        merged['min_budget'] = budget * (1 - flexibility/100)
+        merged['max_budget'] = budget * (1 + flexibility/100)
+        
+        # 10. LOG SUMMARY
+        _logger.info("="*60)
+        _logger.info("FINAL MERGED REQUIREMENTS SUMMARY:")
+        _logger.info(f"  💰 Budget: €{merged['budget']:.2f} (±{flexibility}%)")
+        _logger.info(f"     Range: €{merged['min_budget']:.2f} - €{merged['max_budget']:.2f}")
+        _logger.info(f"     Source: {merged['budget_source']}")
+        _logger.info(f"  📦 Products: {merged['product_count']} (enforce: {merged['enforce_count']})")
+        _logger.info(f"     Source: {merged['count_source']}")
+        _logger.info(f"  🎁 Type: {merged['composition_type']} (from: {merged['type_source']})")
+        if merged['dietary']:
+            _logger.info(f"  🥗 Dietary: {', '.join(merged['dietary'])} (from: {merged['dietary_source']})")
+        _logger.info("="*60)
         
         return merged
     
@@ -2306,8 +2356,7 @@ Extract and return ONLY a valid JSON object with these fields:
                 if 'product' in notes_lower or 'item' in notes_lower:
                     parsed['product_count'] = num_int
             elif 100 <= num_int <= 10000:
-                if 'budget' in notes_lower or '€' in notes or '$' in notes:
-                    parsed['budget_override'] = float(num_int)
+                if 'budget' in notes_lower or '€' in notes or '
     
     # ================== ACTION METHODS ==================
     
@@ -2392,7 +2441,22 @@ Extract and return ONLY a valid JSON object with these fields:
             else:
                 return {'success': False, 'message': 'No response from Ollama'}
         except Exception as e:
-            return {'success': False, 'message': f'Connection failed: {str(e)}'}
+            return {'success': False, 'message': f'Connection failed: {str(e)}'} in notes:
+                    parsed['budget_override'] = float(num_int)
+        
+        # Basic dietary detection
+        if 'halal' in notes_lower:
+            parsed['dietary'].append('halal')
+        if 'vegan' in notes_lower:
+            parsed['dietary'].append('vegan')
+        
+        # Composition type
+        if 'hybrid' in notes_lower:
+            parsed['composition_type'] = 'hybrid'
+        elif 'experience' in notes_lower:
+            parsed['composition_type'] = 'experience'
+        
+        return parsed
     
     # ================== ACTION METHODS ==================
     
