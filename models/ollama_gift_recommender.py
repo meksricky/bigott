@@ -147,7 +147,13 @@ class OllamaGiftRecommender(models.Model):
         learning_data = self._get_or_update_learning_cache(partner_id)
         patterns = learning_data.get('patterns', {})
         seasonal = learning_data.get('seasonal', {})
-        _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
+        
+        # FIX: Check if patterns is None or empty before accessing
+        if patterns:
+            _logger.info(f"📊 HISTORY DATA: {patterns.get('total_orders', 0)} orders, Avg €{patterns.get('avg_order_value', 0):.2f}")
+        else:
+            _logger.info("📊 HISTORY DATA: No patterns available - using defaults")
+            patterns = self._get_default_patterns()
         
         # Get previous sales
         previous_sales = self._get_all_previous_sales_data(partner_id)
@@ -204,6 +210,25 @@ class OllamaGiftRecommender(models.Model):
             self._validate_and_log_result(result, final_requirements)
         
         return result
+    
+    # ================== DEFAULT PATTERNS METHOD ==================
+    
+    def _get_default_patterns(self):
+        """Return default pattern structure when no patterns are available"""
+        return {
+            'total_orders': 0,
+            'avg_order_value': 0,
+            'preferred_categories': {},
+            'seasonal_patterns': {},
+            'product_frequency': {},
+            'budget_trend': 'stable',
+            'avg_product_count': 0,
+            'favorite_products': [],
+            'never_repeated_products': [],
+            'category_evolution': {},
+            'order_intervals': [],
+            'preferred_price_range': {'min': 0, 'max': 0, 'avg': 0}
+        }
     
     # ================== REQUIREMENT MERGING METHODS ==================
     
@@ -535,10 +560,12 @@ class OllamaGiftRecommender(models.Model):
             similarity_weight = similar['similarity']
             patterns = similar['patterns']
             
-            for prod_id in patterns.get('favorite_products', []):
-                if prod_id not in product_popularity:
-                    product_popularity[prod_id] = 0
-                product_popularity[prod_id] += similarity_weight
+            # FIX: Check patterns before accessing
+            if patterns and patterns.get('favorite_products'):
+                for prod_id in patterns['favorite_products']:
+                    if prod_id not in product_popularity:
+                        product_popularity[prod_id] = 0
+                    product_popularity[prod_id] += similarity_weight
         
         # Get popular products
         popular_product_ids = sorted(
@@ -607,6 +634,10 @@ class OllamaGiftRecommender(models.Model):
         
         patterns = context.get('patterns', {})
         seasonal = context.get('seasonal', {})
+        
+        # FIX: Ensure patterns is not None
+        if not patterns:
+            patterns = self._get_default_patterns()
         
         budget = requirements['budget']
         product_count = requirements['product_count']
@@ -685,8 +716,12 @@ class OllamaGiftRecommender(models.Model):
         
         patterns = context.get('patterns', {})
         
+        # FIX: Ensure patterns is not None before accessing
+        if not patterns:
+            patterns = self._get_default_patterns()
+        
         # Determine price range based on patterns or defaults
-        if patterns and patterns.get('preferred_price_range'):
+        if patterns.get('preferred_price_range'):
             min_price = patterns['preferred_price_range'].get('min', budget * 0.01)
             max_price = patterns['preferred_price_range'].get('max', budget * 0.4)
         else:
@@ -718,7 +753,7 @@ class OllamaGiftRecommender(models.Model):
                 available.append(product)
         
         # Score products based on patterns
-        if patterns and patterns.get('favorite_products'):
+        if patterns.get('favorite_products'):
             scored = []
             for product in available:
                 score = 10 if product.id in patterns['favorite_products'] else 1
@@ -734,6 +769,10 @@ class OllamaGiftRecommender(models.Model):
         
         patterns = context.get('patterns', {})
         
+        # FIX: Ensure patterns is not None
+        if not patterns:
+            patterns = self._get_default_patterns()
+        
         # Adjust price range based on composition type
         if composition_type == 'experience':
             min_price = max(10, budget * 0.02)
@@ -741,7 +780,7 @@ class OllamaGiftRecommender(models.Model):
         elif composition_type == 'hybrid':
             min_price = max(15, budget * 0.03)
             max_price = budget * 0.4
-        elif patterns and patterns.get('preferred_price_range'):
+        elif patterns.get('preferred_price_range'):
             min_price = patterns['preferred_price_range'].get('min', budget * 0.01)
             max_price = patterns['preferred_price_range'].get('max', budget * 0.4)
         else:
@@ -788,11 +827,16 @@ class OllamaGiftRecommender(models.Model):
     def _smart_optimize_selection(self, products, target_count, budget, flexibility, enforce_strict, context):
         """Smart optimization considering all constraints and context"""
         
+        # FIX: Ensure patterns exists before accessing
+        patterns = context.get('patterns', {})
+        if not patterns:
+            patterns = self._get_default_patterns()
+        
         if not target_count:
             # Estimate count based on budget
             avg_price = 50  # Default assumption
-            if context.get('patterns', {}).get('preferred_price_range'):
-                avg_price = context['patterns']['preferred_price_range'].get('avg', 50)
+            if patterns.get('preferred_price_range'):
+                avg_price = patterns['preferred_price_range'].get('avg', 50)
             target_count = max(5, int(budget / avg_price))
         
         min_budget = budget * (1 - flexibility/100)
@@ -808,9 +852,8 @@ class OllamaGiftRecommender(models.Model):
             
             # Pattern bonus
             pattern_score = 0
-            if context.get('patterns'):
-                if product.id in context['patterns'].get('favorite_products', []):
-                    pattern_score = 2
+            if patterns.get('favorite_products') and product.id in patterns['favorite_products']:
+                pattern_score = 2
             
             total_score = price_score + pattern_score
             scored_products.append((product, total_score))
@@ -908,7 +951,7 @@ class OllamaGiftRecommender(models.Model):
         
         score = 1.0
         
-        # Pattern-based scoring
+        # FIX: Check patterns before accessing
         if patterns:
             # Favorite products
             if product.id in patterns.get('favorite_products', []):
@@ -991,6 +1034,10 @@ class OllamaGiftRecommender(models.Model):
         patterns = context.get('patterns', {})
         seasonal = context.get('seasonal', {})
         
+        # FIX: Ensure patterns is not None
+        if not patterns:
+            patterns = self._get_default_patterns()
+        
         # Determine search criteria
         avg_price = budget / count if count > 0 else 50
         min_price = max(5, avg_price * 0.3)
@@ -1027,7 +1074,7 @@ class OllamaGiftRecommender(models.Model):
             if hasattr(product, 'categ_id'):
                 cat_name = product.categ_id.name
                 # Higher score for underrepresented categories
-                if patterns and cat_name not in patterns.get('preferred_categories', {}):
+                if cat_name not in patterns.get('preferred_categories', {}):
                     score += 0.5
             
             # Seasonal bonus
@@ -1082,8 +1129,8 @@ class OllamaGiftRecommender(models.Model):
             reasoning_parts.append(f"🥗 Dietary restrictions applied: {', '.join(requirements['dietary'])}")
         
         # Historical insights used
-        if context.get('patterns'):
-            patterns = context['patterns']
+        patterns = context.get('patterns')
+        if patterns:
             if patterns.get('favorite_products'):
                 favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
                 if favorites_included > 0:
@@ -1137,12 +1184,11 @@ class OllamaGiftRecommender(models.Model):
             reasoning_parts.append(f"🎁 Composition type: {requirements['composition_type']}")
         
         # Historical insights
-        if context.get('patterns'):
-            patterns = context['patterns']
-            if patterns.get('favorite_products'):
-                favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
-                if favorites_included > 0:
-                    reasoning_parts.append(f"⭐ Included {favorites_included} favorite products")
+        patterns = context.get('patterns')
+        if patterns and patterns.get('favorite_products'):
+            favorites_included = sum(1 for p in products if p.id in patterns['favorite_products'])
+            if favorites_included > 0:
+                reasoning_parts.append(f"⭐ Included {favorites_included} favorite products")
         
         return "\n".join(reasoning_parts)
     
@@ -1300,7 +1346,8 @@ class OllamaGiftRecommender(models.Model):
         ], order='date_order desc')
         
         if not all_orders:
-            return None
+            _logger.info(f"No historical orders found for partner {partner_id}")
+            return self._get_default_patterns()  # FIX: Return default patterns instead of None
         
         pattern_analysis = {
             'total_orders': len(all_orders),
@@ -1384,7 +1431,7 @@ class OllamaGiftRecommender(models.Model):
         ])
         
         if not orders:
-            return None
+            return {}  # FIX: Return empty dict instead of None
         
         seasonal_data = {
             'spring': {'products': [], 'categories': []},
@@ -1430,7 +1477,7 @@ class OllamaGiftRecommender(models.Model):
         
         target_patterns = self._analyze_client_purchase_patterns(partner_id)
         
-        if not target_patterns:
+        if not target_patterns or target_patterns.get('total_orders', 0) == 0:
             return []
         
         # Find other clients with orders
@@ -1448,7 +1495,7 @@ class OllamaGiftRecommender(models.Model):
                 continue
             
             other_patterns = self._analyze_client_purchase_patterns(other_partner_id)
-            if not other_patterns:
+            if not other_patterns or other_patterns.get('total_orders', 0) == 0:
                 continue
             
             # Calculate similarity score
