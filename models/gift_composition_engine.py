@@ -514,23 +514,3 @@ class GiftCompositionEngine(models.Model):
         ], limit=1)
         
         return new_foie if new_foie else old_foie
-    3. Testing Strategy
-    Test progressively:
-    python# Test 1: Basic functionality (existing system)
-    result = recommender.generate_gift_recommendations(
-        partner_id=1, 
-        target_budget=500
-    )
-
-    # Test 2: With composition engine (new features)
-    result = recommender.generate_gift_recommendations_v2(
-        partner_id=1,
-        target_budget=500,
-        composition_type='experience'
-    )
-
-    # Test 3: 80/20 transformation (for client with last year data)
-    result = engine.generate_complete_composition(
-        partner_id=2,  # Has 2024 order
-        target_budget=800
-    )
