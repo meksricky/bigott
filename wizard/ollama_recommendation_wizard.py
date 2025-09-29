@@ -1,3 +1,4 @@
+from datetime import datetime
 from odoo import models, fields, api, _
 from odoo.exceptions import UserError
 import logging
@@ -176,11 +177,15 @@ class OllamaRecommendationWizard(models.TransientModel):
         compute='_compute_history_analysis'
     )
     
-    # ADD THIS NEW FIELD HERE:
     force_business_rules = fields.Boolean(
         string='Apply Business Rules',
         default=False,
         help='Force application of business rules R1-R6 from Master Guide'
+    )
+
+    has_previous_orders = fields.Boolean(
+        string='Has Previous Orders',
+        compute='_compute_history_analysis'
     )
     
     # ================== COMPUTED FIELDS ==================
