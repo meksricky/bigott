@@ -170,6 +170,18 @@ class OllamaRecommendationWizard(models.TransientModel):
         string='Recommender Engine',
         default=lambda self: self.env['ollama.gift.recommender'].get_or_create_recommender()
     )
+
+    has_last_year_data = fields.Boolean(
+        string='Has Last Year Data',
+        compute='_compute_history_analysis'
+    )
+    
+    # ADD THIS NEW FIELD HERE:
+    force_business_rules = fields.Boolean(
+        string='Apply Business Rules',
+        default=False,
+        help='Force application of business rules R1-R6 from Master Guide'
+    )
     
     # ================== COMPUTED FIELDS ==================
     
