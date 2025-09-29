@@ -281,12 +281,32 @@ class OllamaGiftRecommender(models.Model):
             merged['enforce_count'] = False
             merged['count_source'] = 'history (flexible)'
         else:
-            avg_price = 80
+            # FIX: Ensure avg_price is never 0 to avoid division by zero
+            avg_price = 80.0  # Default price
             if patterns and patterns.get('preferred_price_range'):
-                avg_price = patterns['preferred_price_range'].get('avg', 80)
-            merged['product_count'] = max(8, min(20, int(merged['budget'] / avg_price)))
+                price_range = patterns['preferred_price_range']
+                # Check if avg exists and is greater than 0
+                if price_range.get('avg') and price_range['avg'] > 0:
+                    avg_price = float(price_range['avg'])
+                # Fallback to calculating from min/max if avg is 0
+                elif price_range.get('min') and price_range.get('max'):
+                    min_p = float(price_range.get('min', 50))
+                    max_p = float(price_range.get('max', 150))
+                    if min_p > 0 and max_p > 0:
+                        avg_price = (min_p + max_p) / 2
+            
+            # Ensure avg_price is never less than a minimum threshold
+            avg_price = max(10.0, avg_price)
+            
+            # Safe division with fallback
+            if avg_price > 0:
+                calculated_count = int(merged['budget'] / avg_price)
+            else:
+                calculated_count = 12  # Default fallback count
+            
+            merged['product_count'] = max(8, min(20, calculated_count))
             merged['enforce_count'] = False
-            merged['count_source'] = 'estimated'
+            merged['count_source'] = f'estimated (€{merged["budget"]:.0f}/€{avg_price:.0f})'
         
         # MERGE DIETARY
         dietary_set = set()
@@ -841,14 +861,19 @@ class OllamaGiftRecommender(models.Model):
         
         min_budget = budget * (1 - flexibility/100)
         max_budget = budget * (1 + flexibility/100)
-        avg_price_target = budget / target_count
+        # FIX: Avoid division by zero
+        avg_price_target = budget / target_count if target_count > 0 else budget / 10
         
         # Score products
         scored_products = []
         for product in products:
             # Price fitness score
             price_diff = abs(product.list_price - avg_price_target)
-            price_score = 1 / (1 + price_diff/avg_price_target)
+            # FIX: Avoid division by zero in price score calculation
+            if avg_price_target > 0:
+                price_score = 1 / (1 + price_diff/avg_price_target)
+            else:
+                price_score = 0.5  # Default score when avg_price_target is 0
             
             # Pattern bonus
             pattern_score = 0
@@ -991,6 +1016,7 @@ class OllamaGiftRecommender(models.Model):
         
         min_budget = budget * (1 - flexibility/100)
         max_budget = budget * (1 + flexibility/100)
+        # FIX: Avoid division by zero
         avg_price_target = budget / target_count if target_count > 0 else 50
         
         selected = []
@@ -1039,6 +1065,7 @@ class OllamaGiftRecommender(models.Model):
             patterns = self._get_default_patterns()
         
         # Determine search criteria
+        # FIX: Avoid division by zero
         avg_price = budget / count if count > 0 else 50
         min_price = max(5, avg_price * 0.3)
         max_price = avg_price * 2
@@ -1083,7 +1110,11 @@ class OllamaGiftRecommender(models.Model):
             
             # Price fitness
             price_diff = abs(product.list_price - avg_price)
-            price_score = 1 / (1 + price_diff/avg_price)
+            # FIX: Avoid division by zero in price score calculation
+            if avg_price > 0:
+                price_score = 1 / (1 + price_diff/avg_price)
+            else:
+                price_score = 0.5  # Default score when avg_price is 0
             score += price_score
             
             scored.append((product, score))
@@ -1114,8 +1145,12 @@ class OllamaGiftRecommender(models.Model):
         reasoning_parts.append(f"📊 Generated {len(products)} products totaling €{total_cost:.2f}")
         
         # Budget compliance
-        variance = ((total_cost - budget) / budget) * 100
-        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        # FIX: Avoid division by zero in percentage calculation
+        if budget > 0:
+            variance = ((total_cost - budget) / budget) * 100
+            reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        else:
+            reasoning_parts.append("💰 Budget: No budget specified")
         
         # Count compliance
         if requirements.get('enforce_count') and requirements.get('product_count'):
@@ -1167,8 +1202,12 @@ class OllamaGiftRecommender(models.Model):
         reasoning_parts.append(f"📦 Generated {len(products)} products = €{total_cost:.2f}")
         
         # Budget compliance
-        variance = ((total_cost - budget) / budget) * 100
-        reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        # FIX: Avoid division by zero in percentage calculation
+        if budget > 0:
+            variance = ((total_cost - budget) / budget) * 100
+            reasoning_parts.append(f"💰 Budget variance: {variance:+.1f}%")
+        else:
+            reasoning_parts.append("💰 Budget: No budget specified")
         
         # Requirements met
         if requirements.get('enforce_count'):
@@ -1522,33 +1561,42 @@ class OllamaGiftRecommender(models.Model):
         avg1 = patterns1.get('avg_order_value', 0)
         avg2 = patterns2.get('avg_order_value', 0)
         if avg1 and avg2:
-            budget_diff = abs(avg1 - avg2) / max(avg1, avg2)
-            if budget_diff < 0.3:
-                score += (1 - budget_diff)
-            factors += 1
+            # FIX: Avoid division by zero with max()
+            max_avg = max(avg1, avg2)
+            if max_avg > 0:
+                budget_diff = abs(avg1 - avg2) / max_avg
+                if budget_diff < 0.3:
+                    score += (1 - budget_diff)
+                factors += 1
         
         # Product count similarity
         count1 = patterns1.get('avg_product_count', 0)
         count2 = patterns2.get('avg_product_count', 0)
         if count1 and count2:
-            count_diff = abs(count1 - count2) / max(count1, count2)
-            if count_diff < 0.3:
-                score += (1 - count_diff)
-            factors += 1
+            # FIX: Avoid division by zero with max()
+            max_count = max(count1, count2)
+            if max_count > 0:
+                count_diff = abs(count1 - count2) / max_count
+                if count_diff < 0.3:
+                    score += (1 - count_diff)
+                factors += 1
         
         # Category overlap
         cats1 = set(patterns1.get('preferred_categories', {}).keys())
         cats2 = set(patterns2.get('preferred_categories', {}).keys())
         if cats1 and cats2:
-            overlap = len(cats1.intersection(cats2)) / len(cats1.union(cats2))
-            score += overlap
-            factors += 1
+            union_size = len(cats1.union(cats2))
+            if union_size > 0:  # FIX: Avoid division by zero
+                overlap = len(cats1.intersection(cats2)) / union_size
+                score += overlap
+                factors += 1
         
         # Budget trend similarity
         if patterns1.get('budget_trend') == patterns2.get('budget_trend'):
             score += 0.5
             factors += 0.5
         
+        # FIX: Avoid division by zero when calculating final score
         return score / factors if factors > 0 else 0
     
     # ================== NOTES PARSING METHODS ==================
@@ -1750,11 +1798,19 @@ Extract and return ONLY a valid JSON object with these fields:
         max_budget = expected_budget * (1 + flexibility/100)
         
         if min_budget <= actual_cost <= max_budget:
-            variance = ((actual_cost - expected_budget) / expected_budget) * 100
-            _logger.info(f"✅ Budget requirement MET: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+            # FIX: Avoid division by zero in percentage calculation
+            if expected_budget > 0:
+                variance = ((actual_cost - expected_budget) / expected_budget) * 100
+                _logger.info(f"✅ Budget requirement MET: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+            else:
+                _logger.info(f"✅ Budget requirement MET: €{actual_cost:.2f}")
         else:
-            variance = ((actual_cost - expected_budget) / expected_budget) * 100
-            _logger.error(f"❌ Budget requirement FAILED: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+            # FIX: Avoid division by zero in percentage calculation
+            if expected_budget > 0:
+                variance = ((actual_cost - expected_budget) / expected_budget) * 100
+                _logger.error(f"❌ Budget requirement FAILED: €{actual_cost:.2f} ({variance:+.1f}% variance)")
+            else:
+                _logger.error(f"❌ Budget requirement FAILED: €{actual_cost:.2f} (no expected budget)")
         
         return result.get('compliant', False)
     
