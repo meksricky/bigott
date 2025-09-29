@@ -420,6 +420,33 @@ class OllamaRecommendationWizard(models.TransientModel):
     def _compute_totals(self):
         for wizard in self:
             wizard.total_cost = sum(wizard.recommended_products.mapped('list_price'))
+
+    @api.depends('partner_id')
+    def _compute_history_analysis(self):
+        """Compute if partner has last year data"""
+        for wizard in self:
+            wizard.has_last_year_data = False
+            wizard.has_previous_orders = False
+            
+            if wizard.partner_id:
+                # Check for last year's orders
+                last_year = datetime.now().year - 1
+                last_year_orders = self.env['sale.order'].search([
+                    ('partner_id', '=', wizard.partner_id.id),
+                    ('date_order', '>=', f'{last_year}-01-01'),
+                    ('date_order', '<=', f'{last_year}-12-31'),
+                    ('state', 'in', ['sale', 'done'])
+                ], limit=1)
+                
+                wizard.has_last_year_data = bool(last_year_orders)
+                
+                # Check for any previous orders
+                all_orders = self.env['sale.order'].search([
+                    ('partner_id', '=', wizard.partner_id.id),
+                    ('state', 'in', ['sale', 'done'])
+                ], limit=1)
+                
+                wizard.has_previous_orders = bool(all_orders)
     
     # ================== ONCHANGE METHODS ==================
     
