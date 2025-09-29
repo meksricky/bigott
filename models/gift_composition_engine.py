@@ -4,6 +4,7 @@ Gift Composition Engine - Integrates all recommendation strategies
 Combines existing Ollama system with new business rules (R1-R6)
 """
 
+from odoo import models, fields, api
 import logging
 from datetime import datetime
 import json
