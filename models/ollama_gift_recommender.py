@@ -1871,3 +1871,53 @@ Extract and return ONLY a valid JSON object with these fields:
                 'sticky': False,
             }
         }
+
+    def generate_gift_recommendations_v2(self, partner_id, target_budget, 
+                                        client_notes='', dietary_restrictions=None,
+                                        composition_type=None):
+        """
+        Enhanced version that uses the composition engine for business rules
+        """
+        
+        # Check if we should use the composition engine
+        if self._should_use_composition_engine(partner_id, composition_type):
+            engine = self.env['gift.composition.engine'].search([('active', '=', True)], limit=1)
+            if not engine:
+                engine = self.env['gift.composition.engine'].create({
+                    'name': 'Master Engine',
+                    'ollama_recommender_id': self.id
+                })
+            
+            return engine.generate_complete_composition(
+                partner_id=partner_id,
+                target_budget=target_budget,
+                client_notes=client_notes,
+                dietary_restrictions=dietary_restrictions,
+                composition_type=composition_type,
+                wizard_data={'recommender': self}
+            )
+        
+        # Otherwise use existing logic
+        return self.generate_gift_recommendations(
+            partner_id, target_budget, client_notes, 
+            dietary_restrictions, composition_type
+        )
+
+    def _should_use_composition_engine(self, partner_id, composition_type):
+        """Determine when to use the composition engine"""
+        
+        # Use composition engine for:
+        # 1. Experience-based compositions
+        if composition_type == 'experience':
+            return True
+        
+        # 2. Clients with last year's data (for 80/20 rule)
+        last_year_order = self._get_last_year_order(partner_id)
+        if last_year_order:
+            return True
+        
+        # 3. Explicit business rules request
+        if self.env.context.get('use_business_rules'):
+            return True
+        
+        return False

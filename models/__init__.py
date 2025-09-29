@@ -8,3 +8,4 @@ from . import ollama_gift_recommender
 from . import res_partner_ollama
 from . import recommendation_learning
 from . import notes_parser
+from . import gift_composition_engine

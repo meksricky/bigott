@@ -485,61 +485,107 @@ class OllamaRecommendationWizard(models.TransientModel):
     
     # ================== ACTION METHODS ==================
     
+    # def action_generate_recommendation(self):
+    #     """Generate recommendation with complete data merging"""
+    #     self.ensure_one()
+        
+    #     # Validate inputs
+    #     if not self.partner_id:
+    #         raise UserError("Please select a client")
+        
+    #     # Update state
+    #     self.state = 'generating'
+        
+    #     try:
+    #         # Prepare dietary restrictions
+    #         dietary = self._prepare_dietary_restrictions()
+            
+    #         # Build notes with all specifications
+    #         final_notes = self._prepare_final_notes()
+            
+    #         # Log the generation request
+    #         self._log_generation_request(dietary, final_notes)
+            
+    #         # Include selected experience if applicable
+    #         if self.composition_type == 'experience' and self.selected_experience:
+    #             final_notes += f" Include experience: {self.selected_experience.name}"
+            
+    #         # Generate recommendation with all data
+    #         result = self.recommender_id.generate_gift_recommendations(
+    #             partner_id=self.partner_id.id,
+    #             target_budget=self.target_budget if self.target_budget else 0,
+    #             client_notes=final_notes,
+    #             dietary_restrictions=dietary,
+    #             composition_type=self.composition_type
+    #         )
+            
+    #         if result.get('success'):
+    #             self._process_success_result(result)
+                
+    #             # Show success and open the composition
+    #             return {
+    #                 'type': 'ir.actions.act_window',
+    #                 'name': 'Generated Composition',
+    #                 'res_model': 'gift.composition',
+    #                 'res_id': result['composition_id'],
+    #                 'view_mode': 'form',
+    #                 'target': 'current',
+    #             }
+    #         else:
+    #             self._process_error_result(result)
+                
+    #     except Exception as e:
+    #         _logger.error(f"Generation failed with exception: {e}")
+    #         self.state = 'error'
+    #         self.error_message = str(e)
+    #         raise
+    
     def action_generate_recommendation(self):
-        """Generate recommendation with complete data merging"""
+        """Enhanced generation with composition engine option"""
         self.ensure_one()
         
-        # Validate inputs
-        if not self.partner_id:
-            raise UserError("Please select a client")
+        # Determine which engine to use
+        use_composition_engine = (
+            self.engine_type == 'experience' or 
+            self.force_business_rules or
+            self.has_last_year_data
+        )
         
-        # Update state
-        self.state = 'generating'
-        
-        try:
-            # Prepare dietary restrictions
-            dietary = self._prepare_dietary_restrictions()
+        if use_composition_engine:
+            # Use the new composition engine
+            engine = self.env['gift.composition.engine'].search([('active', '=', True)], limit=1)
+            if not engine:
+                engine = self.env['gift.composition.engine'].create({
+                    'name': 'Master Engine',
+                    'ollama_recommender_id': self.recommender_id.id
+                })
             
-            # Build notes with all specifications
-            final_notes = self._prepare_final_notes()
-            
-            # Log the generation request
-            self._log_generation_request(dietary, final_notes)
-            
-            # Include selected experience if applicable
-            if self.composition_type == 'experience' and self.selected_experience:
-                final_notes += f" Include experience: {self.selected_experience.name}"
-            
-            # Generate recommendation with all data
+            result = engine.generate_complete_composition(
+                partner_id=self.partner_id.id,
+                target_budget=self.target_budget,
+                client_notes=self.additional_notes,
+                dietary_restrictions=self.dietary_restrictions,
+                composition_type=self.composition_type,
+                wizard_data=self._prepare_wizard_data()
+            )
+        else:
+            # Use existing recommender
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
-                target_budget=self.target_budget if self.target_budget else 0,
-                client_notes=final_notes,
-                dietary_restrictions=dietary,
-                composition_type=self.composition_type
+                target_budget=self.target_budget,
+                client_notes=self.additional_notes,
+                dietary_restrictions=self.dietary_restrictions
             )
-            
-            if result.get('success'):
-                self._process_success_result(result)
-                
-                # Show success and open the composition
-                return {
-                    'type': 'ir.actions.act_window',
-                    'name': 'Generated Composition',
-                    'res_model': 'gift.composition',
-                    'res_id': result['composition_id'],
-                    'view_mode': 'form',
-                    'target': 'current',
-                }
-            else:
-                self._process_error_result(result)
-                
-        except Exception as e:
-            _logger.error(f"Generation failed with exception: {e}")
-            self.state = 'error'
-            self.error_message = str(e)
-            raise
-    
+        
+        if result.get('success'):
+            # Return the composition view
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': 'gift.composition',
+                'res_id': result.get('composition_id'),
+                'view_mode': 'form',
+                'target': 'current'
+            }
     def _prepare_dietary_restrictions(self):
         """Prepare dietary restrictions list"""
         dietary = []
