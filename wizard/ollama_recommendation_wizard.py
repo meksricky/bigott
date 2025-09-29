@@ -607,7 +607,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             result = engine.generate_complete_composition(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget,
-                client_notes=self.additional_notes,
+                client_notes=self.client_notes,
                 dietary_restrictions=self.dietary_restrictions,
                 composition_type=self.composition_type,
                 wizard_data=self._prepare_wizard_data()
@@ -617,7 +617,7 @@ class OllamaRecommendationWizard(models.TransientModel):
             result = self.recommender_id.generate_gift_recommendations(
                 partner_id=self.partner_id.id,
                 target_budget=self.target_budget,
-                client_notes=self.additional_notes,
+                client_notes=self.client_notes,
                 dietary_restrictions=self.dietary_restrictions
             )
         
